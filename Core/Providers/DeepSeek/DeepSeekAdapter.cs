@@ -36,6 +36,8 @@ internal sealed class DeepSeekAdapter : ChatAdapter
         _chatCompletionsUri = new Uri(new Uri(_baseUrl, UriKind.Absolute), DeepSeekDefaults.ChatCompletionsPath);
     }
 
+    public override IReadOnlyList<string> ProviderIds => [DeepSeekDefaults.ProviderId];
+
     public override LlmProviderInfo ProviderInfo(string provider) => new(DeepSeekDefaults.ProviderId, "DeepSeek");
 
     public override Task<IReadOnlyList<LlmModelInfo>> ListModelsAsync(string provider, CancellationToken cancellationToken = default)

@@ -1,8 +1,8 @@
 namespace Core.Llm;
 
 /// <summary>
-/// 模型层服务（对应 DSH 的 LlmRuntime）。插件通过 <see cref="IPluginContext.Get{T}"/> 取它。
-/// 适配器插件在这里注册；上层在这里发起请求。
+/// 模型层服务（对应 DSH 的 LlmRuntime）。在组合根经 <c>AddLlm()</c> 注册为 DI 单例，
+/// 其它代码通过构造函数注入取用；适配器由各自的扩展方法（如 <c>AddDeepSeek()</c>）注册。
 /// </summary>
 public interface ILlmService
 {

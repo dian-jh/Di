@@ -8,6 +8,12 @@ namespace Core.Llm;
 /// </summary>
 public abstract class ChatAdapter
 {
+    /// <summary>
+    /// 该适配器自声明的 provider 路由（如 "deepseek"）。DI 装配时（AddLlm）据此
+    /// 把适配器装入 LlmRuntime 路由表；未列出的路由仍可经 <see cref="ILlmService.RegisterAdapter"/> 动态注册。
+    /// </summary>
+    public virtual IReadOnlyList<string> ProviderIds => [];
+
     /// <summary>一个 provider 路由的展示元数据。</summary>
     public virtual LlmProviderInfo ProviderInfo(string provider) => new(provider, provider);
 

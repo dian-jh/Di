@@ -1,55 +1,76 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Core.Llm;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
 // ============================================================================
 //  Di Harness —— 最小 Agent Loop（三层分离演示）
 // ============================================================================
 //
-//  按照你的设计理念，这里演示三层如何协作：
-//     Agent Loop      ← 本文件，只依赖 IChatModel（不碰厂商/注册表细节）
+//     Agent Loop        ← 本文件，只依赖 IChatModel（不碰厂商/注册表细节）
 //     Model Abstraction ← Core/Llm/IChatModel + ChatModelClient
-//     Provider Adapter  ← Core/Providers/DeepSeek（DeepSeek 适配器插件）
+//     Provider Adapter  ← Core/Providers/DeepSeek（DeepSeek 适配器）
+//
+//  组合根用 .NET 原生的 Hosting + DI + Options + Logging，不再手写插件容器：
+//     AddLlm()      —— 模型层（LlmRuntime）注册为 DI 单例
+//     AddDeepSeek() —— DeepSeek 适配器（配置绑定 + 命名 HttpClient + 注册）
+//  换模型/换厂商：改 appsettings.json 的 AgentLoop 段，或加一个 *ServiceCollectionExtensions。
 //
 //  Agent 拿到的是一个"模型对象"，而不是"某个 SDK 的 client"：
 //     var model = new ChatModelClient(llm, "deepseek", "deepseek-v4-pro");
-//     // 换模型/换厂商：改这两个参数，或换成不同的 *Model。
-//     var agent = new AgentLoop(model);
-//     await agent.RunAsync("现在几点？…");
+// ============================================================================
 
-var apiKey = Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY");
-if (string.IsNullOrWhiteSpace(apiKey))
+var builder = Host.CreateApplicationBuilder(args);
+
+builder.Services.AddLlm();
+builder.Services.AddDeepSeek();
+
+builder.Services.Configure<AgentLoopOptions>(builder.Configuration.GetSection("AgentLoop"));
+
+builder.Services.AddSingleton<IChatModel>(sp => new ChatModelClient(
+    sp.GetRequiredService<ILlmService>(),
+    sp.GetRequiredService<IOptions<AgentLoopOptions>>().Value.Provider,
+    sp.GetRequiredService<IOptions<AgentLoopOptions>>().Value.Model));
+
+builder.Services.AddHostedService<AgentLoop>();
+
+using var host = builder.Build();
+try
 {
-    Console.WriteLine("未设置环境变量 DEEPSEEK_API_KEY。");
-    Console.WriteLine("请先执行：  set DEEPSEEK_API_KEY=sk-你的key");
+    await host.RunAsync();
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"启动失败：{ex.Message}");
     return 1;
 }
 
-// ---- 装配（组合根）：插线性。以后换厂商/加厂商只在这里加一行。----
-using var host = new Core.Plugin.PluginHost();
-host.Install(new Core.Plugin.SettingsPlugin());
-host.Install(new Core.Llm.LlmPlugin());
-host.Install(new Core.Providers.DeepSeek.DeepSeekChatProvider());
-await host.InitializeAsync();
-
-var llm = host.Get<Core.Llm.ILlmService>()
-    ?? throw new InvalidOperationException("模型层未就绪。");
-
-Console.WriteLine($"已注册 provider：{string.Join(", ", llm.ListProviders().Select(p => p.Name))}");
-
-// ---- 关键：只实例化一个"模型对象"，交给 Agent Loop ----
-var model = new Core.Llm.ChatModelClient(llm, "deepseek", "deepseek-v4-pro");
-var agent = new AgentLoop(
-    model,
-    systemPrompt: "你是一个极简的 ReAct agent。需要事实信息时调用工具，不要凭空编造。拿到工具结果后给出简洁的中文回答。");
-
-var exit = await agent.RunAsync("现在几点？另外帮我算一下 1234 加 5678 等于多少。");
-return exit;
+return 0;
 
 // ============================================================================
 //  Agent Loop —— 只认识 IChatModel，不认识任何厂商。
 //  这正是"把 Agent 和模型解耦"的最小证明。
 // ============================================================================
 
-file sealed class AgentLoop(Core.Llm.IChatModel model, string systemPrompt)
+file sealed class AgentLoopOptions
 {
-    private static readonly Core.Llm.ChatTool[] Tools =
+    public string Provider { get; set; } = "deepseek";
+    public string Model { get; set; } = "deepseek-v4-pro";
+    public string SystemPrompt { get; set; } =
+        "你是一个极简的 ReAct agent。需要事实信息时调用工具，不要凭空编造。拿到工具结果后给出简洁的中文回答。";
+}
+
+file sealed class AgentLoop(
+    IChatModel model,
+    ILlmService llm,
+    IOptions<AgentLoopOptions> options,
+    ILogger<AgentLoop> logger,
+    IHostApplicationLifetime lifetime) : IHostedService
+{
+    private static readonly ChatTool[] Tools =
     [
         // 需要 JsonObject 形式的 JSON Schema
         Tool("get_current_utc_time", "获取当前的 UTC 时间。参数为空。", """{"type":"object","properties":{},"required":[]}"""),
@@ -57,22 +78,35 @@ file sealed class AgentLoop(Core.Llm.IChatModel model, string systemPrompt)
             """{"type":"object","properties":{"a":{"type":"number","description":"第一个加数"},"b":{"type":"number","description":"第二个加数"}},"required":["a","b"]}"""),
     ];
 
-    public async Task<int> RunAsync(string userRequest)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var history = new List<Core.Llm.ChatMessage>
+        logger.LogInformation("已注册 provider：{Providers}",
+            string.Join(", ", llm.ListProviders().Select(p => p.Name)));
+
+        var exit = await RunLoopAsync();
+
+        Environment.ExitCode = exit;
+        lifetime.StopApplication();
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    private async Task<int> RunLoopAsync()
+    {
+        var history = new List<ChatMessage>
         {
-            Core.Llm.ChatMessage.System(systemPrompt),
-            Core.Llm.ChatMessage.User(userRequest),
+            ChatMessage.System(options.Value.SystemPrompt),
+            ChatMessage.User("现在几点？另外帮我算一下 1234 加 5678 等于多少。"),
         };
 
-        var totalUsage = Core.Llm.TokenUsage.Zero;
+        var totalUsage = TokenUsage.Zero;
         const int MaxSubTurns = 6;
 
         for (var subTurn = 1; subTurn <= MaxSubTurns; subTurn++)
         {
             Console.WriteLine($"\n──── ReAct #{subTurn} " + new string('─', 46));
 
-            var request = new Core.Llm.ModelRequest
+            var request = new ModelRequest
             {
                 Messages = [.. history],
                 Tools = Tools,
@@ -83,7 +117,7 @@ file sealed class AgentLoop(Core.Llm.IChatModel model, string systemPrompt)
             var response = await model.CompleteAsync(request);
 
             totalUsage = totalUsage.Add(response.Usage);
-            Console.WriteLine($"[usage] {response.Usage}  finish={response.FinishReason.Kind ?? "?"}");
+            logger.LogInformation("[usage] {Usage}  finish={Finish}", response.Usage, response.FinishReason.Kind ?? "?");
 
             // 关键：整条 assistant 消息原样入历史（含推理链与工具调用）。
             history.Add(response.Message);
@@ -92,7 +126,7 @@ file sealed class AgentLoop(Core.Llm.IChatModel model, string systemPrompt)
             if (toolCalls.Count == 0)
             {
                 Console.WriteLine($"\n──── 最终回答 " + new string('─', 46));
-                Console.WriteLine(Core.Llm.ChatMessageExtensions.GetText(response.Message));
+                Console.WriteLine(ChatMessageExtensions.GetText(response.Message));
                 Console.WriteLine($"\n累计用量：{totalUsage}");
                 return 0;
             }
@@ -108,13 +142,14 @@ file sealed class AgentLoop(Core.Llm.IChatModel model, string systemPrompt)
                 {
                     result = ExecuteTool(call);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    logger.LogWarning(ex, "工具 {Tool} 执行失败", call.Name);
                     result = """{"error":"工具执行失败"}""";
                 }
 
                 Console.WriteLine($"  ← 结果 {result}");
-                history.Add(Core.Llm.ChatMessage.Tool(call.Id, result));
+                history.Add(ChatMessage.Tool(call.Id, result));
             }
         }
 
@@ -122,7 +157,7 @@ file sealed class AgentLoop(Core.Llm.IChatModel model, string systemPrompt)
         return 1;
     }
 
-    private static string ExecuteTool(Core.Llm.ToolCallBlock call) => call.Name switch
+    private static string ExecuteTool(ToolCallBlock call) => call.Name switch
     {
         "get_current_utc_time" => DateTimeOffset.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"),
         "add_numbers" => ExecuteAddNumbers(call.Arguments),
@@ -133,21 +168,21 @@ file sealed class AgentLoop(Core.Llm.IChatModel model, string systemPrompt)
     {
         try
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(arguments);
+            using var doc = JsonDocument.Parse(arguments);
             var root = doc.RootElement;
             if (!root.TryGetProperty("a", out var a) || !root.TryGetProperty("b", out var b))
                 return """{"error":"缺少参数 a 或 b"}""";
             return (a.GetDouble() + b.GetDouble()).ToString("0.####");
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
             return """{"error":"arguments 不是合法 JSON"}""";
         }
     }
 
-    private static Core.Llm.ChatTool Tool(string name, string description, string schemaJson)
+    private static ChatTool Tool(string name, string description, string schemaJson)
     {
-        var parameters = (System.Text.Json.Nodes.JsonObject)System.Text.Json.Nodes.JsonNode.Parse(schemaJson)!;
-        return new Core.Llm.ChatTool { Name = name, Description = description, Parameters = parameters };
+        var parameters = (JsonObject)JsonNode.Parse(schemaJson)!;
+        return new ChatTool { Name = name, Description = description, Parameters = parameters };
     }
 }
