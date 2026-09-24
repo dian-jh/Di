@@ -1,5 +1,205 @@
+# =====================================================================
+#  Di 项目 .gitignore（.NET / C#，JetBrains Rider）
+# =====================================================================
+
+# ---------------------------------------------------------------
+#  Rider / JetBrains 系列
+# ---------------------------------------------------------------
+.idea/
+*.iml
+*.ipr
+*.iws
+.Rider/
+.idea_modules/
+*.[Rr]e[Ss]harper
+_ReSharper*/
+_ReSharper.Caches/
+*.DotSettings
+*.DotSettings.user
+*.DotSettings.workspace
+# qodana.yaml 通常需要提交，如想忽略可取消注释：
+#qodana.yaml
+
+# ---------------------------------------------------------------
+#  Visual Studio 用户 / 环境特定文件
+# ---------------------------------------------------------------
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.userprefs
+*.sln.docstates
+*.vssscc
+*.vspscc
+*.scc
+*.pidb
+*.svclog
+.vs/
+
+# ---------------------------------------------------------------
+#  构建结果（MSBuild / .NET）
+# ---------------------------------------------------------------
 bin/
 obj/
-/packages/
-riderModule.iml
-/_ReSharper.Caches/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Ll]og/
+[Ll]ogs/
+Generated\ Files/
+artifacts/
+publish/
+[Pp]ublish*/
+out/
+AppPackages/
+BundleArtifacts/
+
+# ---------------------------------------------------------------
+#  Visual Studio / Rider 缓存文件
+# ---------------------------------------------------------------
+*.cache
+!?*.[Cc]ache/
+*.opendb
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.VC.opendb
+.localhistory/
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------
+#  编译产物 / 中间文件
+# ---------------------------------------------------------------
+*_i.c
+*_p.c
+*_h.h
+*.ilk
+*.meta
+*.obj
+*.iobj
+*.pch
+*.pdb
+*.ipdb
+*.pgc
+*.pgd
+*.rsp
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.tmp
+*.tmp_proj
+*_wpftmp.csproj
+*.binlog
+*.build.csdef
+
+# ---------------------------------------------------------------
+#  NuGet / 包管理
+# ---------------------------------------------------------------
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+.paket/paket.exe
+paket-files/
+
+# ---------------------------------------------------------------
+#  测试与覆盖率
+# ---------------------------------------------------------------
+[Tt]est[Rr]esult*/
+TestResult.xml
+*.trx
+*.VisualState.xml
+BenchmarkDotNet.Artifacts/
+[Oo]pen[Cc]over/
+[Ff]akes[Aa]ssemblies/
+[Cc]overage/
+*.coverage
+*.coveragexml
+coverage*.xml
+htmlcov/
+.reportgenerator/
+
+# ---------------------------------------------------------------
+#  日志
+# ---------------------------------------------------------------
+*.log
+logs/
+
+# ---------------------------------------------------------------
+#  本地配置 / 密钥（重要！可能包含 API Key）
+# ---------------------------------------------------------------
+.env
+.env.*
+!.env.example
+# 若 appsettings.json 中包含 API Key 等敏感信息，建议：
+# 提交一份不含密钥的 appsettings.sample.json，并取消下面注释以忽略本地配置：
+#appsettings.json
+#!appsettings.sample.json
+#appsettings.Development.json
+#appsettings.Local.json
+
+# 证书 / 签名密钥（提交可能带来安全风险）
+*.pfx
+*.snk
+
+# ---------------------------------------------------------------
+#  数据库文件（如未来引入本地数据库）
+# ---------------------------------------------------------------
+*.mdf
+*.ldf
+*.ndf
+
+# ---------------------------------------------------------------
+#  其他 IDE / 编辑器（如未来使用 VS Code 等）
+# ---------------------------------------------------------------
+# .vscode/ 如需共享调试配置（launch.json/tasks.json）可不忽略
+#.vscode/
+*.code-workspace
+
+# ---------------------------------------------------------------
+#  系统文件（macOS / Windows 通用）
+# ---------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*~
+*.swp
+
+# ---------------------------------------------------------------
+#  备份 / 归档 / 临时文件
+# ---------------------------------------------------------------
+*.bak
+*.orig
+*.old
+*.zip
+*.rar
+*.7z
+*.tar
+*.tar.gz
+tmp/
+temp/
+
+# ---------------------------------------------------------------
+#  未来可能用到的语言 / 工具产物
+# ---------------------------------------------------------------
+node_modules/
+jspm_packages/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
