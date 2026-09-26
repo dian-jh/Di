@@ -5,15 +5,16 @@ using Core.Llm;
 namespace Di.Tests;
 
 /// <summary>
-/// 针对 <see cref="Core.AgentLoop.AgentLoop"/> 的单元测试。
-/// 用 fake 模型覆盖：主路径、工具循环、失败转观察、预算上限、上下文组装、校验缝。
+/// 针对 <see cref="Core.AgentLoop.ReAct"/> 的单元测试。
+/// 用 fake 模型覆盖：主路径、工具循环、失败转观察、预算上限、最终输出工具、
+/// 错误归一化、上下文组装、校验缝、观察事件。
 /// </summary>
-public sealed class AgentLoopTests
+public sealed class ReActTests
 {
     private const string SystemPrompt = "test system prompt";
 
-    private static AgentLoopOptions Options(int maxIterations = 8) =>
-        new() { SystemPrompt = SystemPrompt, MaxIterations = maxIterations };
+    private static AgentLoopOptions Options(int maxIterations = 8, string? finalOutputTool = null) =>
+        new() { SystemPrompt = SystemPrompt, MaxIterations = maxIterations, FinalOutputTool = finalOutputTool };
 
     private static AgentRequest Request(
         string userMessage = "hello",
@@ -43,7 +44,7 @@ public sealed class AgentLoopTests
         var model = new FakeChatModel();
         model.Enqueue(_ => Response("final answer"));
         var executor = new FakeToolExecutor(_ => "");
-        var loop = new AgentLoop(model, Options());
+        var loop = new ReAct(model, Options());
 
         var result = await loop.RunAsync(Request(executor: executor));
 
@@ -61,7 +62,7 @@ public sealed class AgentLoopTests
     {
         var model = new FakeChatModel();
         model.Enqueue(_ => Response("ok"));
-        var loop = new AgentLoop(model, Options());
+        var loop = new ReAct(model, Options());
 
         await loop.RunAsync(Request(userMessage: "hi"));
 
@@ -78,7 +79,7 @@ public sealed class AgentLoopTests
     {
         var model = new FakeChatModel();
         model.Enqueue(_ => Response("ok"));
-        var loop = new AgentLoop(model, new AgentLoopOptions { SystemPrompt = "", MaxIterations = 8 });
+        var loop = new ReAct(model, new AgentLoopOptions { SystemPrompt = "", MaxIterations = 8 });
 
         await loop.RunAsync(Request());
 
@@ -92,7 +93,7 @@ public sealed class AgentLoopTests
         var model = new FakeChatModel();
         model.Enqueue(_ => Response("ok"));
         var tools = new[] { Tool("echo") };
-        var loop = new AgentLoop(model, Options());
+        var loop = new ReAct(model, Options());
 
         await loop.RunAsync(Request(tools: tools));
 
@@ -107,7 +108,7 @@ public sealed class AgentLoopTests
         model.Enqueue(_ => Response("need data", new ToolCallBlock("call_1", "echo", """{"x":1}""")));
         model.Enqueue(_ => Response("done"));
         var executor = new FakeToolExecutor(call => $"result for {call.Name}");
-        var loop = new AgentLoop(model, Options());
+        var loop = new ReAct(model, Options());
 
         var result = await loop.RunAsync(Request(executor: executor, tools: [Tool("echo")]));
 
@@ -133,7 +134,7 @@ public sealed class AgentLoopTests
             new ToolCallBlock("c2", "echo", """{"v":2}""")));
         model.Enqueue(_ => Response("summed"));
         var executor = new FakeToolExecutor(call => call.Arguments);
-        var loop = new AgentLoop(model, Options());
+        var loop = new ReAct(model, Options());
 
         var result = await loop.RunAsync(Request(executor: executor));
 
@@ -151,30 +152,86 @@ public sealed class AgentLoopTests
         model.Enqueue(_ => Response("will call", new ToolCallBlock("c1", "boom", "{}")));
         model.Enqueue(_ => Response("recovered"));
         var executor = new FakeToolExecutor(_ => throw new InvalidOperationException("kaboom"));
-        var loop = new AgentLoop(model, Options());
+        var loop = new ReAct(model, Options());
 
         var result = await loop.RunAsync(Request(executor: executor));
 
         Assert.Equal(AgentStopReason.Answer, result.StopReason);
         Assert.Equal(2, result.Iterations);
         var tool = Assert.IsType<ToolResultMessage>(result.Trajectory[2]);
-        Assert.Contains("error", tool.Content);
+        Assert.Contains("error executing tool", tool.Content);
         Assert.Contains("kaboom", tool.Content);
     }
 
     [Fact]
-    public async Task RunAsync_ExceedsMaxIterations_StopsWithBudgetExhausted()
+    public async Task RunAsync_ExceedsMaxIterations_StopsAndDoesNotExecuteToolsOnFinalTurn()
     {
         var model = new FakeChatModel();
         model.Fallback(_ => Response("still working", new ToolCallBlock($"c{model.Requests.Count}", "echo", "{}")));
         var executor = new FakeToolExecutor(call => "x");
-        var loop = new AgentLoop(model, Options(maxIterations: 3));
+        var loop = new ReAct(model, Options(maxIterations: 3));
 
         var result = await loop.RunAsync(Request(executor: executor));
 
         Assert.Equal(AgentStopReason.MaxIterations, result.StopReason);
         Assert.Equal(3, result.Iterations);
-        Assert.Equal(3, executor.Calls.Count);
+        // 前两轮各执行 1 次，第三轮预算耗尽不执行
+        Assert.Equal(2, executor.Calls.Count);
+    }
+
+    [Fact]
+    public async Task RunAsync_FinalOutputTool_ReturnsArgumentsAsAnswerWithoutExecuting()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("finishing", new ToolCallBlock("f1", "finish", """{"answer":"42"}""")));
+        var executor = new FakeToolExecutor(call => "should not run");
+        var loop = new ReAct(model, Options(finalOutputTool: "finish"));
+
+        var result = await loop.RunAsync(Request(executor: executor));
+
+        Assert.Equal(AgentStopReason.FinalOutputTool, result.StopReason);
+        Assert.Equal("""{"answer":"42"}""", result.Answer);
+        Assert.Equal(1, result.Iterations);
+        Assert.Empty(executor.Calls);
+    }
+
+    [Fact]
+    public async Task RunAsync_FinalOutputTool_IsHonoredEvenOnLastIteration()
+    {
+        var model = new FakeChatModel();
+        model.Fallback(_ => Response("finishing", new ToolCallBlock($"c{model.Requests.Count}", "finish", "{}")));
+        var executor = new FakeToolExecutor(call => "x");
+        var loop = new ReAct(model, Options(maxIterations: 2, finalOutputTool: "finish"));
+
+        var result = await loop.RunAsync(Request(executor: executor));
+
+        Assert.Equal(AgentStopReason.FinalOutputTool, result.StopReason);
+        Assert.Empty(executor.Calls);
+    }
+
+    [Fact]
+    public async Task RunAsync_NonRetryableModelError_ReturnsCleanErrorResult()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => throw new LlmException("missing api key", LlmErrorCodes.MissingCredential));
+        var loop = new ReAct(model, Options());
+
+        var result = await loop.RunAsync(Request());
+
+        Assert.Equal(AgentStopReason.Error, result.StopReason);
+        Assert.NotNull(result.Failure);
+        Assert.Equal(LlmErrorCodes.MissingCredential, result.Failure.Code);
+        Assert.Empty(result.Answer);
+    }
+
+    [Fact]
+    public async Task RunAsync_RetryableModelError_PropagatesToCaller()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => throw new LlmException("rate limited", LlmErrorCodes.RateLimited));
+        var loop = new ReAct(model, Options());
+
+        await Assert.ThrowsAsync<LlmException>(() => loop.RunAsync(Request()));
     }
 
     [Fact]
@@ -184,7 +241,7 @@ public sealed class AgentLoopTests
         model.Enqueue(_ => ToolCallResponse(new TokenUsage(10, 5)));
         model.Enqueue(_ => ResponseWithUsage("b", new TokenUsage(20, 7)));
         var executor = new FakeToolExecutor(call => "x");
-        var loop = new AgentLoop(model, Options());
+        var loop = new ReAct(model, Options());
 
         var result = await loop.RunAsync(Request(executor: executor));
 
@@ -201,7 +258,7 @@ public sealed class AgentLoopTests
         model.Enqueue(_ => Response("done"));
         var executor = new FakeToolExecutor(call => "ok");
         var validator = new RecordingValidator();
-        var loop = new AgentLoop(model, Options());
+        var loop = new ReAct(model, Options());
 
         await loop.RunAsync(Request(executor: executor, validator: validator));
 
@@ -216,10 +273,64 @@ public sealed class AgentLoopTests
         var model = new FakeChatModel();
         model.Enqueue(_ => Response("x", new ToolCallBlock("c1", "echo", "{}")));
         var executor = new FakeToolExecutor(call => "ok");
-        var loop = new AgentLoop(model, Options());
+        var loop = new ReAct(model, Options());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             loop.RunAsync(Request(executor: executor, validator: new RejectingValidator())));
+    }
+
+    [Fact]
+    public async Task RunAsync_ObserverReceivesTurnAndToolEvents()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("need data", new ToolCallBlock("c1", "echo", "{}")));
+        model.Enqueue(_ => Response("done"));
+        var executor = new FakeToolExecutor(call => "ok");
+        var observer = new RecordingObserver();
+        var loop = new ReAct(model, Options(), observer);
+
+        await loop.RunAsync(Request(executor: executor));
+
+        Assert.Equal(4, observer.Events.Count);
+        Assert.Equal(2, observer.Events.OfType<AgentLoopEvent.TurnCompleted>().Count());
+        var started = Assert.Single(observer.Events.OfType<AgentLoopEvent.ToolStarted>());
+        Assert.Equal("echo", started.Call.Name);
+        var completed = Assert.Single(observer.Events.OfType<AgentLoopEvent.ToolCompleted>());
+        Assert.False(completed.IsError);
+        Assert.Equal("ok", completed.Observation);
+    }
+
+    [Fact]
+    public async Task RunAsync_ObserverReceivesToolErrorEvent()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("x", new ToolCallBlock("c1", "echo", "{}")));
+        model.Enqueue(_ => Response("recovered"));
+        var executor = new FakeToolExecutor(_ => throw new InvalidOperationException("kaboom"));
+        var observer = new RecordingObserver();
+        var loop = new ReAct(model, Options(), observer);
+
+        var result = await loop.RunAsync(Request(executor: executor));
+
+        Assert.Equal(AgentStopReason.Answer, result.StopReason);
+        var failed = Assert.Single(observer.Events.OfType<AgentLoopEvent.ToolCompleted>());
+        Assert.True(failed.IsError);
+        Assert.Contains("kaboom", failed.Observation);
+    }
+
+    [Fact]
+    public async Task RunAsync_ObserverReceivesRunFailedOnNonRetryableError()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => throw new LlmException("no key", LlmErrorCodes.MissingCredential));
+        var observer = new RecordingObserver();
+        var loop = new ReAct(model, Options(), observer);
+
+        var result = await loop.RunAsync(Request());
+
+        Assert.Equal(AgentStopReason.Error, result.StopReason);
+        var runFailed = Assert.Single(observer.Events.OfType<AgentLoopEvent.RunFailed>());
+        Assert.Equal(LlmErrorCodes.MissingCredential, runFailed.Failure.Code);
     }
 
     private static ModelResponse ResponseWithUsage(string text, TokenUsage usage) => new()

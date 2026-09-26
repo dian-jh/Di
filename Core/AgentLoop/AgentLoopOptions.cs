@@ -12,6 +12,12 @@ public sealed class AgentLoopOptions
     /// <summary>循环上限，防止模型无限循环。到达后以 <see cref="AgentStopReason.MaxIterations"/> 结束。</summary>
     public int MaxIterations { get; set; } = 8;
 
+    /// <summary>
+    /// 最终输出工具名：模型调用它表示任务完成，其参数作为最终答案返回
+    /// （<see cref="AgentStopReason.FinalOutputTool"/>）。null = 不启用该退出条件。
+    /// </summary>
+    public string? FinalOutputTool { get; set; }
+
     /// <summary>透传给模型请求。</summary>
     public int? MaxTokens { get; set; }
 
