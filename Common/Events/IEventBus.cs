@@ -37,6 +37,6 @@ public interface IEventBus
     /// <summary>订阅一个委托处理器（最轻量，适合测试与 CLI 内联逻辑）。</summary>
     IDisposable Subscribe<TEvent>(Func<TEvent, CancellationToken, Task> handler) where TEvent : IEvent;
 
-    /// <summary>创建某事件类型的消费者（pull 模式）：用 await foreach 拉取该类事件的有序流。</summary>
-    IEventConsumer<TEvent> CreateConsumer<TEvent>() where TEvent : IEvent;
+    /// <summary>创建某事件类型的消费者（pull 模式）：用 await foreach 或 <see cref="IEventConsumer{TEvent}.TryRead"/> 读取该类事件的有序流。</summary>
+    IEventConsumer<TEvent> CreateConsumer<TEvent>() where TEvent : class, IEvent;
 }

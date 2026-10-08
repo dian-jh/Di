@@ -81,7 +81,7 @@ public sealed class InMemoryEventBus : IEventBus
     }
 
     public IEventConsumer<TEvent> CreateConsumer<TEvent>()
-        where TEvent : IEvent
+        where TEvent : class, IEvent
     {
         var sink = new ChannelSink<TEvent>();
         lock (_sync)
@@ -206,7 +206,7 @@ public sealed class InMemoryEventBus : IEventBus
     }
 
     /// <summary>消费者句柄：Dispose 时完成通道并退订，幂等。</summary>
-    private sealed class Consumer<TEvent> : IEventConsumer<TEvent> where TEvent : IEvent
+    private sealed class Consumer<TEvent> : IEventConsumer<TEvent> where TEvent : class, IEvent
     {
         private readonly ChannelSink<TEvent> _sink;
         private readonly Action _remove;
@@ -220,6 +220,8 @@ public sealed class InMemoryEventBus : IEventBus
 
         public IAsyncEnumerable<TEvent> ConsumeAsync(CancellationToken cancellationToken = default)
             => _sink.InnerChannel.Reader.ReadAllAsync(cancellationToken);
+
+        public TEvent? TryRead() => _sink.InnerChannel.Reader.TryRead(out var @event) ? @event : null;
 
         public void Dispose()
         {

@@ -325,6 +325,19 @@ public sealed class EventBusTests
     }
 
     [Fact]
+    public async Task Consumer_TryRead_ReturnsBufferedEventsThenNull()
+    {
+        var bus = new InMemoryEventBus();
+        using var consumer = bus.CreateConsumer<Ping>();
+        await bus.PublishAsync(new Ping("a"));
+        await bus.PublishAsync(new Ping("b"));
+
+        Assert.Equal("a", consumer.TryRead()!.Payload);
+        Assert.Equal("b", consumer.TryRead()!.Payload);
+        Assert.Null(consumer.TryRead());   // 排空后不阻塞，返回 null
+    }
+
+    [Fact]
     public void EventBase_PopulatesIdCreatedAtAndCorrelationId()
     {
         var e = new Ping("x") { CorrelationId = "run-1" };
