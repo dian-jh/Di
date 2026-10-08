@@ -12,12 +12,17 @@ namespace Di.Cli;
 /// </summary>
 public sealed class AgentRunner : IAgentRunner
 {
+    /// <summary>跨回合记忆默认保留的最近回合数（超出丢最旧整回合，控制上下文膨胀）。</summary>
+    public const int DefaultMaxHistoryTurns = 10;
+
     private readonly Func<string, IChatModel> _modelFactory;
     private readonly AgentLoopOptions _options;
     private readonly IEventBus _eventBus;
     private readonly IReadOnlyList<ChatTool> _tools;
     private readonly IToolExecutor _toolExecutor;
     private readonly string? _workingDirectory;
+    private readonly int _maxHistoryTurns;
+    private IReadOnlyList<ChatMessage> _history = [];
 
     public AgentRunner(
         Func<string, IChatModel> modelFactory,
@@ -25,7 +30,8 @@ public sealed class AgentRunner : IAgentRunner
         AgentLoopOptions options,
         IEventBus eventBus,
         IReadOnlyList<ChatTool>? tools = null,
-        string? workingDirectory = null)
+        string? workingDirectory = null,
+        int maxHistoryTurns = DefaultMaxHistoryTurns)
     {
         _modelFactory = modelFactory ?? throw new ArgumentNullException(nameof(modelFactory));
         _toolExecutor = toolExecutor ?? throw new ArgumentNullException(nameof(toolExecutor));
@@ -33,9 +39,12 @@ public sealed class AgentRunner : IAgentRunner
         _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
         _tools = tools ?? [];
         _workingDirectory = workingDirectory;
+        _maxHistoryTurns = Math.Max(0, maxHistoryTurns);
     }
 
     public string CurrentModel { get; set; } = "deepseek-flash";
+
+    public void ResetHistory() => _history = [];
 
     public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
     {
@@ -51,12 +60,37 @@ public sealed class AgentRunner : IAgentRunner
                 .ConfigureAwait(false);
         }
 
-        return await react.RunStreamingAsync(new AgentRequest
+        var result = await react.RunStreamingAsync(new AgentRequest
         {
             UserMessage = userMessage,
+            History = _history,   // 上一回合的完整轨迹 → 模型"记得"之前的对话
             Tools = _tools,
             ToolExecutor = _toolExecutor,
             SystemContext = systemContext,
         }, cancellationToken).ConfigureAwait(false);
+
+        // 累加本回合轨迹作为下一回合的记忆，并裁剪到最近 N 轮（按整回合在 user 消息处切）。
+        _history = TrimHistory(result.Trajectory, _maxHistoryTurns);
+        return result;
+    }
+
+    /// <summary>保留最近 <paramref name="maxTurns"/> 轮整回合（每个回合以 user 消息为起点）。</summary>
+    private static IReadOnlyList<ChatMessage> TrimHistory(IReadOnlyList<ChatMessage> trajectory, int maxTurns)
+    {
+        if (maxTurns <= 0)
+            return [];
+        var userCount = trajectory.Count(m => m is UserMessage);
+        if (userCount <= maxTurns)
+            return trajectory;
+
+        // 裁掉最旧的 (userCount - maxTurns) 个整回合，起点是第 (toDrop+1) 个 user 消息。
+        var toDrop = userCount - maxTurns;
+        var seen = 0;
+        for (var i = 0; i < trajectory.Count; i++)
+        {
+            if (trajectory[i] is UserMessage && seen++ == toDrop)
+                return trajectory.Skip(i).ToArray();
+        }
+        return trajectory;
     }
 }

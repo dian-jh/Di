@@ -8,7 +8,7 @@ public sealed class ReplOptions
 
     /// <summary>/help 输出的命令说明。</summary>
     public string HelpText { get; init; } =
-        "命令：/help 帮助 · /clear 清屏 · /model &lt;模型名&gt; 切换模型 · /exit 退出";
+        "命令：/help 帮助 · /clear 清屏并清空记忆 · /model &lt;模型名&gt; 切换模型 · /exit 退出";
 
     /// <summary>回合开始、等待模型首个输出时显示的"进行中"状态行。</summary>
     public string WorkingStatusText { get; init; } = "⟳ 正在请求模型…";

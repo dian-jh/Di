@@ -13,4 +13,7 @@ public interface IAgentRunner
 
     /// <summary>运行一个用户回合，返回最终结果。</summary>
     Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default);
+
+    /// <summary>清空跨回合记忆（/clear 命令调用后，模型不再记得之前的对话）。</summary>
+    void ResetHistory();
 }

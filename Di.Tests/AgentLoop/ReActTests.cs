@@ -22,13 +22,15 @@ public sealed class ReActTests
         IToolExecutor? executor = null,
         IToolValidator? validator = null,
         IReadOnlyList<ChatTool>? tools = null,
-        string? systemContext = null) => new()
+        string? systemContext = null,
+        IReadOnlyList<ChatMessage>? history = null) => new()
     {
         UserMessage = userMessage,
         ToolExecutor = executor ?? new FakeToolExecutor(_ => ""),
         Validator = validator,
         Tools = tools,
         SystemContext = systemContext,
+        History = history,
     };
 
     private static ModelResponse Response(string? text = null, params ToolCallBlock[] toolCalls) => new()
@@ -75,6 +77,57 @@ public sealed class ReActTests
         Assert.Equal(SystemPrompt, system.Text);
         var user = Assert.IsType<UserMessage>(request.Messages[1]);
         Assert.Equal("hi", ChatMessageExtensions.GetText(user));
+    }
+
+    [Fact]
+    public async Task RunAsync_History_IsPrependedBeforeCurrentUserMessage()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("ok"));
+        var loop = new ReAct(model, Options());
+
+        var history = new ChatMessage[] { ChatMessage.User("之前的问题"), ChatMessage.Assistant("之前的回答") };
+        await loop.RunAsync(Request(userMessage: "现在的问题", history: history));
+
+        var request = Assert.Single(model.Requests);
+        Assert.Equal(4, request.Messages.Count);   // [system, user旧, assistant旧, user新]
+        Assert.Equal("之前的问题", ChatMessageExtensions.GetText(request.Messages[1]));
+        Assert.Equal("之前的回答", ChatMessageExtensions.GetText(request.Messages[2]));
+        Assert.Equal("现在的问题", ChatMessageExtensions.GetText(request.Messages[3]));
+    }
+
+    [Fact]
+    public async Task RunAsync_History_IncludedInTrajectory_AndExposedOnResult()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("ok"));
+        var loop = new ReAct(model, Options());
+
+        var history = new ChatMessage[] { ChatMessage.User("a"), ChatMessage.Assistant("ra") };
+        var result = await loop.RunAsync(Request(userMessage: "b", history: history));
+
+        Assert.Equal(4, result.Trajectory.Count);   // [user a, assistant ra, user b, assistant ok]
+        Assert.Equal("a", ChatMessageExtensions.GetText(result.Trajectory[0]));
+        Assert.Equal("b", ChatMessageExtensions.GetText(result.Trajectory[2]));
+        Assert.Same(history, result.History);       // 会话日志据此跳过已记录的历史
+    }
+
+    [Fact]
+    public async Task RunAsync_History_ThenToolLoop_AccumulatesFullTrajectory()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("need", new ToolCallBlock("c1", "echo", "{}")));
+        model.Enqueue(_ => Response("done"));
+        var executor = new FakeToolExecutor(call => "r");
+        var loop = new ReAct(model, Options());
+
+        var history = new ChatMessage[] { ChatMessage.User("旧"), ChatMessage.Assistant("旧答") };
+        var result = await loop.RunAsync(Request(executor: executor, history: history));
+
+        // [user旧, assistant旧答, user新, assistant(toolcall), tool, assistant done]
+        Assert.Equal(6, result.Trajectory.Count);
+        Assert.Equal("r", ((ToolResultMessage)result.Trajectory[4]).Content);
+        Assert.Same(history, result.History);
     }
 
     [Fact]

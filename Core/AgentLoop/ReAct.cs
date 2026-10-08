@@ -63,11 +63,11 @@ public sealed class ReAct
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // trajectory = [user_request]
-        var trajectory = new List<ChatMessage>
-        {
-            ChatMessage.User(request.UserMessage),
-        };
+        // trajectory = [history..., user_request] —— 跨回合记忆在 host 侧累加，ReAct 只负责拼装。
+        var trajectory = new List<ChatMessage>();
+        if (request.History is { Count: > 0 })
+            trajectory.AddRange(request.History);
+        trajectory.Add(ChatMessage.User(request.UserMessage));
 
         var usage = TokenUsage.Zero;
         var iterations = 0;
@@ -93,7 +93,7 @@ public sealed class ReAct
             }
             catch (LlmException ex) when (!ex.IsRetryable)
             {
-                var result = Fail(trajectory, usage, iterations, ex);
+                var result = Fail(trajectory, usage, iterations, ex, request.History);
                 Emit(new AgentLoopEvent.RunFailed(result.Failure!));
                 return result;
             }
@@ -109,6 +109,7 @@ public sealed class ReAct
                 {
                     Answer = LastAssistantText(trajectory),
                     Trajectory = trajectory,
+                    History = request.History,
                     Usage = usage,
                     Iterations = iterations,
                     StopReason = AgentStopReason.Answer,
@@ -124,6 +125,7 @@ public sealed class ReAct
                     {
                         Answer = call.Arguments,
                         Trajectory = trajectory,
+                        History = request.History,
                         Usage = usage,
                         Iterations = iterations,
                         StopReason = AgentStopReason.FinalOutputTool,
@@ -146,6 +148,7 @@ public sealed class ReAct
         {
             Answer = LastAssistantText(trajectory),
             Trajectory = trajectory,
+            History = request.History,
             Usage = usage,
             Iterations = iterations,
             StopReason = AgentStopReason.MaxIterations,
@@ -218,10 +221,12 @@ public sealed class ReAct
     }
 
     /// <summary>不可重试的模型故障：以干净的 <see cref="AgentStopReason.Error"/> 结果结束，而不是抛异常。</summary>
-    private static AgentResult Fail(IReadOnlyList<ChatMessage> trajectory, TokenUsage usage, int iterations, LlmException ex) => new()
+    private static AgentResult Fail(IReadOnlyList<ChatMessage> trajectory, TokenUsage usage, int iterations, LlmException ex,
+        IReadOnlyList<ChatMessage>? history) => new()
     {
         Answer = string.Empty,
         Trajectory = trajectory,
+        History = history,
         Usage = usage,
         Iterations = iterations,
         StopReason = AgentStopReason.Error,

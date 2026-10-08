@@ -51,6 +51,66 @@ public sealed class AgentRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_AccumulatesHistoryAcrossTurns()
+    {
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus());
+
+        await runner.RunAsync("第一问");
+        await runner.RunAsync("第二问");
+
+        Assert.Equal(2, model.Requests.Count);
+        var second = model.Requests[1];
+        // [system, user第一问, assistant, user第二问] —— 上一回合轨迹被带回
+        Assert.Equal(4, second.Messages.Count);
+        Assert.Equal("第一问", ChatMessageExtensions.GetText(second.Messages[1]));
+        Assert.Equal("第二问", ChatMessageExtensions.GetText(second.Messages[3]));
+    }
+
+    [Fact]
+    public async Task RunAsync_TrimsHistoryToMaxTurns()
+    {
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus(),
+            maxHistoryTurns: 2);
+
+        for (var i = 1; i <= 5; i++)
+            await runner.RunAsync($"问{i}");
+
+        // 请求 = 记忆(最近 2 轮) + 当前回合：问3、问4 来自记忆，问5 是当前；问1、问2 已被裁掉。
+        var last = model.Requests[^1];
+        var userTexts = last.Messages.OfType<UserMessage>().Select(ChatMessageExtensions.GetText).ToArray();
+        Assert.Equal(["问3", "问4", "问5"], userTexts);
+    }
+
+    [Fact]
+    public async Task ResetHistory_ClearsAccumulatedMemory()
+    {
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus());
+
+        await runner.RunAsync("第一问");
+        runner.ResetHistory();
+        await runner.RunAsync("第二问");
+
+        var last = model.Requests[^1];
+        var userTexts = last.Messages.OfType<UserMessage>().Select(ChatMessageExtensions.GetText).ToArray();
+        Assert.Equal(["第二问"], userTexts);   // 记忆被清空，只有当前问
+    }
+
+    [Fact]
     public async Task RunAsync_WithWorkingDirectory_InjectsEnvironmentSnapshot()
     {
         var dir = Directory.CreateTempSubdirectory("di-runner-").FullName;

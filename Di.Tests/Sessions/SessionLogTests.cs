@@ -134,6 +134,31 @@ public sealed class SessionLogTests : IDisposable
     }
 
     [Fact]
+    public void AppendTurn_WithHistory_RecordsOnlyNewMessages()
+    {
+        var log = NewLog();
+        log.StartSession();
+
+        var history = new ChatMessage[] { ChatMessage.User("旧问题"), ChatMessage.Assistant("旧回答") };
+        log.AppendTurn(new AgentResult
+        {
+            Answer = "新回答",
+            Trajectory = [.. history, ChatMessage.User("新问题"), ChatMessage.Assistant("新回答")],
+            History = history,   // 上回合已写入会话文件，本回合不应重复记录
+            Iterations = 1,
+            StopReason = AgentStopReason.Answer,
+        }, DateTimeOffset.UtcNow);
+
+        var messageTexts = ReadRecords(log.LogFilePath)
+            .Where(r => r.GetProperty("type").GetString() == "response_item")
+            .Select(r => r.GetProperty("payload"))
+            .Where(p => p.GetProperty("type").GetString() == "message")
+            .Select(p => p.GetProperty("content")[0].GetProperty("text").GetString())
+            .ToArray();
+        Assert.Equal(["新问题", "新回答"], messageTexts);
+    }
+
+    [Fact]
     public void AppendTurn_OrdinalsMonotonicAcrossTurns()
     {
         var log = NewLog();

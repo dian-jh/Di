@@ -14,6 +14,13 @@ public sealed class AgentRequest
     /// </summary>
     public string? SystemContext { get; init; }
 
+    /// <summary>
+    /// 跨回合记忆：上一回合的完整轨迹（含用户消息与工具结果），置于本次 user 消息之前，
+    /// 使模型能"记得"之前的对话。由宿主（AgentRunner）在回合之间累加。
+    /// null / 空 = 本次从零开始。
+    /// </summary>
+    public IReadOnlyList<ChatMessage>? History { get; init; }
+
     /// <summary>本次运行中模型可以调用的工具。</summary>
     public IReadOnlyList<ChatTool>? Tools { get; init; }
 

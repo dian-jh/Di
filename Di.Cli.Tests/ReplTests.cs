@@ -94,6 +94,16 @@ public sealed class ReplTests
     }
 
     [Fact]
+    public async Task ClearCommand_ResetsConversationMemory()
+    {
+        var (repl, _, runner) = Setup("/clear", "/exit");
+
+        await repl.RunAsync();
+
+        Assert.True(runner.ResetCalled, "/clear 应清空跨回合记忆");
+    }
+
+    [Fact]
     public async Task EmptyLine_IsIgnored()
     {
         var (repl, _, runner) = Setup("", "hi", "/exit");
@@ -202,6 +212,10 @@ public sealed class ReplTests
 
         public List<string> Messages { get; } = [];
 
+        public bool ResetCalled { get; private set; }
+
+        public void ResetHistory() => ResetCalled = true;
+
         public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
         {
             Messages.Add(userMessage);
@@ -227,5 +241,7 @@ public sealed class ReplTests
 
         public Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("boom");
+
+        public void ResetHistory() { }
     }
 }

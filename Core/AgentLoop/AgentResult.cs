@@ -11,6 +11,12 @@ public sealed class AgentResult
     /// <summary>完整轨迹（system+user+assistant+tool 消息）—— 可重放的状态。</summary>
     public required IReadOnlyList<ChatMessage> Trajectory { get; init; }
 
+    /// <summary>
+    /// 本回合收到的跨回合记忆（即 <see cref="AgentRequest.History"/>，已在轨迹开头）。
+    /// 会话日志据此跳过已记录的历史，只写本回合新增消息。
+    /// </summary>
+    public IReadOnlyList<ChatMessage>? History { get; init; }
+
     /// <summary>全部模型调用的累计 token 用量。</summary>
     public TokenUsage Usage { get; init; } = TokenUsage.Zero;
 

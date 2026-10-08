@@ -98,6 +98,7 @@ public sealed class SessionLog
 
     /// <summary>
     /// 把一个完整回合（用户请求 + 轨迹 + 结局）追加进会话文件。
+    /// 轨迹里 <see cref="AgentResult.History"/> 之前的消息是上一回合已写过的历史，这里跳过，只写本回合新增。
     /// <paramref name="startedAt"/> 是回合开始时间（调用方在运行前记录），用于计算 duration_ms。
     /// </summary>
     public void AppendTurn(AgentResult result, DateTimeOffset startedAt)
@@ -118,7 +119,8 @@ public sealed class SessionLog
             });
             Append("turn_context", new { TurnId = turnId, Cwd = _cwd });
 
-            foreach (var message in result.Trajectory)
+            var historyCount = result.History?.Count ?? 0;
+            foreach (var message in result.Trajectory.Skip(historyCount))
                 AppendMessage(message);
 
             Append("event_msg", new

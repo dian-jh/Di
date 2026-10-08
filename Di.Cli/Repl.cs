@@ -159,6 +159,8 @@ public sealed class Repl
                 break;
             case "/clear":
                 _output.Write("\x1b[2J\x1b[H");   // ANSI 清屏（主屏幕）
+                _runner.ResetHistory();           // 同时清空跨回合记忆
+                _output.WriteLine("已清空屏幕与对话记忆");
                 break;
             case "/model" when args.Length > 0:
                 _runner.CurrentModel = args;
