@@ -7,7 +7,8 @@ namespace Di.Cli;
 /// <summary>
 /// <see cref="IAgentRunner"/> 的标准实现：按当前模型名经工厂解析 <see cref="IChatModel"/>，
 /// 把用户输入组装成 <see cref="AgentRequest"/> 交给 <see cref="ReAct"/> 执行。
-/// ReAct 经共享 <see cref="IEventBus"/> 发布循环事件，UI 从同一总线消费渲染。
+/// 走流式路径：模型文本增量以 <see cref="AgentLoopEvent.TextDelta"/> 事件实时发布到
+/// 共享 <see cref="IEventBus"/>，UI 从同一总线消费渲染。
 /// </summary>
 public sealed class AgentRunner : IAgentRunner
 {
@@ -37,7 +38,7 @@ public sealed class AgentRunner : IAgentRunner
     {
         var model = _modelFactory(CurrentModel);
         var react = new ReAct(model, _options, _eventBus);
-        return react.RunAsync(new AgentRequest
+        return react.RunStreamingAsync(new AgentRequest
         {
             UserMessage = userMessage,
             Tools = _tools,

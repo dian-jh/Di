@@ -52,7 +52,14 @@ public sealed class ReAct
         _eventBus = eventBus;
     }
 
-    public async Task<AgentResult> RunAsync(AgentRequest request, CancellationToken cancellationToken = default)
+    public Task<AgentResult> RunAsync(AgentRequest request, CancellationToken cancellationToken = default)
+        => RunCoreAsync(request, stream: false, cancellationToken);
+
+    /// <summary>流式变体：模型输出逐段发布 <see cref="AgentLoopEvent.TextDelta"/> 事件，UI 可实时渲染。</summary>
+    public Task<AgentResult> RunStreamingAsync(AgentRequest request, CancellationToken cancellationToken = default)
+        => RunCoreAsync(request, stream: true, cancellationToken);
+
+    private async Task<AgentResult> RunCoreAsync(AgentRequest request, bool stream, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -73,13 +80,16 @@ public sealed class ReAct
             ModelResponse response;
             try
             {
-                response = await _model.CompleteAsync(new ModelRequest
+                var modelRequest = new ModelRequest
                 {
                     Messages = BuildContext(trajectory),
                     Tools = request.Tools,
                     ReasoningEffort = _options.ReasoningEffort,
                     MaxTokens = _options.MaxTokens,
-                }, cancellationToken);
+                };
+                response = stream
+                    ? await StreamModelAsync(modelRequest, cancellationToken)
+                    : await _model.CompleteAsync(modelRequest, cancellationToken);
             }
             catch (LlmException ex) when (!ex.IsRetryable)
             {
@@ -140,6 +150,30 @@ public sealed class ReAct
             Iterations = iterations,
             StopReason = AgentStopReason.MaxIterations,
         };
+    }
+
+    /// <summary>
+    /// 流式调用模型：消费事件流，把每个文本增量发布为 <see cref="AgentLoopEvent.TextDelta"/>，
+    /// 最终取 <see cref="ModelEvent.Completed"/> 携带的完整响应（工具调用等已由模型层装配好）。
+    /// </summary>
+    private async Task<ModelResponse> StreamModelAsync(ModelRequest request, CancellationToken cancellationToken)
+    {
+        ModelResponse? response = null;
+        await foreach (var evt in _model.StreamAsync(request, cancellationToken).ConfigureAwait(false))
+        {
+            switch (evt)
+            {
+                case ModelEvent.TextDelta { Text: var text }:
+                    Emit(new AgentLoopEvent.TextDelta(text));
+                    break;
+                case ModelEvent.Completed completed:
+                    response = completed.Response;
+                    break;
+            }
+        }
+
+        return response
+            ?? throw new LlmException("模型流在结束前中断，未收到 Completed。", LlmErrorCodes.BadResponse);
     }
 
     /// <summary>稳定前缀 + 轨迹。工具定义经 <see cref="ModelRequest.Tools"/> 传递。</summary>

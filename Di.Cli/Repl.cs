@@ -53,10 +53,16 @@ public sealed class Repl
         }
     }
 
-    /// <summary>一次聊天回合：先建消费者，再运行，最后排空事件并渲染回答。</summary>
+    /// <summary>
+    /// 一次聊天回合：先建消费者，启动并发渲染任务（实时消费事件流），
+    /// 运行结束后取消渲染任务并兜底排空残余事件，最后打印脚注。
+    /// </summary>
     private async Task RunTurnAsync(string userMessage, CancellationToken cancellationToken)
     {
         using var consumer = _bus.CreateConsumer<AgentLoopEvent>();
+        using var renderCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        var renderTask = RenderAsync(consumer, renderCts.Token);
 
         AgentResult result;
         try
@@ -66,12 +72,48 @@ public sealed class Repl
         catch (Exception ex)
         {
             _output.WriteLine($"  ✗ 运行失败: {ex.Message}");
+            renderCts.Cancel();
+            await StopRendererAsync(renderTask);
             return;
         }
 
+        renderCts.Cancel();
+        await StopRendererAsync(renderTask);
+
+        // 兜底：取消瞬间渲染任务未消费的残余事件（发布同步入队，不会丢失）。
         while (consumer.TryRead() is { } evt)
             _renderer.Render(evt);
+
         _renderer.RenderResult(result);
+    }
+
+    /// <summary>实时消费事件流并渲染（TextDelta 逐字写出，模型生成即显示）。</summary>
+    private async Task RenderAsync(IEventConsumer<AgentLoopEvent> consumer, CancellationToken cancellationToken)
+    {
+        await foreach (var evt in consumer.ConsumeAsync(cancellationToken))
+        {
+            try
+            {
+                _renderer.Render(evt);
+            }
+            catch (Exception)
+            {
+                // 渲染失败不打断回合。
+            }
+        }
+    }
+
+    /// <summary>等待渲染任务结束；取消导致的 OperationCanceledException 属预期。</summary>
+    private static async Task StopRendererAsync(Task renderTask)
+    {
+        try
+        {
+            await renderTask;
+        }
+        catch (OperationCanceledException)
+        {
+            // 预期：回合结束取消渲染器。
+        }
     }
 
     /// <summary>斜杠命令；返回 true 表示退出。</summary>
