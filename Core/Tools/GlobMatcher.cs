@@ -16,6 +16,10 @@ internal static class GlobMatcher
 
     public static Regex ToRegex(string pattern, bool ignoreCase)
     {
+        // 匹配路径统一用 '/' 分隔；把 Windows 风格的反斜杠（src\*.cs）规范成 '/'，
+        // 避免模型按 Windows 习惯写模式时永远匹配不到。
+        pattern = pattern.Replace('\\', '/');
+
         var sb = new StringBuilder("^");
         for (var i = 0; i < pattern.Length; i++)
         {

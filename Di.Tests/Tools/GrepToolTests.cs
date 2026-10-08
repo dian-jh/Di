@@ -178,4 +178,87 @@ public sealed class GrepToolTests : IDisposable
         Assert.True(def.Parameters["properties"]!["pattern"] is not null);
         Assert.True(def.Parameters["properties"]!["glob"] is not null);
     }
+
+    // ---- 悲观：EOF/空文件/编码/路径边界 ----
+
+    [Fact]
+    public void Execute_PathIsFile_ReturnsError()
+    {
+        Write("file.txt", "hit\n");
+        var result = NewTool().ExecuteAsync("""{"pattern":"hit","path":"file.txt"}""").GetAwaiter().GetResult();
+
+        Assert.StartsWith("error:", result);
+        Assert.Contains("文件", result);   // 明确提示"是文件而非目录"
+    }
+
+    [Fact]
+    public void Execute_MatchAtEofWithoutTrailingNewline_IsReported()
+    {
+        Write("a.txt", "hit");
+        var result = NewTool().ExecuteAsync("""{"pattern":"hit"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("a.txt:1: hit", result);
+    }
+
+    [Fact]
+    public void Execute_EmptyFile_ReturnsNotFound()
+    {
+        Write("a.txt", "");
+        var result = NewTool().ExecuteAsync("""{"pattern":"."}""").GetAwaiter().GetResult();
+
+        Assert.Contains("未找到", result);
+    }
+
+    [Fact]
+    public void Execute_UnicodePattern_MatchesUnicodeContent()
+    {
+        Write("a.txt", "包含中文内容\nplain");
+        var result = NewTool().ExecuteAsync("""{"pattern":"中文"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("a.txt:1: 包含中文内容", result);
+    }
+
+    [Fact]
+    public void Execute_CrlfFile_ContentHasNoCarriageReturn()
+    {
+        Write("a.txt", "one\r\nTODO\r\ntwo");
+        var result = NewTool().ExecuteAsync("""{"pattern":"TODO"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("a.txt:2: TODO", result);
+        Assert.DoesNotContain("\r", result.Split('\n')[0]);
+    }
+
+    [Fact]
+    public void Execute_LongLine_MatchAtEnd_IsReported()
+    {
+        Write("a.txt", new string('x', 5000) + "needle");
+        var result = NewTool().ExecuteAsync("""{"pattern":"needle"}""").GetAwaiter().GetResult();
+
+        var line = result.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        Assert.NotNull(line);
+        Assert.StartsWith("a.txt:1: ", line);
+        Assert.Contains("needle", line);
+    }
+
+    [Fact]
+    public void Execute_AnchoredPattern_MatchesFullLine()
+    {
+        Write("a.txt", "abc\nxabc\n");
+        var result = NewTool().ExecuteAsync("""{"pattern":"^abc$"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("a.txt:1: abc", result);
+        Assert.DoesNotContain("a.txt:2", result);
+    }
+
+    [Fact]
+    public void Execute_AlternationPattern_MatchesAnyBranch()
+    {
+        Write("a.txt", "alpha\nbeta\ngamma");
+        var result = NewTool().ExecuteAsync("""{"pattern":"alpha|gamma"}""").GetAwaiter().GetResult();
+
+        var lines = result.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Contains("a.txt:1: alpha", lines);
+        Assert.Contains("a.txt:3: gamma", lines);
+        Assert.DoesNotContain("beta", result);
+    }
 }

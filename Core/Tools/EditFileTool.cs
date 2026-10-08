@@ -60,7 +60,9 @@ public sealed class EditFileTool : ICoreTool
             if (first < 0)
                 return Task.FromResult("error: 在文件中未找到 old_string");
 
-            var second = text.IndexOf(oldString, first + oldString.Length, StringComparison.Ordinal);
+            // 从 first + 1 起搜第二个：重叠出现（如 "aaa" 中 "aa" 出现在 0 和 1）也算多次，
+            // 不能从 first + oldString.Length 起搜——那会漏掉重叠匹配而静默替换第一个。
+            var second = text.IndexOf(oldString, first + 1, StringComparison.Ordinal);
             if (second >= 0)
                 return Task.FromResult("error: old_string 在文件中出现多次，请提供更多上下文使其唯一");
 
@@ -79,6 +81,11 @@ public sealed class EditFileTool : ICoreTool
         catch (JsonException)
         {
             return Task.FromResult("error: arguments 不是合法 JSON");
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            // 非法路径字符（如 NUL）：路径解析会抛 ArgumentException。
+            return Task.FromResult($"error: 路径参数非法: {ex.Message}");
         }
     }
 

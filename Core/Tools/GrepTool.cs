@@ -52,7 +52,9 @@ public sealed class GrepTool : ICoreTool
             var pathArg = ToolHelpers.TryGetOptionalString(doc.RootElement, "path");
             var searchRoot = pathArg is null ? _baseDirectory : ToolHelpers.ResolvePath(_baseDirectory, pathArg);
             if (!Directory.Exists(searchRoot))
-                return Task.FromResult($"error: 目录不存在: {pathArg}");
+                return Task.FromResult(File.Exists(searchRoot)
+                    ? $"error: 路径是文件而非目录: {pathArg}"
+                    : $"error: 目录不存在: {pathArg}");
 
             var globArg = ToolHelpers.TryGetOptionalString(doc.RootElement, "glob");
             var globRegex = globArg is null ? null : GlobMatcher.ToRegex(globArg, ignoreCase: OperatingSystem.IsWindows());
@@ -94,6 +96,11 @@ public sealed class GrepTool : ICoreTool
         catch (JsonException)
         {
             return Task.FromResult("error: arguments 不是合法 JSON");
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            // 非法路径字符（如 NUL）：路径解析会抛 ArgumentException。
+            return Task.FromResult($"error: 路径参数非法: {ex.Message}");
         }
     }
 }

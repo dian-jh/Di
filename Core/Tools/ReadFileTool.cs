@@ -72,6 +72,16 @@ public sealed class ReadFileTool : ICoreTool
         {
             return Task.FromResult("error: arguments 不是合法 JSON");
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 文件被占用/无权限：返回可预期的错误观察，而不是让异常冒泡。
+            return Task.FromResult($"error: 读取失败: {ex.Message}");
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            // 非法路径字符（如 NUL）：Path.GetFullPath 会抛 ArgumentException。
+            return Task.FromResult($"error: 路径参数非法: {ex.Message}");
+        }
     }
 
     /// <summary>把 [from, to) 区间的行渲染成 "行号: 内容"，用 \n 分隔（跨平台一致的观察文本）。</summary>

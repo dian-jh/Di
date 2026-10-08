@@ -13,6 +13,9 @@ public sealed record ShellCommand(string FileName, IReadOnlyList<string> PrefixA
     public static ShellCommand Default { get; } = OperatingSystem.IsWindows()
         ? new ShellCommand(Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe", ["/c"])
         : new ShellCommand("/bin/sh", ["-c"]);
+
+    /// <summary>是否为平台默认 shell（BashTool 借此决定用哪种命令行构造方式）。</summary>
+    public bool IsPlatformDefault => ReferenceEquals(this, Default);
 }
 
 /// <summary>一次进程执行的结果。</summary>
@@ -39,7 +42,8 @@ internal static class ProcessRunner
         IReadOnlyList<string> arguments,
         string workingDirectory,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? rawArguments = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -50,8 +54,17 @@ internal static class ProcessRunner
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
-        foreach (var arg in arguments)
-            psi.ArgumentList.Add(arg);
+        if (rawArguments is not null)
+        {
+            // 原样传入整个命令行（verbatim）——cmd.exe 需要 /d /s /c "命令" 这种手工形式，
+            // ArgumentList 的内嵌引号转义（\"）cmd 不认，会把反斜杠原样输出。
+            psi.Arguments = rawArguments;
+        }
+        else
+        {
+            foreach (var arg in arguments)
+                psi.ArgumentList.Add(arg);
+        }
 
         using var process = new Process { StartInfo = psi };
         var output = new StringBuilder();

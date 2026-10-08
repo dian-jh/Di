@@ -38,7 +38,9 @@ public sealed class GlobTool : ICoreTool
             var pathArg = ToolHelpers.TryGetOptionalString(doc.RootElement, "path");
             var searchRoot = pathArg is null ? _baseDirectory : ToolHelpers.ResolvePath(_baseDirectory, pathArg);
             if (!Directory.Exists(searchRoot))
-                return Task.FromResult($"error: 目录不存在: {pathArg}");
+                return Task.FromResult(File.Exists(searchRoot)
+                    ? $"error: 路径是文件而非目录: {pathArg}"
+                    : $"error: 目录不存在: {pathArg}");
 
             var regex = GlobMatcher.ToRegex(pattern!, ignoreCase: OperatingSystem.IsWindows());
             var results = new List<string>();
@@ -58,6 +60,11 @@ public sealed class GlobTool : ICoreTool
         catch (JsonException)
         {
             return Task.FromResult("error: arguments 不是合法 JSON");
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            // 非法路径字符（如 NUL）：路径解析会抛 ArgumentException。
+            return Task.FromResult($"error: 路径参数非法: {ex.Message}");
         }
     }
 }

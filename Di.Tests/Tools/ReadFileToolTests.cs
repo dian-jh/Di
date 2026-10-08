@@ -202,4 +202,76 @@ public sealed class ReadFileToolTests : IDisposable
         Assert.Equal("object", def.Parameters["type"]!.GetValue<string>());
         Assert.True(def.Parameters["properties"]!["path"] is not null);
     }
+
+    // ---- 悲观：锁文件/非法路径/边界 ----
+
+    [Fact]
+    public void Execute_LockedFile_ReturnsErrorInsteadOfThrowing()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;   // Unix 不强制 FileShare.None，锁不住
+
+        var path = Path.Combine(_base, "locked.txt");
+        using (var fs = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None))
+        {
+            fs.SetLength(100);
+            var result = NewTool().ExecuteAsync("""{"path":"locked.txt"}""").GetAwaiter().GetResult();
+
+            Assert.StartsWith("error:", result);   // 读被占用文件 → error 观察，而非异常冒泡
+        }
+    }
+
+    [Fact]
+    public void Execute_PathWithNulChar_ReturnsErrorInsteadOfThrowing()
+    {
+        var result = NewTool().ExecuteAsync("""{"path":"bad\u0000dir.txt"}""").GetAwaiter().GetResult();
+
+        Assert.StartsWith("error:", result);   // Path.GetFullPath 对 NUL 抛 ArgumentException → 应转为 error
+    }
+
+    [Fact]
+    public void Execute_UnicodeContent_LineNumbersAreCorrect()
+    {
+        Write("c.txt", "第一行\n第二行\nthird");
+        var result = NewTool().ExecuteAsync("""{"path":"c.txt"}""").GetAwaiter().GetResult();
+
+        Assert.Equal("1: 第一行\n2: 第二行\n3: third", result);
+    }
+
+    [Fact]
+    public void Execute_FileExactlyAtMaxBytes_IsReadable()
+    {
+        Write("at.txt", new string('x', (int)ReadFileTool.MaxBytes));
+        var result = NewTool().ExecuteAsync("""{"path":"at.txt"}""").GetAwaiter().GetResult();
+
+        Assert.StartsWith("1: ", result);   // 恰在上限 → 正常读取，不是 error
+    }
+
+    [Fact]
+    public void Execute_BlankLines_PreservedWithNumbers()
+    {
+        Write("b.txt", "a\n\nb");
+        var result = NewTool().ExecuteAsync("""{"path":"b.txt"}""").GetAwaiter().GetResult();
+
+        Assert.Equal("1: a\n2: \n3: b", result);
+    }
+
+    [Fact]
+    public void Execute_LongSingleLine_ReturnedInFull()
+    {
+        Write("long.txt", "x" + new string('y', 5000));
+        var result = NewTool().ExecuteAsync("""{"path":"long.txt"}""").GetAwaiter().GetResult();
+
+        Assert.StartsWith("1: x", result);
+        Assert.Contains(new string('y', 5000), result);   // 读文件不做截断，整行返回
+    }
+
+    [Fact]
+    public void Execute_FileWithOnlyNewline_ReportsOneBlankLine()
+    {
+        Write("nl.txt", "\n");
+        var result = NewTool().ExecuteAsync("""{"path":"nl.txt"}""").GetAwaiter().GetResult();
+
+        Assert.Equal("1: ", result);
+    }
 }

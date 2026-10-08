@@ -171,4 +171,73 @@ public sealed class GlobToolTests : IDisposable
         Assert.Equal("glob", def.Name);
         Assert.True(def.Parameters["properties"]!["pattern"] is not null);
     }
+
+    // ---- 悲观：模式/编码/路径边界 ----
+
+    [Fact]
+    public void Execute_WindowsSeparatorPattern_IsNormalized()
+    {
+        // 模型按 Windows 习惯写 src\*.cs → 应规范成 / 后命中，而不是永远匹配不到。
+        Write("src/a.cs");
+        var result = NewTool().ExecuteAsync("""{"pattern":"src\\*.cs"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("src/a.cs", result);
+    }
+
+    [Fact]
+    public void Execute_QuestionMark_MatchesExactlyOneChar()
+    {
+        Write("a.txt");
+        Write("ab.txt");
+        var result = NewTool().ExecuteAsync("""{"pattern":"?.txt"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("a.txt", result);
+        Assert.DoesNotContain("ab.txt", result);
+    }
+
+    [Fact]
+    public void Execute_UnicodeFilename_IsMatched()
+    {
+        Write("报告.md");
+        var result = NewTool().ExecuteAsync("""{"pattern":"**/*.md"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("报告.md", result);
+    }
+
+    [Fact]
+    public void Execute_PathIsFile_ReturnsError()
+    {
+        Write("file.txt");
+        var result = NewTool().ExecuteAsync("""{"pattern":"**","path":"file.txt"}""").GetAwaiter().GetResult();
+
+        Assert.StartsWith("error:", result);
+        Assert.Contains("文件", result);   // 明确提示"是文件而非目录"
+    }
+
+    [Fact]
+    public void Execute_EmptyDirectory_ReturnsNotFound()
+    {
+        Directory.CreateDirectory(Path.Combine(_base, "empty"));
+        var result = NewTool().ExecuteAsync("""{"pattern":"**","path":"empty"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("未找到", result);
+    }
+
+    [Fact]
+    public void Execute_Dotfiles_AreMatched()
+    {
+        Write(".gitignore");
+        var result = NewTool().ExecuteAsync("""{"pattern":"*"}""").GetAwaiter().GetResult();
+
+        Assert.Contains(".gitignore", result);
+    }
+
+    [Fact]
+    public void Execute_TrailingSlashPattern_IsHarmless()
+    {
+        Write("src/a.cs");
+        var result = NewTool().ExecuteAsync("""{"pattern":"src/"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("未找到", result);   // 目录本身不是文件，不命中；也不报错
+    }
 }

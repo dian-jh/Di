@@ -9,8 +9,8 @@ namespace Core.Tools;
 /// </summary>
 public static class CoreTools
 {
-    /// <summary>创建全部七个核心工具实例（相对路径都以 baseDirectory 为根）。</summary>
-    public static IReadOnlyList<ICoreTool> Create(string baseDirectory) =>
+    /// <summary>创建全部七个核心工具实例（相对路径都以 baseDirectory 为根；pythonExecutable 默认走 PATH 的 python）。</summary>
+    public static IReadOnlyList<ICoreTool> Create(string baseDirectory, string pythonExecutable = "python") =>
     [
         new ReadFileTool(baseDirectory),
         new WriteFileTool(baseDirectory),
@@ -18,15 +18,16 @@ public static class CoreTools
         new GlobTool(baseDirectory),
         new GrepTool(baseDirectory),
         new BashTool(baseDirectory),
-        new PythonTool(),
+        new PythonTool(pythonExecutable),
     ];
 
     /// <summary>七个工具的 ChatTool 定义，传给模型以允许其发起工具调用。</summary>
-    public static IReadOnlyList<ChatTool> Definitions(string baseDirectory) =>
-        Create(baseDirectory).Select(t => t.Definition).ToList();
+    public static IReadOnlyList<ChatTool> Definitions(string baseDirectory, string pythonExecutable = "python") =>
+        Create(baseDirectory, pythonExecutable).Select(t => t.Definition).ToList();
 
     /// <summary>创建按工具名分发的执行器，供 ReAct 循环使用。</summary>
-    public static IToolExecutor CreateExecutor(string baseDirectory) => new Executor(Create(baseDirectory));
+    public static IToolExecutor CreateExecutor(string baseDirectory, string pythonExecutable = "python")
+        => new Executor(Create(baseDirectory, pythonExecutable));
 
     /// <summary>
     /// 工具使用说明：作为 stable_prefix 的一部分注入系统提示，让模型知道有哪七个工具、

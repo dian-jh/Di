@@ -51,5 +51,10 @@ public sealed class PythonTool : ICoreTool
         {
             return "error: arguments 不是合法 JSON";
         }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            // 非法路径字符（如 NUL）：路径解析会抛 ArgumentException。
+            return $"error: 路径参数非法: {ex.Message}";
+        }
     }
 }

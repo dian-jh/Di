@@ -90,14 +90,21 @@ internal static class ToolHelpers
         return true;
     }
 
-    /// <summary>递归列出目录下所有文件；无权限/被占用的子目录跳过，不让整个遍历失败。</summary>
+    /// <summary>
+    /// 递归列出目录下所有文件；无权限/被占用的子目录跳过，不让整个遍历失败。
+    /// 符号链接/联接（junction）子目录被跳过：Windows 常见 junction 环（如指向祖先目录）
+    /// 会让朴素遍历无限循环。搜索起点本身若是链接仍正常遍历（用户可能把工作区建在链接上）。
+    /// </summary>
     public static IEnumerable<string> EnumerateFiles(string root)
     {
-        var pending = new Stack<string>();
-        pending.Push(root);
+        var pending = new Stack<(string Dir, bool IsRoot)>();
+        pending.Push((root, true));
         while (pending.Count > 0)
         {
-            var dir = pending.Pop();
+            var (dir, isRoot) = pending.Pop();
+            if (!isRoot && IsLink(dir))
+                continue;   // 链接目录不深入，杜绝目录环
+
             string[] dirs;
             string[] files;
             try
@@ -112,7 +119,23 @@ internal static class ToolHelpers
             foreach (var file in files)
                 yield return file;
             foreach (var sub in dirs)
-                pending.Push(sub);
+                pending.Push((sub, false));
+        }
+    }
+
+    /// <summary>判断目录是否为符号链接/联接（junction）——深入会带来目录环，遍历时跳过。</summary>
+    private static bool IsLink(string dir)
+    {
+        try
+        {
+            // Windows：ReparsePoint 属性；Unix：DirectoryInfo.LinkTarget 非空即符号链接。
+            // 属性读不到（无权限等）时保守返回 true 跳过，避免死循环。
+            return (File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0
+                || new DirectoryInfo(dir).LinkTarget is not null;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            return true;
         }
     }
 

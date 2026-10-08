@@ -42,4 +42,26 @@ public sealed class GlobMatcherTests
         Assert.True(GlobMatcher.IsMatch("a+b.c", "a+b.c", ignoreCase: false));
         Assert.False(GlobMatcher.IsMatch("a+b.c", "axbxc", ignoreCase: false));
     }
+
+    // ---- 悲观：模式极端情况 ----
+
+    [Theory]
+    [InlineData("src\\*.cs", "src/a.cs", true)]    // Windows 反斜杠被规范成 /
+    [InlineData("src\\*.cs", "src/deep/a.cs", false)]
+    [InlineData("a**b", "ab", true)]               // ** 在段中间跨目录
+    [InlineData("a**b", "a/x/b", true)]
+    [InlineData("a**b", "acb", true)]
+    [InlineData("", "", true)]                     // 空模式只匹配空路径
+    [InlineData("", "a", false)]
+    [InlineData("a[].c", "a[].c", true)]           // 方括号按字面
+    [InlineData("a[].c", "a.c", false)]
+    [InlineData("**/", "x/y", false)]              // 只有 **/ 时不匹配任何文件
+    [InlineData("?.txt", "a.txt", true)]
+    [InlineData("?a", ".a", true)]                 // ? 可以匹配点
+    [InlineData("?.txt", ".txt", false)]           // 模式 5 字符 vs 路径 4 字符，不匹配
+    [InlineData("?.txt", "ab.txt", false)]
+    public void IsMatch_EdgePatterns(string pattern, string path, bool expected)
+    {
+        Assert.Equal(expected, GlobMatcher.IsMatch(pattern, path, ignoreCase: false));
+    }
 }

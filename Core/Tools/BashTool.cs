@@ -45,13 +45,27 @@ public sealed class BashTool : ICoreTool
             if (!Directory.Exists(workingDir))
                 return $"error: 工作目录不存在: {workingDirArg}";
 
+            // Windows 默认 shell（cmd.exe）必须手工构造 /d /s /c "命令"：
+            // ArgumentList 会把命令里内嵌的引号转义成 \"，而 cmd 不认这种转义（反斜杠被原样输出）。
+            // /s 让 cmd 无条件剥离首尾各一层引号，命令里的 " & | > 等特殊字符原样生效。
+            if (OperatingSystem.IsWindows() && _shell.IsPlatformDefault)
+            {
+                var result = await ProcessRunner.RunAsync(_shell.FileName, [], workingDir, _timeout, cancellationToken,
+                    rawArguments: $"/d /s /c \"{command!}\"");
+                return result.ToObservation();
+            }
+
             var args = new List<string>(_shell.PrefixArguments) { command! };
-            var result = await ProcessRunner.RunAsync(_shell.FileName, args, workingDir, _timeout, cancellationToken);
-            return result.ToObservation();
+            var unixResult = await ProcessRunner.RunAsync(_shell.FileName, args, workingDir, _timeout, cancellationToken);
+            return unixResult.ToObservation();
         }
         catch (JsonException)
         {
             return "error: arguments 不是合法 JSON";
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            return $"error: 路径参数非法: {ex.Message}";
         }
     }
 }

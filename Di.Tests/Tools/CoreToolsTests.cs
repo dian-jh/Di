@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Core.AgentLoop;
 using Core.Llm;
 using Core.Tools;
@@ -14,7 +13,7 @@ public sealed class CoreToolsTests : IDisposable
     private static readonly string[] ExpectedNames =
         ["read_file", "write_file", "edit_file", "glob", "grep", "bash", "python"];
 
-    private static readonly bool PythonAvailable = ProbePython();
+    private static readonly string? PythonExe = TestEnvironment.FindPython();
 
     private readonly string _base = Directory.CreateTempSubdirectory("di-core-").FullName;
 
@@ -91,10 +90,11 @@ public sealed class CoreToolsTests : IDisposable
     [Fact]
     public async Task Executor_PythonRunsCode()
     {
-        if (!PythonAvailable) return;
-        var executor = CoreTools.CreateExecutor(_base);
+        if (PythonExe is null) return;
+        var executor = CoreTools.CreateExecutor(_base, PythonExe);
         var result = await executor.ExecuteAsync(Call("python", """{"code":"print(3 + 4)"}"""));
 
+        Assert.StartsWith("exit: 0", result);
         Assert.Contains("7", result);
     }
 
@@ -130,25 +130,4 @@ public sealed class CoreToolsTests : IDisposable
     }
 
     private static ToolCallBlock Call(string name, string arguments) => new("test-1", name, arguments);
-
-    private static bool ProbePython()
-    {
-        try
-        {
-            using var p = Process.Start(new ProcessStartInfo("python", "--version")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            });
-            if (p is null)
-                return false;
-            p.WaitForExit(5000);
-            return p.ExitCode == 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
 }

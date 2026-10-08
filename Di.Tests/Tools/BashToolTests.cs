@@ -167,4 +167,81 @@ public sealed class BashToolTests : IDisposable
         Assert.Equal("bash", def.Name);
         Assert.True(def.Parameters["properties"]!["command"] is not null);
     }
+
+    // ---- 悲观：引号/特殊字符/工作目录 ----
+
+    [Fact]
+    public async Task Execute_CommandWithDoubleQuotes_NoBackslashCorruption()
+    {
+        // Windows 上 cmd.exe 必须手工构造 /d /s /c "命令"；ArgumentList 的 \" 转义
+        // cmd 不认，会把反斜杠原样输出（bug：echo "hi" → \"hi\"）。任何平台都不允许 \" 污染。
+        var result = await new BashTool(_base).ExecuteAsync(Args("echo \"hello world\""));
+
+        Assert.StartsWith("exit: 0", result);
+        Assert.Contains("hello world", result);
+        Assert.DoesNotContain("\\\"", result);
+    }
+
+    [Fact]
+    public async Task Execute_CommandWithNestedQuotes_PreservesMeaning()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;   // sh 会剥掉双引号，语义不同；这里只验证 Windows cmd。
+
+        var result = await new BashTool(_base).ExecuteAsync(Args("echo it's \"a b\" here"));
+
+        Assert.Contains("it's", result);
+        Assert.Contains("\"a b\"", result);   // cmd 保留内层引号
+        Assert.DoesNotContain("\\", result);
+    }
+
+    [Fact]
+    public async Task Execute_CommandWithAmpersand_RunsBothCommands()
+    {
+        var result = await new BashTool(_base).ExecuteAsync(Args("echo first & echo second"));
+
+        Assert.StartsWith("exit: 0", result);
+        Assert.Contains("first", result);
+        Assert.Contains("second", result);
+    }
+
+    [Fact]
+    public async Task Execute_CommandWithRedirection_WritesFileInWorkingDir()
+    {
+        var result = await new BashTool(_base).ExecuteAsync(Args("echo marker > bash-marker.txt"));
+
+        Assert.StartsWith("exit: 0", result);
+        var path = Path.Combine(_base, "bash-marker.txt");
+        Assert.True(File.Exists(path), $"期望文件 {path} 被创建");
+        Assert.Contains("marker", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public async Task Execute_CommandWithEnvVarExpansion_Works()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;   // sh 的变量语法不同（$PWD），只验证 cmd 的 %CD%。
+
+        var result = await new BashTool(_base).ExecuteAsync(Args("echo %CD%"));
+
+        Assert.StartsWith("exit: 0", result);
+        Assert.Contains(_base, result);   // %CD% 应展开为当前工作目录
+    }
+
+    [Fact]
+    public async Task Execute_EmptyCommand_ReturnsError()
+    {
+        var result = await new BashTool(_base).ExecuteAsync("""{"command":""}""");
+
+        Assert.StartsWith("error:", result);
+        Assert.Contains("command", result);
+    }
+
+    [Fact]
+    public async Task Execute_WorkingDirWithIllegalChar_ReturnsError()
+    {
+        var result = await new BashTool(_base).ExecuteAsync("""{"command":"echo x","working_dir":"bad\u0000dir"}""");
+
+        Assert.StartsWith("error:", result);   // 不应抛 ArgumentException
+    }
 }
