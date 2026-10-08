@@ -30,11 +30,11 @@ public static class CoreTools
     /// <summary>
     /// 七个工具的 ChatTool 定义，传给模型以允许其发起工具调用。
     /// 与 <see cref="CreateExecutor"/> 保持一致：bash 走共享持久化会话（定义里不含 working_dir）。
-    /// ShellSession 惰性启动进程，这里只构造定义，不会真正拉起 shell。
+    /// 会话是惰性的（不执行命令不会拉起进程）；这里只需要 Schema，取完定义立即释放，不留孤儿会话。
     /// </summary>
     public static IReadOnlyList<ChatTool> Definitions(string baseDirectory, string pythonExecutable = "python")
     {
-        var session = new ShellSession(baseDirectory);
+        using var session = new ShellSession(baseDirectory);
         return CreateTools(baseDirectory, pythonExecutable, session).Select(t => t.Definition).ToList();
     }
 
