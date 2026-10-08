@@ -17,32 +17,46 @@ public sealed class AgentRunner : IAgentRunner
     private readonly IEventBus _eventBus;
     private readonly IReadOnlyList<ChatTool> _tools;
     private readonly IToolExecutor _toolExecutor;
+    private readonly string? _workingDirectory;
 
     public AgentRunner(
         Func<string, IChatModel> modelFactory,
         IToolExecutor toolExecutor,
         AgentLoopOptions options,
         IEventBus eventBus,
-        IReadOnlyList<ChatTool>? tools = null)
+        IReadOnlyList<ChatTool>? tools = null,
+        string? workingDirectory = null)
     {
         _modelFactory = modelFactory ?? throw new ArgumentNullException(nameof(modelFactory));
         _toolExecutor = toolExecutor ?? throw new ArgumentNullException(nameof(toolExecutor));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
         _tools = tools ?? [];
+        _workingDirectory = workingDirectory;
     }
 
     public string CurrentModel { get; set; } = "deepseek-flash";
 
-    public Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
+    public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
     {
         var model = _modelFactory(CurrentModel);
         var react = new ReAct(model, _options, _eventBus);
-        return react.RunStreamingAsync(new AgentRequest
+
+        // 环境感知快照：每个回合开始时刷新（git 状态在回合之间会变），注入为追加系统上下文。
+        // 尽力而为——git 缺失/出错只导致快照退化为"仅工作目录"，绝不阻塞回合。
+        string? systemContext = null;
+        if (!string.IsNullOrWhiteSpace(_workingDirectory))
+        {
+            systemContext = await EnvironmentSnapshot.CaptureAsync(_workingDirectory, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return await react.RunStreamingAsync(new AgentRequest
         {
             UserMessage = userMessage,
             Tools = _tools,
             ToolExecutor = _toolExecutor,
-        }, cancellationToken);
+            SystemContext = systemContext,
+        }, cancellationToken).ConfigureAwait(false);
     }
 }

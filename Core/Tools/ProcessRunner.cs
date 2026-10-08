@@ -53,7 +53,8 @@ internal static class ProcessRunner
         string workingDirectory,
         TimeSpan timeout,
         CancellationToken cancellationToken,
-        string? rawArguments = null)
+        string? rawArguments = null,
+        Encoding? outputEncoding = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -63,9 +64,10 @@ internal static class ProcessRunner
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
-            // 显式用 OEM 代码页解码，避免按 Console.OutputEncoding（真实 CLI 里是 UTF-8）解出乱码。
-            StandardOutputEncoding = ProcessEncoding.ChildOutput,
-            StandardErrorEncoding = ProcessEncoding.ChildOutput,
+            // 默认显式用 OEM 代码页解码，避免按 Console.OutputEncoding（真实 CLI 里是 UTF-8）解出乱码。
+            // 个别原生写 UTF-8 的工具（如 git）可传 outputEncoding 覆盖。
+            StandardOutputEncoding = outputEncoding ?? ProcessEncoding.ChildOutput,
+            StandardErrorEncoding = outputEncoding ?? ProcessEncoding.ChildOutput,
         };
         if (rawArguments is not null)
         {

@@ -82,7 +82,7 @@ public sealed class ReAct
             {
                 var modelRequest = new ModelRequest
                 {
-                    Messages = BuildContext(trajectory),
+                    Messages = BuildContext(request, trajectory),
                     Tools = request.Tools,
                     ReasoningEffort = _options.ReasoningEffort,
                     MaxTokens = _options.MaxTokens,
@@ -176,15 +176,21 @@ public sealed class ReAct
             ?? throw new LlmException("模型流在结束前中断，未收到 Completed。", LlmErrorCodes.BadResponse);
     }
 
-    /// <summary>稳定前缀 + 轨迹。工具定义经 <see cref="ModelRequest.Tools"/> 传递。</summary>
-    private IReadOnlyList<ChatMessage> BuildContext(IReadOnlyList<ChatMessage> trajectory)
+    /// <summary>stable_prefix + 请求级系统上下文（环境快照）+ 轨迹。工具定义经 <see cref="ModelRequest.Tools"/> 传递。</summary>
+    private IReadOnlyList<ChatMessage> BuildContext(AgentRequest request, IReadOnlyList<ChatMessage> trajectory)
     {
-        if (string.IsNullOrWhiteSpace(_options.SystemPrompt))
+        // 合并成单条 system 消息：stable_prefix 在前，追加系统上下文（环境快照）在后。
+        var parts = new List<string>(2);
+        if (!string.IsNullOrWhiteSpace(_options.SystemPrompt))
+            parts.Add(_options.SystemPrompt);
+        if (!string.IsNullOrWhiteSpace(request.SystemContext))
+            parts.Add(request.SystemContext);
+        if (parts.Count == 0)
             return trajectory;
 
         var context = new List<ChatMessage>(trajectory.Count + 1)
         {
-            ChatMessage.System(_options.SystemPrompt),
+            ChatMessage.System(string.Join("\n\n", parts)),
         };
         context.AddRange(trajectory);
         return context;

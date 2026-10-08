@@ -50,7 +50,8 @@ var runner = new AgentRunner(
         MaxIterations = 8,
     },
     provider.GetRequiredService<IEventBus>(),
-    CoreTools.Definitions(workspace));
+    CoreTools.Definitions(workspace),
+    workingDirectory: workspace);
 
 var repl = new Repl(
     runner,

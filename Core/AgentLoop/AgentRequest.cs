@@ -8,6 +8,12 @@ public sealed class AgentRequest
     /// <summary>用户的请求消息，作为 trajectory 的起点。</summary>
     public required string UserMessage { get; init; }
 
+    /// <summary>
+    /// 可选的追加系统上下文（如环境快照），置于 stable_prefix 之后、历史之前，随每次请求刷新。
+    /// null = 无。
+    /// </summary>
+    public string? SystemContext { get; init; }
+
     /// <summary>本次运行中模型可以调用的工具。</summary>
     public IReadOnlyList<ChatTool>? Tools { get; init; }
 

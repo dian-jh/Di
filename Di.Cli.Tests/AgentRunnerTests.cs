@@ -50,6 +50,34 @@ public sealed class AgentRunnerTests
         Assert.Single(observer.Events.OfType<AgentLoopEvent.TurnCompleted>());
     }
 
+    [Fact]
+    public async Task RunAsync_WithWorkingDirectory_InjectsEnvironmentSnapshot()
+    {
+        var dir = Directory.CreateTempSubdirectory("di-runner-").FullName;
+        try
+        {
+            var model = new FakeChatModel();
+            var runner = new AgentRunner(
+                _ => model,
+                new FakeToolExecutor(),
+                new AgentLoopOptions { SystemPrompt = "sys" },
+                new InMemoryEventBus(),
+                workingDirectory: dir);
+
+            await runner.RunAsync("hi");
+
+            var request = Assert.Single(model.Requests);
+            var system = Assert.IsType<SystemMessage>(request.Messages[0]);
+            Assert.Contains("sys", system.Text);
+            Assert.Contains("工作目录", system.Text);
+            Assert.Contains(dir, system.Text);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
     private sealed class FakeChatModel : IChatModel
     {
         public List<ModelRequest> Requests { get; } = [];

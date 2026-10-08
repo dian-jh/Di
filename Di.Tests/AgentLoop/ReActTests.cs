@@ -21,12 +21,14 @@ public sealed class ReActTests
         string userMessage = "hello",
         IToolExecutor? executor = null,
         IToolValidator? validator = null,
-        IReadOnlyList<ChatTool>? tools = null) => new()
+        IReadOnlyList<ChatTool>? tools = null,
+        string? systemContext = null) => new()
     {
         UserMessage = userMessage,
         ToolExecutor = executor ?? new FakeToolExecutor(_ => ""),
         Validator = validator,
         Tools = tools,
+        SystemContext = systemContext,
     };
 
     private static ModelResponse Response(string? text = null, params ToolCallBlock[] toolCalls) => new()
@@ -86,6 +88,37 @@ public sealed class ReActTests
 
         var request = Assert.Single(model.Requests);
         Assert.All(request.Messages, m => Assert.IsNotType<SystemMessage>(m));
+    }
+
+    [Fact]
+    public async Task RunAsync_SystemContext_IsMergedIntoSystemMessage()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("ok"));
+        var loop = new ReAct(model, Options());
+
+        await loop.RunAsync(Request(systemContext: "## 环境\n- 工作目录: /tmp/x"));
+
+        var request = Assert.Single(model.Requests);
+        Assert.Equal(2, request.Messages.Count);   // [system, user]，system 仍是单条
+        var system = Assert.IsType<SystemMessage>(request.Messages[0]);
+        Assert.Contains(SystemPrompt, system.Text);
+        Assert.Contains("## 环境", system.Text);
+        Assert.Contains("/tmp/x", system.Text);
+    }
+
+    [Fact]
+    public async Task RunAsync_SystemContextWithoutSystemPrompt_IsSystemMessage()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("ok"));
+        var loop = new ReAct(model, new AgentLoopOptions { SystemPrompt = "", MaxIterations = 8 });
+
+        await loop.RunAsync(Request(systemContext: "snapshot only"));
+
+        var request = Assert.Single(model.Requests);
+        var system = Assert.IsType<SystemMessage>(request.Messages[0]);
+        Assert.Equal("snapshot only", system.Text);
     }
 
     [Fact]

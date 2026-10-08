@@ -21,6 +21,35 @@ internal static class TestEnvironment
         return null;
     }
 
+    /// <summary>找到一个可用的 git 路径/命令；找不到返回 null（testhost PATH 可能不含 git）。</summary>
+    public static string? FindGit()
+    {
+        foreach (var candidate in GitCandidates())
+        {
+            if (TryRunVersion(candidate, "--version"))
+                return candidate;
+        }
+        return null;
+    }
+
+    private static IEnumerable<string> GitCandidates()
+    {
+        yield return "git";
+        if (OperatingSystem.IsWindows())
+        {
+            foreach (var root in new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "cmd"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Git", "cmd"),
+            })
+            {
+                var exe = Path.Combine(root, "git.exe");
+                if (File.Exists(exe))
+                    yield return exe;
+            }
+        }
+    }
+
     private static IEnumerable<string> Candidates()
     {
         yield return "python";
@@ -50,11 +79,11 @@ internal static class TestEnvironment
         }
     }
 
-    private static bool TryRunVersion(string exe)
+    private static bool TryRunVersion(string exe, string versionArg = "--version")
     {
         try
         {
-            using var p = Process.Start(new ProcessStartInfo(exe, "--version")
+            using var p = Process.Start(new ProcessStartInfo(exe, versionArg)
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
