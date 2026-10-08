@@ -1,5 +1,7 @@
 <Solution>
   <Project Path="Common/Common.csproj" />
   <Project Path="Core/Core.csproj" />
+  <Project Path="Di.Cli/Di.Cli.csproj" />
   <Project Path="Di.Tests/Di.Tests.csproj" />
+  <Project Path="Di.Cli.Tests/Di.Cli.Tests.csproj" />
 </Solution>
