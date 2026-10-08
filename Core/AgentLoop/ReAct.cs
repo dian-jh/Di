@@ -1,3 +1,4 @@
+using Common.Events;
 using Core.Llm;
 
 namespace Core.AgentLoop;
@@ -27,7 +28,8 @@ namespace Core.AgentLoop;
 /// <list type="bullet">
 /// <item><see cref="IToolValidator"/> —— 执行前校验（安全/权限挂点）。</item>
 /// <item><see cref="IToolExecutor"/> —— 工具如何执行。</item>
-/// <item><see cref="IAgentLoopObserver"/> —— 运行过程事件（日志/遥测挂点，MVP 可空）。</item>
+/// <item><see cref="IEventBus"/> —— 运行过程事件经事件总线派发（日志/遥测/UI 挂点，可空则不发）。
+///     发布是旁路的：不阻塞循环、单个坏订阅者不拖垮 loop（总线负责异常隔离）。</item>
 /// </list>
 ///
 /// 故障语义：
@@ -41,13 +43,13 @@ public sealed class ReAct
 {
     private readonly IChatModel _model;
     private readonly AgentLoopOptions _options;
-    private readonly IAgentLoopObserver? _observer;
+    private readonly IEventBus? _eventBus;
 
-    public ReAct(IChatModel model, AgentLoopOptions options, IAgentLoopObserver? observer = null)
+    public ReAct(IChatModel model, AgentLoopOptions options, IEventBus? eventBus = null)
     {
         _model = model ?? throw new ArgumentNullException(nameof(model));
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _observer = observer;
+        _eventBus = eventBus;
     }
 
     public async Task<AgentResult> RunAsync(AgentRequest request, CancellationToken cancellationToken = default)
@@ -192,5 +194,6 @@ public sealed class ReAct
             .Select(ChatMessageExtensions.GetText)
             .LastOrDefault() ?? string.Empty;
 
-    private void Emit(AgentLoopEvent evt) => _observer?.OnEvent(evt);
+    /// <summary>发布观察事件到总线（旁路、fire-and-forget；不阻塞循环，也不等待订阅者完成）。</summary>
+    private void Emit(AgentLoopEvent evt) => _ = _eventBus?.PublishAsync(evt);
 }

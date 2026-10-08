@@ -1,3 +1,4 @@
+using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
 
@@ -64,10 +65,14 @@ internal sealed class RejectingValidator : IToolValidator
     public ToolCallBlock Validate(ToolCallBlock call) => throw new InvalidOperationException("拒绝执行");
 }
 
-/// <summary>记录全部观察事件。</summary>
-internal sealed class RecordingObserver : IAgentLoopObserver
+/// <summary>订阅事件总线并记录全部 AgentLoopEvent 的观察者。</summary>
+internal sealed class RecordingObserver : IEventHandler<AgentLoopEvent>
 {
     public List<AgentLoopEvent> Events { get; } = [];
 
-    public void OnEvent(AgentLoopEvent evt) => Events.Add(evt);
+    public Task HandleAsync(AgentLoopEvent evt, CancellationToken cancellationToken = default)
+    {
+        Events.Add(evt);
+        return Task.CompletedTask;
+    }
 }

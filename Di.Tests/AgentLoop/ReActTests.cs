@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
 
@@ -286,8 +287,7 @@ public sealed class ReActTests
         model.Enqueue(_ => Response("need data", new ToolCallBlock("c1", "echo", "{}")));
         model.Enqueue(_ => Response("done"));
         var executor = new FakeToolExecutor(call => "ok");
-        var observer = new RecordingObserver();
-        var loop = new ReAct(model, Options(), observer);
+        var (loop, observer) = LoopWithObserver(model);
 
         await loop.RunAsync(Request(executor: executor));
 
@@ -307,8 +307,7 @@ public sealed class ReActTests
         model.Enqueue(_ => Response("x", new ToolCallBlock("c1", "echo", "{}")));
         model.Enqueue(_ => Response("recovered"));
         var executor = new FakeToolExecutor(_ => throw new InvalidOperationException("kaboom"));
-        var observer = new RecordingObserver();
-        var loop = new ReAct(model, Options(), observer);
+        var (loop, observer) = LoopWithObserver(model);
 
         var result = await loop.RunAsync(Request(executor: executor));
 
@@ -323,14 +322,84 @@ public sealed class ReActTests
     {
         var model = new FakeChatModel();
         model.Enqueue(_ => throw new LlmException("no key", LlmErrorCodes.MissingCredential));
-        var observer = new RecordingObserver();
-        var loop = new ReAct(model, Options(), observer);
+        var (loop, observer) = LoopWithObserver(model);
 
         var result = await loop.RunAsync(Request());
 
         Assert.Equal(AgentStopReason.Error, result.StopReason);
         var runFailed = Assert.Single(observer.Events.OfType<AgentLoopEvent.RunFailed>());
         Assert.Equal(LlmErrorCodes.MissingCredential, runFailed.Failure.Code);
+    }
+
+    [Fact]
+    public async Task RunAsync_PublishesTurnAndToolEventsToBus()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("need data", new ToolCallBlock("c1", "echo", "{}")));
+        model.Enqueue(_ => Response("done"));
+        var executor = new FakeToolExecutor(call => "ok");
+        var (loop, observer) = LoopWithObserver(model);
+
+        await loop.RunAsync(Request(executor: executor, tools: [Tool("echo")]));
+
+        Assert.Equal(4, observer.Events.Count);
+        Assert.IsType<AgentLoopEvent.TurnCompleted>(observer.Events[0]);
+        Assert.IsType<AgentLoopEvent.ToolStarted>(observer.Events[1]);
+        Assert.IsType<AgentLoopEvent.ToolCompleted>(observer.Events[2]);
+        Assert.IsType<AgentLoopEvent.TurnCompleted>(observer.Events[3]);
+    }
+
+    [Fact]
+    public async Task RunAsync_BaseConsumerReceivesFullTurnInOrder()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("need data", new ToolCallBlock("c1", "echo", "{}")));
+        model.Enqueue(_ => Response("done"));
+        var executor = new FakeToolExecutor(call => "x");
+        var bus = new InMemoryEventBus();
+        using var consumer = bus.CreateConsumer<AgentLoopEvent>();
+        var loop = new ReAct(model, Options(), bus);
+
+        var result = await loop.RunAsync(Request(executor: executor, tools: [Tool("echo")]));
+
+        var events = new List<AgentLoopEvent>();
+        while (consumer.TryRead() is { } e)
+            events.Add(e);
+        Assert.Equal(4, events.Count);   // TurnCompleted → ToolStarted → ToolCompleted → TurnCompleted
+        Assert.Equal(AgentStopReason.Answer, result.StopReason);
+    }
+
+    [Fact]
+    public async Task RunAsync_PublishesRunFailedOnNonRetryableError()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => throw new LlmException("no key", LlmErrorCodes.MissingCredential));
+        var (loop, observer) = LoopWithObserver(model);
+
+        var result = await loop.RunAsync(Request());
+
+        Assert.Equal(AgentStopReason.Error, result.StopReason);
+        var runFailed = Assert.Single(observer.Events.OfType<AgentLoopEvent.RunFailed>());
+        Assert.Equal(LlmErrorCodes.MissingCredential, runFailed.Failure.Code);
+    }
+
+    [Fact]
+    public void AgentLoopEvent_IsEvent_WithIdAndCreatedAt()
+    {
+        var evt = new AgentLoopEvent.TurnCompleted(1, TokenUsage.Zero, new FinishReason.Stop());
+
+        Assert.IsAssignableFrom<Event>(evt);
+        Assert.NotEqual(Guid.Empty, evt.Id);
+        Assert.True(evt.CreatedAt > DateTimeOffset.UnixEpoch);
+    }
+
+    /// <summary>创建订阅了 RecordingObserver 的总线，并把 ReAct 接到总线上。</summary>
+    private static (ReAct Loop, RecordingObserver Observer) LoopWithObserver(FakeChatModel model, AgentLoopOptions? options = null)
+    {
+        var bus = new InMemoryEventBus();
+        var observer = new RecordingObserver();
+        bus.Subscribe(observer);
+        return (new ReAct(model, options ?? Options(), bus), observer);
     }
 
     private static ModelResponse ResponseWithUsage(string text, TokenUsage usage) => new()

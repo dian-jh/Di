@@ -1,18 +1,13 @@
+using Common.Events;
 using Core.Llm;
 
 namespace Core.AgentLoop;
 
 /// <summary>
-/// Agent 循环运行事件（日志 / 遥测 / 审计的挂点）。
-/// MVP 阶段为可空观察者：不注入则不产生任何事件。
+/// 一次循环运行中产生的观察事件（经事件总线派发，供日志 / 遥测 / CLI UI 订阅或消费）。
+/// 继承 <see cref="Event"/> 获得 Id / 创建时间 / 关联 ID，可按基类订阅或消费（多态派发）。
 /// </summary>
-public interface IAgentLoopObserver
-{
-    void OnEvent(AgentLoopEvent evt);
-}
-
-/// <summary>一次循环运行中产生的观察事件。</summary>
-public abstract record AgentLoopEvent
+public abstract record AgentLoopEvent : Event
 {
     /// <summary>一次模型调用完成（含累计用量与停止原因）。</summary>
     public sealed record TurnCompleted(int Iteration, TokenUsage Usage, FinishReason FinishReason) : AgentLoopEvent;

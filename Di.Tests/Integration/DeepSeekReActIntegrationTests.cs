@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
 using Microsoft.Extensions.Configuration;
@@ -34,6 +35,8 @@ public sealed class DeepSeekReActIntegrationTests
             "deepseek",
             "deepseek-flash");
 
+        var bus = new InMemoryEventBus();
+        bus.Subscribe(new ConsoleObserver());
         var react = new ReAct(model, new AgentLoopOptions
         {
             SystemPrompt =
@@ -41,7 +44,7 @@ public sealed class DeepSeekReActIntegrationTests
             MaxIterations = 6,
             MaxTokens = 8192,
             ReasoningEffort = "high",
-        }, new ConsoleObserver());
+        }, bus);
 
         var result = await react.RunAsync(new AgentRequest
         {
@@ -75,10 +78,10 @@ public sealed class DeepSeekReActIntegrationTests
         return ChatTool.Create(name, description, parameters);
     }
 
-    /// <summary>把观察事件打到控制台，便于人工观察 ReAct 循环过程。</summary>
-    private sealed class ConsoleObserver : IAgentLoopObserver
+    /// <summary>订阅事件总线，把观察事件打到控制台，便于人工观察 ReAct 循环过程。</summary>
+    private sealed class ConsoleObserver : IEventHandler<AgentLoopEvent>
     {
-        public void OnEvent(AgentLoopEvent evt)
+        public Task HandleAsync(AgentLoopEvent evt, CancellationToken cancellationToken = default)
         {
             switch (evt)
             {
@@ -95,6 +98,7 @@ public sealed class DeepSeekReActIntegrationTests
                     Console.WriteLine($"  ✗ run failed: [{f.Failure.Code}] {f.Failure.Message}");
                     break;
             }
+            return Task.CompletedTask;
         }
     }
 
