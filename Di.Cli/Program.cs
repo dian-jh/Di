@@ -34,7 +34,10 @@ catch (InvalidOperationException ex)
     return 1;
 }
 
-Func<string, IChatModel> modelFactory = name => new ChatModelClient(llm, "deepseek", name);
+// 模型工厂：默认套上重试装饰器——限流/超时/5xx 等可重试故障按指数退避重试（尊重 Retry-After），
+// 对 ReAct 透明。重试耗尽后异常原样上抛（ReAct 会以干净错误结束回合）。
+Func<string, IChatModel> modelFactory = name =>
+    new RetryingChatModel(new ChatModelClient(llm, "deepseek", name));
 
 var workspace = Directory.GetCurrentDirectory();
 
