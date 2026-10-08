@@ -11,12 +11,44 @@ namespace Di.Cli;
 public sealed class EventRenderer
 {
     private readonly TextWriter _output;
+    private readonly bool _useAnsi;
     private bool _lineOpen;   // 当前行是否有未换行的流式文本
+    private bool _statusShown;   // 是否正在显示"进行中"状态行（等待首个内容将其擦除）
 
-    public EventRenderer(TextWriter output) => _output = output;
+    public EventRenderer(TextWriter output, bool useAnsi = true)
+    {
+        _output = output ?? throw new ArgumentNullException(nameof(output));
+        _useAnsi = useAnsi;
+    }
+
+    /// <summary>
+    /// 显示一条"进行中"状态行（如"正在请求模型…"）。首个事件/结果渲染时会被擦除。
+    /// 请求可能在几秒内无任何事件（网络延迟、模型思考），没有这行用户会以为程序卡死。
+    /// </summary>
+    public void ShowStatus(string text)
+    {
+        _output.WriteLine(text);
+        _output.Flush();
+        _statusShown = true;
+    }
+
+    /// <summary>
+    /// 清除状态行。正常路径由 <see cref="Render"/> / <see cref="RenderResult"/> 自动调用；
+    /// 回合异常路径（runner 直接抛错）需要显式调用，避免"正在请求模型…"残留。
+    /// 非 ANSI（输出重定向）时状态行已自带换行，无需清行。
+    /// </summary>
+    public void ClearStatus()
+    {
+        if (!_statusShown)
+            return;
+        _statusShown = false;
+        if (_useAnsi)
+            _output.Write("\r\x1b[2K");   // 回到行首 + 整行清空，覆盖状态行
+    }
 
     public void Render(AgentLoopEvent evt)
     {
+        ClearStatus();
         switch (evt)
         {
             case AgentLoopEvent.TextDelta d:
@@ -44,6 +76,7 @@ public sealed class EventRenderer
 
     public void RenderResult(AgentResult result)
     {
+        ClearStatus();
         CloseLine();
         _output.WriteLine();
 

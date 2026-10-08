@@ -24,7 +24,7 @@ public sealed class Repl
         _reader = reader ?? throw new ArgumentNullException(nameof(reader));
         _output = output ?? throw new ArgumentNullException(nameof(output));
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _renderer = new EventRenderer(output);
+        _renderer = new EventRenderer(output, options.UseAnsi);
     }
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
@@ -64,6 +64,9 @@ public sealed class Repl
 
         var renderTask = RenderAsync(consumer, renderCts.Token);
 
+        // 模型首个输出可能延迟数秒（网络/思考），先给出可见反馈，首个事件到达时被擦除。
+        _renderer.ShowStatus(_options.WorkingStatusText);
+
         AgentResult result;
         try
         {
@@ -71,6 +74,7 @@ public sealed class Repl
         }
         catch (Exception ex)
         {
+            _renderer.ClearStatus();
             _output.WriteLine($"  ✗ 运行失败: {ex.Message}");
             renderCts.Cancel();
             await StopRendererAsync(renderTask);

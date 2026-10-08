@@ -21,7 +21,9 @@ public static class DeepSeekServiceCollectionExtensions
     public static IServiceCollection AddDeepSeek(this IServiceCollection services)
     {
         services.AddOptions<DeepSeekAdapterConfig>().BindConfiguration("DeepSeek");
-        services.AddHttpClient(DeepSeekDefaults.ProviderId);
+        services.AddHttpClient(DeepSeekDefaults.ProviderId)
+            .ConfigureHttpClient((sp, client) => client.Timeout =
+                TimeSpan.FromSeconds(sp.GetRequiredService<IOptions<DeepSeekAdapterConfig>>().Value.TimeoutSeconds));
 
         services.AddSingleton<ChatAdapter>(sp =>
         {

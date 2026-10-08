@@ -15,6 +15,9 @@ public static class DeepSeekDefaults
     public const string ProviderId = "deepseek";
     public const string ApiKeyEnvironmentVariable = "DEEPSEEK_API_KEY";
 
+    /// <summary>单次请求超时（秒）。默认 60 —— 网络挂起时快速以 <see cref="LlmErrorCodes.Timeout"/> 失败，而不是让用户无限等待。</summary>
+    public const int RequestTimeoutSeconds = 60;
+
     public const int MaxTokensLimit = 393_216;
     public const int StopLimit = 16;
 

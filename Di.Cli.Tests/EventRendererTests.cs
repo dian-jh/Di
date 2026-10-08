@@ -113,6 +113,75 @@ public sealed class EventRendererTests
     }
 
     [Fact]
+    public void ShowStatus_WritesStatusLineWithNewline()
+    {
+        var output = new StringWriter();
+        var renderer = new EventRenderer(output);
+
+        renderer.ShowStatus("⟳ 思考中…");
+
+        Assert.Equal("⟳ 思考中…" + Environment.NewLine, output.ToString());
+    }
+
+    [Fact]
+    public void Render_AfterShowStatus_ErasesStatusLineThenAppendsContent()
+    {
+        var output = new StringWriter();
+        var renderer = new EventRenderer(output);
+
+        renderer.ShowStatus("⟳ 思考中…");
+        renderer.Render(new AgentLoopEvent.TextDelta("你"));
+        renderer.Render(new AgentLoopEvent.TextDelta("好"));
+
+        Assert.Equal("⟳ 思考中…" + Environment.NewLine + "\r\x1b[2K你好", output.ToString());
+    }
+
+    [Fact]
+    public void Render_AfterShowStatus_WithoutAnsi_ContinuesOnNewLine()
+    {
+        var output = new StringWriter();
+        var renderer = new EventRenderer(output, useAnsi: false);
+
+        renderer.ShowStatus("⟳ 思考中…");
+        renderer.Render(new AgentLoopEvent.TextDelta("你好"));
+
+        Assert.Equal("⟳ 思考中…" + Environment.NewLine + "你好", output.ToString());
+    }
+
+    [Fact]
+    public void RenderResult_AfterShowStatus_ErasesStatusLineBeforeFooter()
+    {
+        var output = new StringWriter();
+        var renderer = new EventRenderer(output);
+        var result = new AgentResult
+        {
+            Answer = "答案",   // 已流式渲染，不应重复打印
+            Trajectory = [ChatMessage.User("hi")],
+            Iterations = 2,
+            StopReason = AgentStopReason.Answer,
+        };
+
+        renderer.ShowStatus("⟳ 思考中…");
+        renderer.RenderResult(result);
+
+        var text = output.ToString();
+        Assert.StartsWith("⟳ 思考中…" + Environment.NewLine + "\r\x1b[2K", text);
+        Assert.Contains("Answer", text);
+        Assert.DoesNotContain("答案", text);
+    }
+
+    [Fact]
+    public void ClearStatus_WithoutShownStatus_WritesNothing()
+    {
+        var output = new StringWriter();
+        var renderer = new EventRenderer(output);
+
+        renderer.ClearStatus();
+
+        Assert.Equal(string.Empty, output.ToString());
+    }
+
+    [Fact]
     public void RenderResult_FinalOutputToolCase_PrintsAnswerBlock()
     {
         var output = new StringWriter();

@@ -22,4 +22,7 @@ public sealed class DeepSeekAdapterConfig
 
     /// <summary>是否启用严格工具模式（需要 beta 端点）。</summary>
     public bool StrictTools { get; set; }
+
+    /// <summary>单次请求超时（秒）。默认 <see cref="DeepSeekDefaults.RequestTimeoutSeconds"/>。</summary>
+    public double TimeoutSeconds { get; set; } = DeepSeekDefaults.RequestTimeoutSeconds;
 }

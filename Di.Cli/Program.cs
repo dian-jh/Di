@@ -18,7 +18,20 @@ services.AddEventBus(o => o.OnHandlerError = (ex, evt) =>
 });
 await using var provider = services.BuildServiceProvider();
 
-var llm = provider.GetRequiredService<ILlmService>();
+ILlmService llm;
+try
+{
+    // 首次解析会触发适配器装配；DeepSeek API Key 缺失时在这里抛 InvalidOperationException。
+    llm = provider.GetRequiredService<ILlmService>();
+}
+catch (InvalidOperationException ex)
+{
+    Console.Error.WriteLine($"模型层初始化失败: {ex.Message}");
+    if (ex.Message.Contains("API Key", StringComparison.OrdinalIgnoreCase))
+        Console.Error.WriteLine("提示：请先设置环境变量 DEEPSEEK_API_KEY 再运行。");
+    return 1;
+}
+
 Func<string, IChatModel> modelFactory = name => new ChatModelClient(llm, "deepseek", name);
 
 var runner = new AgentRunner(
@@ -37,6 +50,11 @@ var repl = new Repl(
     provider.GetRequiredService<IEventBus>(),
     new ConsoleLineReader(),
     Console.Out,
-    new ReplOptions());
+    new ReplOptions
+    {
+        // 输出重定向（管道/文件）时不写 ANSI 控制序列，避免污染捕获输出。
+        UseAnsi = !Console.IsOutputRedirected,
+    });
 
 await repl.RunAsync();
+return 0;

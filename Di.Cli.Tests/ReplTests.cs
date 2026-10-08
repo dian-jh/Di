@@ -111,6 +111,36 @@ public sealed class ReplTests
         Assert.Empty(runner.Messages);
     }
 
+    [Fact]
+    public async Task ChatTurn_ShowsWorkingIndicator_BeforeEvents_AndErasesIt()
+    {
+        var (repl, output, _) = Setup("你好", "/exit");
+
+        await repl.RunAsync();
+
+        var text = output.ToString();
+        var indicator = text.IndexOf("正在请求模型", StringComparison.Ordinal);
+        var answer = text.IndexOf("回答: 你好", StringComparison.Ordinal);
+        Assert.True(indicator >= 0, "回合开始应显示进行中指示器");
+        Assert.True(answer > indicator, "指示器应先于流式文本出现");
+        Assert.Contains("\r\x1b[2K", text);   // 首个内容到达时擦除指示器
+    }
+
+    [Fact]
+    public async Task ChatTurn_WhenRunnerThrows_ErasesIndicatorAndShowsError()
+    {
+        var output = new StringWriter();
+        var bus = new InMemoryEventBus();
+        var runner = new ThrowingRunner();
+        var repl = new Repl(runner, bus, new FakeLineReader("你好", "/exit"), output, new ReplOptions());
+
+        await repl.RunAsync();
+
+        var text = output.ToString();
+        Assert.Contains("\r\x1b[2K", text);      // 异常路径也要清掉指示器
+        Assert.Contains("✗ 运行失败", text);
+    }
+
     private static (Repl Repl, StringWriter Output, FakeRunner Runner) Setup(params string?[] lines)
     {
         var output = new StringWriter();
@@ -154,5 +184,13 @@ public sealed class ReplTests
                 StopReason = AgentStopReason.Answer,
             };
         }
+    }
+
+    private sealed class ThrowingRunner : IAgentRunner
+    {
+        public string CurrentModel { get; set; } = "deepseek-flash";
+
+        public Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("boom");
     }
 }
