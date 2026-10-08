@@ -174,6 +174,9 @@ public sealed class ShellSession : IDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
+            // 显式用 OEM 代码页解码，避免按 Console.OutputEncoding（真实 CLI 里是 UTF-8）解出乱码。
+            StandardOutputEncoding = ProcessEncoding.ChildOutput,
+            StandardErrorEncoding = ProcessEncoding.ChildOutput,
         };
         foreach (var arg in _shell.PrefixArguments)
             psi.ArgumentList.Add(arg);
