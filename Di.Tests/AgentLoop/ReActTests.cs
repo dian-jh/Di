@@ -393,6 +393,70 @@ public sealed class ReActTests
         Assert.True(evt.CreatedAt > DateTimeOffset.UnixEpoch);
     }
 
+    [Fact]
+    public async Task RunStreamingAsync_EmitsTextDeltaEventsAndReturnsAnswer()
+    {
+        var model = new FakeChatModel();
+        model.EnqueueStream(_ => StreamOf(
+            new ModelEvent.TextDelta("你"),
+            new ModelEvent.TextDelta("好"),
+            CompletedResponse("你好", new TokenUsage(10, 5))));
+        var (loop, observer) = LoopWithObserver(model);
+
+        var result = await loop.RunStreamingAsync(Request());
+
+        Assert.Equal("你好", result.Answer);
+        Assert.Equal(AgentStopReason.Answer, result.StopReason);
+        var deltas = observer.Events.OfType<AgentLoopEvent.TextDelta>().Select(d => d.Delta);
+        Assert.Equal(new[] { "你", "好" }, deltas);
+        var turn = Assert.Single(observer.Events.OfType<AgentLoopEvent.TurnCompleted>());
+        Assert.Equal(new TokenUsage(10, 5), turn.Usage);
+    }
+
+    [Fact]
+    public async Task RunStreamingAsync_StreamWithToolCall_ContinuesLoop()
+    {
+        var model = new FakeChatModel();
+        model.EnqueueStream(_ => StreamOf(
+            new ModelEvent.TextDelta("查一下"),
+            new ModelEvent.Completed(new ModelResponse
+            {
+                Message = ChatMessage.Assistant(null, toolCalls: [new ToolCallBlock("c1", "echo", "{}")]),
+                FinishReason = new FinishReason.ToolCalls(),
+                Usage = TokenUsage.Zero,
+            })));
+        model.EnqueueStream(_ => StreamOf(
+            new ModelEvent.Completed(new ModelResponse
+            {
+                Message = ChatMessage.Assistant("完成"),
+                FinishReason = new FinishReason.Stop(),
+                Usage = TokenUsage.Zero,
+            })));
+        var executor = new FakeToolExecutor(call => "x");
+        var (loop, observer) = LoopWithObserver(model);
+
+        var result = await loop.RunStreamingAsync(Request(executor: executor, tools: [Tool("echo")]));
+
+        Assert.Equal("完成", result.Answer);
+        Assert.Equal(2, result.Iterations);
+        Assert.Single(observer.Events.OfType<AgentLoopEvent.ToolStarted>());
+        Assert.Single(observer.Events.OfType<AgentLoopEvent.ToolCompleted>());
+        Assert.Single(observer.Events.OfType<AgentLoopEvent.TextDelta>());
+    }
+
+    private static async IAsyncEnumerable<ModelEvent> StreamOf(params ModelEvent[] events)
+    {
+        foreach (var evt in events)
+            yield return evt;
+    }
+
+    private static ModelEvent.Completed CompletedResponse(string text, TokenUsage? usage = null) => new(new ModelResponse
+    {
+        Message = ChatMessage.Assistant(text),
+        FinishReason = new FinishReason.Stop(),
+        Usage = usage ?? TokenUsage.Zero,
+    });
+
     /// <summary>创建订阅了 RecordingObserver 的总线，并把 ReAct 接到总线上。</summary>
     private static (ReAct Loop, RecordingObserver Observer) LoopWithObserver(FakeChatModel model, AgentLoopOptions? options = null)
     {

@@ -76,13 +76,28 @@ public sealed class EventRendererTests
     }
 
     [Fact]
-    public void RenderResult_WritesAnswerAndMetadata()
+    public void Render_TextDelta_AppendsTextAndClosesOnTurnCompleted()
+    {
+        var output = new StringWriter();
+        var renderer = new EventRenderer(output);
+
+        renderer.Render(new AgentLoopEvent.TextDelta("你"));
+        renderer.Render(new AgentLoopEvent.TextDelta("好"));
+        renderer.Render(new AgentLoopEvent.TurnCompleted(1, TokenUsage.Zero, new FinishReason.Stop()));
+
+        var text = output.ToString();
+        Assert.StartsWith("你好", text);   // 流式追加，不换行
+        Assert.Contains("第 1 轮思考完成", text);
+    }
+
+    [Fact]
+    public void RenderResult_AnswerCase_WritesFooterOnly_NoAnswerReprint()
     {
         var output = new StringWriter();
         var renderer = new EventRenderer(output);
         var result = new AgentResult
         {
-            Answer = "答案是 42",
+            Answer = "答案是 42",   // 已流式渲染，不应重复打印
             Trajectory = [ChatMessage.User("hi")],
             Usage = new TokenUsage(7, 3),
             Iterations = 2,
@@ -92,8 +107,28 @@ public sealed class EventRendererTests
         renderer.RenderResult(result);
 
         var text = output.ToString();
-        Assert.Contains("答案是 42", text);
-        Assert.Contains(AgentStopReason.Answer.ToString(), text);
+        Assert.DoesNotContain("答案是 42", text);
+        Assert.Contains("Answer", text);
         Assert.Contains("2 轮", text);
+    }
+
+    [Fact]
+    public void RenderResult_FinalOutputToolCase_PrintsAnswerBlock()
+    {
+        var output = new StringWriter();
+        var renderer = new EventRenderer(output);
+        var result = new AgentResult
+        {
+            Answer = """{"a":1}""",   // 最终输出工具的参数即答案，未经流式渲染，需打印
+            Trajectory = [ChatMessage.User("hi")],
+            Iterations = 1,
+            StopReason = AgentStopReason.FinalOutputTool,
+        };
+
+        renderer.RenderResult(result);
+
+        var text = output.ToString();
+        Assert.Contains(""""{"a":1}"""", text);
+        Assert.Contains("FinalOutputTool", text);
     }
 }

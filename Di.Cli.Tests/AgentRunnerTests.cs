@@ -65,9 +65,12 @@ public sealed class AgentRunnerTests
             });
         }
 
-        public IAsyncEnumerable<ModelEvent> StreamAsync(
+        public async IAsyncEnumerable<ModelEvent> StreamAsync(
             ModelRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("CLI MVP 走 CompleteAsync 路径。");
+        {
+            // AgentRunner 走流式路径：合成单个 Completed 事件。
+            yield return new ModelEvent.Completed(await CompleteAsync(request, cancellationToken));
+        }
     }
 
     private sealed class FakeToolExecutor : IToolExecutor

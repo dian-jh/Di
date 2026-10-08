@@ -140,9 +140,12 @@ public sealed class ReplTests
         public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
         {
             Messages.Add(userMessage);
-            // 模拟 ReAct：运行中往总线发事件（消费者应在运行前创建，这里由 Repl 保证）。
+            // 模拟 ReAct 流式：先发布文本增量，再发布回合完成事件。
             if (Bus is not null)
+            {
+                await Bus.PublishAsync(new AgentLoopEvent.TextDelta($"回答: {userMessage}"));
                 await Bus.PublishAsync(new AgentLoopEvent.TurnCompleted(1, TokenUsage.Zero, new FinishReason.Stop()));
+            }
             return new AgentResult
             {
                 Answer = $"回答: {userMessage}",

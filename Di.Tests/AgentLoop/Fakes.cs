@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
@@ -10,6 +11,7 @@ namespace Di.Tests;
 internal sealed class FakeChatModel : IChatModel
 {
     private readonly Queue<Func<ModelRequest, ModelResponse>> _responses = new();
+    private readonly Queue<Func<ModelRequest, IAsyncEnumerable<ModelEvent>>> _streams = new();
     private Func<ModelRequest, ModelResponse>? _fallback;
 
     /// <summary>记录每次收到的请求，用于断言上下文内容。</summary>
@@ -19,6 +21,8 @@ internal sealed class FakeChatModel : IChatModel
 
     public void Fallback(Func<ModelRequest, ModelResponse> factory) => _fallback = factory;
 
+    public void EnqueueStream(Func<ModelRequest, IAsyncEnumerable<ModelEvent>> factory) => _streams.Enqueue(factory);
+
     public Task<ModelResponse> CompleteAsync(ModelRequest request, CancellationToken cancellationToken = default)
     {
         Requests.Add(request);
@@ -27,8 +31,20 @@ internal sealed class FakeChatModel : IChatModel
         return Task.FromResult(factory(request));
     }
 
-    public IAsyncEnumerable<ModelEvent> StreamAsync(ModelRequest request, CancellationToken cancellationToken = default)
-        => throw new NotSupportedException("循环测试走 CompleteAsync 路径。");
+    public async IAsyncEnumerable<ModelEvent> StreamAsync(
+        ModelRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (_streams.Count > 0)
+        {
+            await foreach (var evt in _streams.Dequeue()(request).WithCancellation(cancellationToken))
+                yield return evt;
+            yield break;
+        }
+
+        // 未预置流式响应时，用 CompleteAsync 队列合成单个 Completed。
+        var response = await CompleteAsync(request, cancellationToken);
+        yield return new ModelEvent.Completed(response);
+    }
 }
 
 /// <summary>记录收到的工具调用，按 handler 返回观察结果。</summary>

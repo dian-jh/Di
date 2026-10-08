@@ -72,6 +72,54 @@ public sealed class DeepSeekReActIntegrationTests
         Assert.Contains("5678", result.Answer, StringComparison.Ordinal);
     }
 
+    [SkippableFact]
+    public async Task RunStreamingAsync_AgainstRealDeepSeek_EmitsTextDeltaEvents()
+    {
+        Skip.If(string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY")),
+            "未设置 DEEPSEEK_API_KEY，跳过真实 API 集成测试。");
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddLlm();
+        services.AddDeepSeek();
+        await using var provider = services.BuildServiceProvider();
+
+        var model = new ChatModelClient(
+            provider.GetRequiredService<ILlmService>(),
+            "deepseek",
+            "deepseek-flash");
+
+        var bus = new InMemoryEventBus();
+        using var consumer = bus.CreateConsumer<AgentLoopEvent>();
+        var react = new ReAct(model, new AgentLoopOptions
+        {
+            SystemPrompt = "你是一个极简的 ReAct agent。需要事实信息时调用工具，不要凭空编造。",
+            MaxIterations = 6,
+        }, bus);
+
+        var result = await react.RunStreamingAsync(new AgentRequest
+        {
+            UserMessage = "帮我算一下 1234 加 5678 等于多少。",
+            Tools =
+            [
+                Tool("add_numbers", "计算两个数字的和。",
+                    """{"type":"object","properties":{"a":{"type":"number"},"b":{"type":"number"}},"required":["a","b"]}"""),
+            ],
+            ToolExecutor = new DemoToolExecutor(),
+        }, new CancellationTokenSource(TimeSpan.FromSeconds(180)).Token);
+
+        // 流式路径：真实模型逐段产出文本增量，事件被消费者按序收齐。
+        Assert.Equal(AgentStopReason.Answer, result.StopReason);
+
+        var events = new List<AgentLoopEvent>();
+        while (consumer.TryRead() is { } e)
+            events.Add(e);
+        var deltas = events.OfType<AgentLoopEvent.TextDelta>().Select(d => d.Delta).ToList();
+        Assert.NotEmpty(deltas);
+        Assert.Contains("1234", string.Concat(deltas));
+        Assert.Contains(events, e => e is AgentLoopEvent.ToolStarted { Call.Name: "add_numbers" });
+    }
+
     private static ChatTool Tool(string name, string description, string schemaJson)
     {
         var parameters = (JsonObject)JsonNode.Parse(schemaJson)!;
