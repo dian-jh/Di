@@ -1,5 +1,6 @@
 using Common.Events;
 using Core.AgentLoop;
+using Core.Sessions;
 
 namespace Di.Cli;
 
@@ -16,8 +17,10 @@ public sealed class Repl
     private readonly TextWriter _output;
     private readonly ReplOptions _options;
     private readonly EventRenderer _renderer;
+    private readonly SessionLog? _sessionLog;
 
-    public Repl(IAgentRunner runner, IEventBus bus, ILineReader reader, TextWriter output, ReplOptions options)
+    public Repl(IAgentRunner runner, IEventBus bus, ILineReader reader, TextWriter output, ReplOptions options,
+        SessionLog? sessionLog = null)
     {
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
@@ -25,10 +28,21 @@ public sealed class Repl
         _output = output ?? throw new ArgumentNullException(nameof(output));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _renderer = new EventRenderer(output, options.UseAnsi);
+        _sessionLog = sessionLog;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
+        // 会话开始时写首行 session_meta（尽力而为：失败只告警，不阻塞 REPL）。
+        try
+        {
+            _sessionLog?.StartSession();
+        }
+        catch (Exception ex)
+        {
+            _output.WriteLine($"  ⚠ 会话日志初始化失败: {ex.Message}");
+        }
+
         while (!cancellationToken.IsCancellationRequested)
         {
             _output.Write(_options.Prompt);
@@ -67,6 +81,8 @@ public sealed class Repl
         // 模型首个输出可能延迟数秒（网络/思考），先给出可见反馈，首个事件到达时被擦除。
         _renderer.ShowStatus(_options.WorkingStatusText);
 
+        var startedAt = DateTimeOffset.UtcNow;   // 记录到会话日志，用于计算 duration_ms
+
         AgentResult result;
         try
         {
@@ -89,6 +105,16 @@ public sealed class Repl
             _renderer.Render(evt);
 
         _renderer.RenderResult(result);
+
+        // 回合结束即落盘（尽力而为，磁盘错误不打断聊天）。
+        try
+        {
+            _sessionLog?.AppendTurn(result, startedAt);
+        }
+        catch (Exception ex)
+        {
+            _output.WriteLine($"  ⚠ 会话日志写入失败: {ex.Message}");
+        }
     }
 
     /// <summary>实时消费事件流并渲染（TextDelta 逐字写出，模型生成即显示）。</summary>

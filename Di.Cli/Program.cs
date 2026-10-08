@@ -2,6 +2,7 @@ using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
 using Core.Providers.DeepSeek;
+using Core.Sessions;
 using Core.Tools;
 using Di.Cli;
 using Microsoft.Extensions.Configuration;
@@ -53,6 +54,10 @@ var runner = new AgentRunner(
     CoreTools.Definitions(workspace),
     workingDirectory: workspace);
 
+// 会话持久化：整个 CLI 运行写成一个 JSONL（~/.di/sessions/YYYY/MM/DD/）。
+// 记录为尽力而为——磁盘错误只告警，绝不中断聊天。
+var sessionLog = new SessionLog(new SessionLogOptions());
+
 var repl = new Repl(
     runner,
     provider.GetRequiredService<IEventBus>(),
@@ -62,7 +67,8 @@ var repl = new Repl(
     {
         // 输出重定向（管道/文件）时不写 ANSI 控制序列，避免污染捕获输出。
         UseAnsi = !Console.IsOutputRedirected,
-    });
+    },
+    sessionLog);
 
 await repl.RunAsync();
 return 0;

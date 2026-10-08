@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
+using Core.Sessions;
 using Di.Cli;
 
 namespace Di.Cli.Tests;
@@ -139,6 +141,39 @@ public sealed class ReplTests
         var text = output.ToString();
         Assert.Contains("\r\x1b[2K", text);      // 异常路径也要清掉指示器
         Assert.Contains("✗ 运行失败", text);
+    }
+
+    [Fact]
+    public async Task ChatTurn_WithSessionLog_RecordsTurnToJsonl()
+    {
+        var root = Directory.CreateTempSubdirectory("di-repl-session-").FullName;
+        try
+        {
+            var bus = new InMemoryEventBus();
+            var runner = new FakeRunner { Bus = bus };
+            var sessionLog = new SessionLog(new SessionLogOptions { RootDirectory = root });
+            var repl = new Repl(runner, bus, new FakeLineReader("你好", "/exit"), new StringWriter(),
+                new ReplOptions(), sessionLog);
+
+            await repl.RunAsync();
+
+            Assert.True(File.Exists(sessionLog.LogFilePath));
+            var lines = File.ReadAllLines(sessionLog.LogFilePath).Where(l => !string.IsNullOrWhiteSpace(l)).ToArray();
+
+            using var meta = JsonDocument.Parse(lines[0]);
+            Assert.Equal("session_meta", meta.RootElement.GetProperty("type").GetString());
+            Assert.Equal(sessionLog.SessionId,
+                meta.RootElement.GetProperty("payload").GetProperty("session_id").GetString());
+
+            using var complete = JsonDocument.Parse(lines[^1]);
+            Assert.Equal("task_complete",
+                complete.RootElement.GetProperty("payload").GetProperty("type").GetString());
+            Assert.True(lines.Length >= 5, "一个回合至少写 meta + task_started + turn_context + 消息 + task_complete");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private static (Repl Repl, StringWriter Output, FakeRunner Runner) Setup(params string?[] lines)
