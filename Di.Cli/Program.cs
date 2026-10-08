@@ -1,23 +1,21 @@
 using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
-using Core.Providers.DeepSeek;
 using Core.Sessions;
 using Core.Tools;
 using Di.Cli;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-// 组合根：装配模型层（DeepSeek）+ 事件总线 + CLI。
+// 组合根：加载真实配置（appsettings.json + 环境变量）→ AddDi() 装配模型层与事件总线。
+var configuration = new ConfigurationBuilder()
+    .SetBasePath(AppContext.BaseDirectory)   // appsettings.json 随构建拷贝到输出目录
+    .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+    .AddEnvironmentVariables()
+    .Build();
+
 var services = new ServiceCollection();
-services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
-services.AddLlm();
-services.AddDeepSeek();
-services.AddEventBus(o => o.OnHandlerError = (ex, evt) =>
-{
-    Console.Error.WriteLine($"事件处理失败: {ex.Message}");
-    return Task.CompletedTask;
-});
+services.AddDi(configuration);
 await using var provider = services.BuildServiceProvider();
 
 ILlmService llm;
@@ -34,17 +32,12 @@ catch (InvalidOperationException ex)
     return 1;
 }
 
-// 模型工厂：默认套上重试装饰器——限流/超时/5xx 等可重试故障按指数退避重试（尊重 Retry-After），
-// 对 ReAct 透明。重试耗尽后异常原样上抛（ReAct 会以干净错误结束回合）。
-Func<string, IChatModel> modelFactory = name =>
-    new RetryingChatModel(new ChatModelClient(llm, "deepseek", name));
-
 var workspace = Directory.GetCurrentDirectory();
 
 using var executor = CoreTools.CreateExecutor(workspace);
 
 var runner = new AgentRunner(
-    modelFactory,
+    provider.GetRequiredService<Func<string, IChatModel>>(),
     executor,
     new AgentLoopOptions
     {
