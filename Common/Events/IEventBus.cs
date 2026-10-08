@@ -9,6 +9,10 @@ namespace Common.Events;
 /// 2. 消费（pull）：<see cref="CreateConsumer{TEvent}"/> + await foreach —— 拉取有序事件流，
 ///    适合 CLI UI 渲染这类"按序处理 + 背压"的消费者。
 ///
+/// 多态派发：事件沿继承链向上投递，订阅 / 消费基类（如 AgentLoopEvent）或接口（如 <see cref="IEvent"/>）
+/// 会收到其所有具体子类事件，因此"消费基类一条流、按序收全部事件"成立；具体类型订阅者仍只收自己的类型。
+/// 注意：同一处理器同时注册在具体类型和其基类两层时，会收到两次事件——请只订阅在最需要的层级。
+///
 /// 设计约定：
 /// - 订阅返回 <see cref="IDisposable"/> 退订令牌，Dispose 即退订（比微软 Unsubscribe 更安全，支持作用域订阅）。
 /// - <see cref="PublishAsync{TEvent}"/> 并发派发并等待所有订阅者完成：保证测试确定性、错误可见；

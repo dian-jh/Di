@@ -15,6 +15,13 @@ public sealed class EventBusTests
 
     private sealed record Pong(string Note) : Event;
 
+    /// <summary>模拟 AgentLoopEvent：一个基类，多个具体子类事件。</summary>
+    private abstract record BaseEvent : Event;
+
+    private sealed record DerivedEvent(string? Payload = null) : BaseEvent;
+
+    private sealed record OtherDerivedEvent(string Note) : BaseEvent;
+
     [Fact]
     public async Task PublishAsync_DeliversToInstanceHandler()
     {
@@ -239,6 +246,82 @@ public sealed class EventBusTests
         await Task.WhenAll(publishes);
 
         Assert.Equal(100, received.Count);
+    }
+
+    [Fact]
+    public async Task PublishAsync_DeliversToBaseClassSubscriber()
+    {
+        var bus = new InMemoryEventBus();
+        var received = new List<string>();
+        bus.Subscribe<BaseEvent>((e, _) =>
+        {
+            received.Add(((DerivedEvent)e).Payload!);
+            return Task.CompletedTask;
+        });
+
+        await bus.PublishAsync(new DerivedEvent("concrete"));
+
+        Assert.Equal(["concrete"], received);
+    }
+
+    [Fact]
+    public async Task PublishAsync_DeliversToInterfaceSubscriber()
+    {
+        var bus = new InMemoryEventBus();
+        var count = 0;
+        bus.Subscribe<IEvent>((_, _) =>
+        {
+            count++;
+            return Task.CompletedTask;
+        });
+
+        await bus.PublishAsync(new DerivedEvent());
+
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public async Task CreateConsumer_OfBaseType_ReceivesMixedDerivedEventsInOrder()
+    {
+        var bus = new InMemoryEventBus();
+        using var consumer = bus.CreateConsumer<BaseEvent>();
+
+        await bus.PublishAsync(new DerivedEvent("1"));
+        await bus.PublishAsync(new OtherDerivedEvent("2"));
+        await bus.PublishAsync(new DerivedEvent("3"));
+
+        var received = new List<string>();
+        await foreach (var e in consumer.ConsumeAsync())
+        {
+            received.Add(e switch { DerivedEvent d => d.Payload!, OtherDerivedEvent o => o.Note, _ => "" });
+            if (received.Count == 3)
+                break;
+        }
+
+        Assert.Equal(["1", "2", "3"], received);   // 异构子类按发布顺序进入基类消费者
+    }
+
+    [Fact]
+    public async Task PublishAsync_SpecificAndBaseSubscribers_EachReceiveOnce()
+    {
+        var bus = new InMemoryEventBus();
+        var specific = 0;
+        var baseCount = 0;
+        bus.Subscribe<DerivedEvent>((_, _) =>
+        {
+            specific++;
+            return Task.CompletedTask;
+        });
+        bus.Subscribe<BaseEvent>((_, _) =>
+        {
+            baseCount++;
+            return Task.CompletedTask;
+        });
+
+        await bus.PublishAsync(new DerivedEvent());
+
+        Assert.Equal(1, specific);
+        Assert.Equal(1, baseCount);
     }
 
     [Fact]

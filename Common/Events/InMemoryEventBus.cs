@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -5,11 +6,17 @@ namespace Common.Events;
 
 /// <summary>
 /// 进程内内存事件总线（线程安全）。
-/// 订阅与消费都按事件类型索引；发布时在锁内取快照，锁外并发派发，避免长时间持锁。
+/// 订阅与消费按事件类型及其祖先类型索引（多态派发）：发布 TurnCompleted 时，
+/// 会沿继承链向上投递给 AgentLoopEvent / Event / IEvent 的订阅与消费，
+/// 因此"消费基类一条流、按序收全部事件"成立。向上派发以发布时的静态类型为天花板。
+/// 发布时在锁内取快照，锁外并发派发，避免长时间持锁。
 /// 事件要么走 push（订阅者回调），要么走 pull（消费者通道），两者独立共存。
 /// </summary>
 public sealed class InMemoryEventBus : IEventBus
 {
+    /// <summary>按事件类型缓存其继承链（自身 → 基类 → 接口），避免每次发布重复反射。</summary>
+    private static readonly ConcurrentDictionary<Type, Type[]> TypeChainCache = new();
+
     private readonly object _sync = new();
     private readonly Dictionary<Type, List<IEventSubscriptionSink>> _subscriptions = new();
     private readonly Dictionary<Type, List<IEventChannelSink>> _consumers = new();
@@ -31,8 +38,8 @@ public sealed class InMemoryEventBus : IEventBus
         IEventChannelSink[] consumers;
         lock (_sync)
         {
-            subscriptions = _subscriptions.TryGetValue(typeof(TEvent), out var subs) ? subs.ToArray() : [];
-            consumers = _consumers.TryGetValue(typeof(TEvent), out var chans) ? chans.ToArray() : [];
+            subscriptions = Collect(_subscriptions, typeof(TEvent)).ToArray();
+            consumers = Collect(_consumers, typeof(TEvent)).ToArray();
         }
 
         // pull 模式：入队给消费者（无阻塞，带背压的通道）
@@ -123,6 +130,27 @@ public sealed class InMemoryEventBus : IEventBus
             map[key] = list = [];
         return list;
     }
+
+    /// <summary>沿事件类型的继承链，收集各级已注册的订阅 / 消费者。</summary>
+    private static List<T> Collect<T>(Dictionary<Type, List<T>> map, Type eventType)
+    {
+        var result = new List<T>();
+        foreach (var type in GetTypeChain(eventType))
+            if (map.TryGetValue(type, out var list))
+                result.AddRange(list);
+        return result;
+    }
+
+    /// <summary>计算继承链：自身 → 各基类（不含 object）→ 所有接口。</summary>
+    private static Type[] GetTypeChain(Type eventType)
+        => TypeChainCache.GetOrAdd(eventType, static t =>
+        {
+            var chain = new List<Type>(4);
+            for (var current = t; current is not null && current != typeof(object); current = current.BaseType)
+                chain.Add(current);
+            chain.AddRange(t.GetInterfaces());
+            return chain.ToArray();
+        });
 
     /// <summary>订阅槽的隐藏类型：把泛型处理器收窄成非泛型调用，避免字典里用反射。</summary>
     private interface IEventSubscriptionSink
