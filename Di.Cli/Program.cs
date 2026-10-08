@@ -37,9 +37,11 @@ Func<string, IChatModel> modelFactory = name => new ChatModelClient(llm, "deepse
 
 var workspace = Directory.GetCurrentDirectory();
 
+using var executor = CoreTools.CreateExecutor(workspace);
+
 var runner = new AgentRunner(
     modelFactory,
-    CoreTools.CreateExecutor(workspace),
+    executor,
     new AgentLoopOptions
     {
         // stable_prefix：核心工具使用说明（七个内置编码工具）始终在系统提示最前面。

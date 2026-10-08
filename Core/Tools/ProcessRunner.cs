@@ -14,12 +14,22 @@ public sealed record ShellCommand(string FileName, IReadOnlyList<string> PrefixA
         ? new ShellCommand(Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe", ["/c"])
         : new ShellCommand("/bin/sh", ["-c"]);
 
+    /// <summary>
+    /// 持久化会话的 shell：Windows 用 cmd.exe（无 /c，交互式读 stdin），其他平台用 /bin/sh（管道模式）。
+    /// </summary>
+    public static ShellCommand SessionDefault { get; } = OperatingSystem.IsWindows()
+        ? new ShellCommand(Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe", [])
+        : new ShellCommand("/bin/sh", []);
+
     /// <summary>是否为平台默认 shell（BashTool 借此决定用哪种命令行构造方式）。</summary>
     public bool IsPlatformDefault => ReferenceEquals(this, Default);
+
+    /// <summary>是否为平台默认会话 shell（ShellSession 借此决定回显过滤/标记行的语法）。</summary>
+    public bool IsSessionDefault => ReferenceEquals(this, SessionDefault);
 }
 
-/// <summary>一次进程执行的结果。</summary>
-internal sealed record ProcessResult(int ExitCode, string Output, string? Error)
+/// <summary>一次进程/会话命令执行的结果，渲染成回填给模型的观察文本。</summary>
+public sealed record ProcessResult(int ExitCode, string Output, string? Error)
 {
     /// <summary>渲染成回填给模型的观察文本：失败以 error: 开头，正常返回退出码 + 合并输出。</summary>
     public string ToObservation()

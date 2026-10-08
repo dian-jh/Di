@@ -9,25 +9,45 @@ namespace Core.Tools;
 /// </summary>
 public static class CoreTools
 {
-    /// <summary>创建全部七个核心工具实例（相对路径都以 baseDirectory 为根；pythonExecutable 默认走 PATH 的 python）。</summary>
-    public static IReadOnlyList<ICoreTool> Create(string baseDirectory, string pythonExecutable = "python") =>
+    /// <summary>
+    /// 创建全部七个核心工具实例（相对路径都以 baseDirectory 为根；pythonExecutable 默认走 PATH 的 python）。
+    /// bash 为一次性进程模式（每次命令独立进程）；共享持久化会话用 <see cref="CreateExecutor"/>。
+    /// </summary>
+    public static IReadOnlyList<ICoreTool> Create(string baseDirectory, string pythonExecutable = "python")
+        => CreateTools(baseDirectory, pythonExecutable, session: null);
+
+    private static IReadOnlyList<ICoreTool> CreateTools(string baseDirectory, string pythonExecutable, ShellSession? session) =>
     [
         new ReadFileTool(baseDirectory),
         new WriteFileTool(baseDirectory),
         new EditFileTool(baseDirectory),
         new GlobTool(baseDirectory),
         new GrepTool(baseDirectory),
-        new BashTool(baseDirectory),
+        new BashTool(baseDirectory, session: session),
         new PythonTool(pythonExecutable),
     ];
 
-    /// <summary>七个工具的 ChatTool 定义，传给模型以允许其发起工具调用。</summary>
-    public static IReadOnlyList<ChatTool> Definitions(string baseDirectory, string pythonExecutable = "python") =>
-        Create(baseDirectory, pythonExecutable).Select(t => t.Definition).ToList();
+    /// <summary>
+    /// 七个工具的 ChatTool 定义，传给模型以允许其发起工具调用。
+    /// 与 <see cref="CreateExecutor"/> 保持一致：bash 走共享持久化会话（定义里不含 working_dir）。
+    /// ShellSession 惰性启动进程，这里只构造定义，不会真正拉起 shell。
+    /// </summary>
+    public static IReadOnlyList<ChatTool> Definitions(string baseDirectory, string pythonExecutable = "python")
+    {
+        var session = new ShellSession(baseDirectory);
+        return CreateTools(baseDirectory, pythonExecutable, session).Select(t => t.Definition).ToList();
+    }
 
-    /// <summary>创建按工具名分发的执行器，供 ReAct 循环使用。</summary>
-    public static IToolExecutor CreateExecutor(string baseDirectory, string pythonExecutable = "python")
-        => new Executor(Create(baseDirectory, pythonExecutable));
+    /// <summary>
+    /// 创建按工具名分发的执行器，供 ReAct 循环使用。
+    /// bash 挂接一个共享的持久化终端会话（惰性启动，第一次 bash 调用才拉起进程）；
+    /// 返回的执行器实现 IDisposable，用完后请释放以终止会话进程。
+    /// </summary>
+    public static Executor CreateExecutor(string baseDirectory, string pythonExecutable = "python")
+    {
+        var session = new ShellSession(baseDirectory);
+        return new Executor(CreateTools(baseDirectory, pythonExecutable, session), session);
+    }
 
     /// <summary>
     /// 工具使用说明：作为 stable_prefix 的一部分注入系统提示，让模型知道有哪七个工具、
@@ -46,8 +66,9 @@ public static class CoreTools
         4. glob —— 按文件名模式（支持 * ? **）搜索文件，返回匹配的相对路径列表。
         5. grep —— 按正则表达式搜索文件内容，返回 file:行号: 内容（如 src/api.py:42: # TODO: ...）。
            定位代码逻辑用 grep，先搜再读，不要编造文件内容。
-        6. bash —— 在 shell 中执行一条命令，返回退出码与合并输出（stdout+stderr）。
-           适合跑测试、处理特殊格式文件、装依赖。超时（30 秒）返回 error，长输出自动截断头尾。
+        6. bash —— 在共享的持久化终端会话中执行命令，返回退出码与合并输出（stdout+stderr）。
+           cd、环境变量、激活的虚拟环境等状态在多次调用之间保持——切换目录用 cd 而不是 working_dir。
+           适合跑测试、处理特殊格式文件、装依赖。超时（30 秒）返回 error（会话自动重建），长输出自动截断头尾。
         7. python —— 在沙盒临时目录中执行一段 Python 代码，适合计算、数据处理、生成图表。超时返回 error，长输出截断。
 
         使用惯例：
@@ -57,13 +78,15 @@ public static class CoreTools
         """;
 
     /// <summary>把 ToolCallBlock 按工具名分发给对应工具，未知工具返回错误观察。</summary>
-    public sealed class Executor : IToolExecutor
+    public sealed class Executor : IToolExecutor, IDisposable
     {
         private readonly IReadOnlyDictionary<string, ICoreTool> _tools;
+        private readonly ShellSession? _session;
 
-        public Executor(IEnumerable<ICoreTool> tools)
+        public Executor(IEnumerable<ICoreTool> tools, ShellSession? session = null)
         {
             _tools = tools.ToDictionary(t => t.Name);
+            _session = session;
         }
 
         public Task<string> ExecuteAsync(ToolCallBlock call, CancellationToken cancellationToken = default)
@@ -72,5 +95,7 @@ public static class CoreTools
                 return tool.ExecuteAsync(call.Arguments, cancellationToken);
             return Task.FromResult($"error: 未知工具 '{call.Name}'");
         }
+
+        public void Dispose() => _session?.Dispose();
     }
 }

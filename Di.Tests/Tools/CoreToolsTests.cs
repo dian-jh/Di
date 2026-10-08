@@ -81,17 +81,42 @@ public sealed class CoreToolsTests : IDisposable
     [Fact]
     public async Task Executor_BashRunsCommand()
     {
-        var executor = CoreTools.CreateExecutor(_base);
+        using var executor = CoreTools.CreateExecutor(_base);
         var result = await executor.ExecuteAsync(Call("bash", """{"command":"echo core-bash"}"""));
 
         Assert.Contains("core-bash", result);
     }
 
     [Fact]
+    public async Task Executor_Bash_PersistentSession_StatePersists()
+    {
+        // 第五章：共享持久化终端会话是 bash 的默认模式——第一次 cd 的状态在后续调用中保持。
+        Directory.CreateDirectory(Path.Combine(_base, "work"));
+        using var executor = CoreTools.CreateExecutor(_base);
+
+        await executor.ExecuteAsync(Call("bash", """{"command":"cd work"}"""));
+        var result = await executor.ExecuteAsync(Call("bash",
+            OperatingSystem.IsWindows() ? """{"command":"cd"}""" : """{"command":"pwd"}"""));
+
+        Assert.StartsWith("exit: 0", result);
+        Assert.Contains("work", result);
+    }
+
+    [Fact]
+    public void Definitions_BashIsPersistentSession_OmitsWorkingDir()
+    {
+        // Definitions 与 CreateExecutor 一致：bash 是持久化会话模式，schema 里没有 working_dir。
+        var def = CoreTools.Definitions(_base).Single(d => d.Name == "bash");
+
+        Assert.NotNull(def.Parameters["properties"]!["command"]);
+        Assert.False(def.Parameters["properties"]!.AsObject().ContainsKey("working_dir"));
+    }
+
+    [Fact]
     public async Task Executor_PythonRunsCode()
     {
         if (PythonExe is null) return;
-        var executor = CoreTools.CreateExecutor(_base, PythonExe);
+        using var executor = CoreTools.CreateExecutor(_base, PythonExe);
         var result = await executor.ExecuteAsync(Call("python", """{"code":"print(3 + 4)"}"""));
 
         Assert.StartsWith("exit: 0", result);

@@ -244,4 +244,63 @@ public sealed class BashToolTests : IDisposable
 
         Assert.StartsWith("error:", result);   // 不应抛 ArgumentException
     }
+
+    // ---- 悲观：持久化终端会话模式 ----
+
+    [Fact]
+    public async Task Execute_WithSession_StatePersistsAcrossCalls()
+    {
+        Directory.CreateDirectory(Path.Combine(_base, "work"));
+        using var session = new ShellSession(_base);
+        var tool = new BashTool(_base, session: session);
+
+        await tool.ExecuteAsync(Args("cd work"));
+        var result = await tool.ExecuteAsync(Args(OperatingSystem.IsWindows() ? "cd" : "pwd"));
+
+        Assert.StartsWith("exit: 0", result);
+        Assert.Contains("work", result);   // 第一次 cd 的状态在第二次调用中仍然有效
+    }
+
+    [Fact]
+    public async Task Execute_WithSession_WorkingDirParamIsIgnored()
+    {
+        // 会话模式下 working_dir 不在 schema 中；模型即使传了也不影响会话状态（cd 才是正路）。
+        using var session = new ShellSession(_base);
+        var tool = new BashTool(_base, session: session);
+
+        var set = OperatingSystem.IsWindows() ? "set DI_T=yes" : "export DI_T=yes";
+        var read = OperatingSystem.IsWindows() ? "echo %DI_T%" : "echo $DI_T";
+        await tool.ExecuteAsync(Args(set, "sub/that/does/not/exist"));
+        var result = await tool.ExecuteAsync(Args(read, "sub/that/does/not/exist"));
+
+        Assert.Contains("yes", result);
+    }
+
+    [Fact]
+    public void Definition_WithSession_OmitsWorkingDirAndDescribesPersistence()
+    {
+        using var session = new ShellSession(_base);
+        var def = new BashTool(_base, session: session).Definition;
+
+        Assert.Equal("bash", def.Name);
+        Assert.NotNull(def.Parameters["properties"]!["command"]);
+        Assert.False(def.Parameters["properties"]!.AsObject().ContainsKey("working_dir"));
+        Assert.Contains("持久化", def.Description);
+    }
+
+    [Fact]
+    public async Task Execute_WithSession_TimeoutSelfHeals()
+    {
+        using var session = new ShellSession(_base);
+        var tool = new BashTool(_base, session: session, timeout: TimeSpan.FromMilliseconds(300));
+
+        var timedOut = await tool.ExecuteAsync(Args(
+            OperatingSystem.IsWindows() ? "for /l %i in (1,1,100000000) do @rem" : "sleep 60"));
+        Assert.StartsWith("error:", timedOut);
+        Assert.Contains("秒", timedOut);
+
+        var after = await tool.ExecuteAsync(Args("echo recovered"));
+        Assert.StartsWith("exit: 0", after);
+        Assert.Contains("recovered", after);
+    }
 }
