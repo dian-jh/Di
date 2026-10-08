@@ -2,6 +2,7 @@ using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
 using Core.Providers.DeepSeek;
+using Core.Tools;
 using Di.Cli;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,16 +35,20 @@ catch (InvalidOperationException ex)
 
 Func<string, IChatModel> modelFactory = name => new ChatModelClient(llm, "deepseek", name);
 
+var workspace = Directory.GetCurrentDirectory();
+
 var runner = new AgentRunner(
     modelFactory,
-    new DemoTools.Executor(),
+    CoreTools.CreateExecutor(workspace),
     new AgentLoopOptions
     {
-        SystemPrompt = "你是一个简洁的 ReAct 助手。需要事实信息时调用工具，不要编造。回答用中文。",
+        // stable_prefix：核心工具使用说明（七个内置编码工具）始终在系统提示最前面。
+        SystemPrompt = CoreTools.Instructions + "\n\n" +
+                       "你是一个简洁的 ReAct 助手。需要事实信息时调用工具，不要编造。回答用中文。",
         MaxIterations = 8,
     },
     provider.GetRequiredService<IEventBus>(),
-    DemoTools.Definitions);
+    CoreTools.Definitions(workspace));
 
 var repl = new Repl(
     runner,
