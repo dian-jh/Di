@@ -52,15 +52,21 @@ internal sealed class DeepSeekUsage
     public int CompletionTokens { get; set; }
     public int PromptTokens { get; set; }
     public int TotalTokens { get; set; }
+
+    /// <summary>顶层字段（官方线格式）：命中上下文缓存的 prompt token 数。</summary>
+    public int? PromptCacheHitTokens { get; set; }
+
+    /// <summary>顶层字段（官方线格式）：未命中缓存的 prompt token 数。</summary>
+    public int? PromptCacheMissTokens { get; set; }
+
     public DeepSeekPromptTokensDetails? PromptTokensDetails { get; set; }
     public DeepSeekCompletionTokensDetails? CompletionTokensDetails { get; set; }
 }
 
+/// <summary>OpenAI 风格嵌套对象：只含 cached_tokens（与顶层 prompt_cache_hit_tokens 同值）。</summary>
 internal sealed class DeepSeekPromptTokensDetails
 {
     public int? CachedTokens { get; set; }
-    public int? PromptCacheHitTokens { get; set; }
-    public int? PromptCacheMissTokens { get; set; }
 }
 
 internal sealed class DeepSeekCompletionTokensDetails

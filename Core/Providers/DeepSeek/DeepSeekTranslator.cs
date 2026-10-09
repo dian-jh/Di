@@ -251,7 +251,7 @@ internal static class DeepSeekTranslator
         InputTokens: usage.PromptTokens,
         OutputTokens: usage.CompletionTokens,
         TotalTokens: usage.TotalTokens,
-        CacheReadTokens: usage.PromptTokensDetails?.PromptCacheHitTokens ?? usage.PromptTokensDetails?.CachedTokens,
+        CacheReadTokens: usage.PromptCacheHitTokens ?? usage.PromptTokensDetails?.CachedTokens,
         ReasoningTokens: usage.CompletionTokensDetails?.ReasoningTokens);
 }
 
