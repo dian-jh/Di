@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
+using Core.Skills;
 using Di.Cli;
 
 namespace Di.Cli.Tests;
@@ -108,6 +109,47 @@ public sealed class AgentRunnerTests
         var last = model.Requests[^1];
         var userTexts = last.Messages.OfType<UserMessage>().Select(ChatMessageExtensions.GetText).ToArray();
         Assert.Equal(["第二问"], userTexts);   // 记忆被清空，只有当前问
+    }
+
+    [Fact]
+    public async Task RunAsync_WithActiveSkill_AppendsSkillToSystemContext()
+    {
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus());
+
+        runner.ActiveSkill = new Skill
+        {
+            Name = "backend-tests",
+            Description = "跑后端测试",
+            Instructions = "先 dotnet build 再 dotnet test",
+        };
+        await runner.RunAsync("hi");
+
+        var request = Assert.Single(model.Requests);
+        var system = Assert.IsType<SystemMessage>(request.Messages[0]);
+        Assert.Contains("backend-tests", system.Text);
+        Assert.Contains("先 dotnet build 再 dotnet test", system.Text);
+    }
+
+    [Fact]
+    public async Task RunAsync_WithoutActiveSkill_DoesNotIncludeSkillContext()
+    {
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus());
+
+        await runner.RunAsync("hi");
+
+        var request = Assert.Single(model.Requests);
+        var system = Assert.IsType<SystemMessage>(request.Messages[0]);
+        Assert.DoesNotContain("已激活 Skill", system.Text);
     }
 
     [Fact]

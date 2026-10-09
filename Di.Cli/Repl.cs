@@ -1,6 +1,7 @@
 using Common.Events;
 using Core.AgentLoop;
 using Core.Sessions;
+using Core.Skills;
 
 namespace Di.Cli;
 
@@ -18,9 +19,10 @@ public sealed class Repl
     private readonly ReplOptions _options;
     private readonly EventRenderer _renderer;
     private readonly SessionLog? _sessionLog;
+    private readonly IReadOnlyList<Skill>? _skills;
 
     public Repl(IAgentRunner runner, IEventBus bus, ILineReader reader, TextWriter output, ReplOptions options,
-        SessionLog? sessionLog = null)
+        SessionLog? sessionLog = null, IReadOnlyList<Skill>? skills = null)
     {
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
@@ -29,6 +31,7 @@ public sealed class Repl
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _renderer = new EventRenderer(output, options.UseAnsi);
         _sessionLog = sessionLog;
+        _skills = skills;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
@@ -169,6 +172,12 @@ public sealed class Repl
             case "/model":
                 _output.WriteLine("用法: /model <模型名>");
                 break;
+            case "/skills":
+                ListSkills();
+                break;
+            case "/skill":
+                ActivateSkill(args);
+                break;
             default:
                 _output.WriteLine($"未知命令: {name}（输入 /help 查看帮助）");
                 break;
@@ -180,5 +189,43 @@ public sealed class Repl
     {
         var space = command.IndexOf(' ');
         return space < 0 ? (command, string.Empty) : (command[..space], command[(space + 1)..].Trim());
+    }
+
+    /// <summary>/skills：列出所有可用 skill（用户级 + 项目级已合并）。</summary>
+    private void ListSkills()
+    {
+        if (_skills is null || _skills.Count == 0)
+        {
+            _output.WriteLine("没有可用 skill。把 SKILL.md 放在 ~/.di/skills/<名称>/ 或 <工作区>/.di/skills/<名称>/ 下。");
+            return;
+        }
+        foreach (var skill in _skills)
+            _output.WriteLine($"  {skill.Name} —— {skill.Description}");
+    }
+
+    /// <summary>/skill：带名称激活，off/none 停用，无参数显示当前与用法。</summary>
+    private void ActivateSkill(string name)
+    {
+        if (name.Length == 0)
+        {
+            _output.WriteLine(_runner.ActiveSkill is null
+                ? "当前未激活 skill。用法: /skill <名称>（/skills 查看列表，/skill off 停用）"
+                : $"当前已激活：{_runner.ActiveSkill.Name}。用法: /skill <名称>（/skill off 停用）");
+            return;
+        }
+        if (name is "off" or "none")
+        {
+            _runner.ActiveSkill = null;
+            _output.WriteLine("已停用 skill");
+            return;
+        }
+        var skill = _skills?.FirstOrDefault(s => s.Name == name);
+        if (skill is null)
+        {
+            _output.WriteLine($"未找到 skill：{name}（/skills 查看可用列表）");
+            return;
+        }
+        _runner.ActiveSkill = skill;
+        _output.WriteLine($"已激活 skill：{skill.Name}");
     }
 }

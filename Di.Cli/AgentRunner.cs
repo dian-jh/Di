@@ -1,6 +1,7 @@
 using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
+using Core.Skills;
 
 namespace Di.Cli;
 
@@ -44,6 +45,9 @@ public sealed class AgentRunner : IAgentRunner
 
     public string CurrentModel { get; set; } = "deepseek-flash";
 
+    /// <summary>当前激活的 skill（/skill 命令设置）：指令随每个回合注入系统上下文。null = 未激活。</summary>
+    public Skill? ActiveSkill { get; set; }
+
     public void ResetHistory() => _history = [];
 
     public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
@@ -51,13 +55,20 @@ public sealed class AgentRunner : IAgentRunner
         var model = _modelFactory(CurrentModel);
         var react = new ReAct(model, _options, _eventBus);
 
-        // 环境感知快照：每个回合开始时刷新（git 状态在回合之间会变），注入为追加系统上下文。
-        // 尽力而为——git 缺失/出错只导致快照退化为"仅工作目录"，绝不阻塞回合。
+        // 系统上下文 = 环境快照 + 已激活 skill 的指令。skill 是用户显式挂上的工作流，
+        // 放在快照之后更贴近本轮任务；两者都尽力而为，绝不阻塞回合。
         string? systemContext = null;
         if (!string.IsNullOrWhiteSpace(_workingDirectory))
         {
             systemContext = await EnvironmentSnapshot.CaptureAsync(_workingDirectory, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
+        }
+        if (ActiveSkill is not null)
+        {
+            var skillContext = $"【已激活 Skill：{ActiveSkill.Name}】\n{ActiveSkill.Instructions}";
+            systemContext = systemContext is null
+                ? skillContext
+                : systemContext + "\n\n" + skillContext;
         }
 
         var result = await react.RunStreamingAsync(new AgentRequest

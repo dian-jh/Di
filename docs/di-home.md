@@ -46,7 +46,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 |---|---|---|---|
 | `config.json` | 用户 | 程序（分层配置源 #2） | ✅ 已实现（用户级） |
 | `sessions/YYYY/MM/DD/*.jsonl` | 程序（SessionLog） | 用户/重放工具 | ✅ 已实现 |
-| `skills/<name>/SKILL.md` | 用户 | 将来 skill 加载器 | 🔜 格式已预留 |
+| `skills/<name>/SKILL.md` | 用户 | SkillRepository（`/skill` 激活） | ✅ MVP |
 | `commands/<name>.md` | 用户 | 将来命令注册表 | 🔜 格式已预留 |
 | `agents/<name>.md` | 用户 | 将来子代理加载器 | 🔜 格式已预留 |
 | `mcp.json` | 用户 | 将来 MCP 桥 | 🔜 格式已预留 |
@@ -116,11 +116,13 @@ export Model__DefaultModel=deepseek-flash
 | 配置段绑定 | `Di.Cli/DiServiceCollectionExtensions.cs` | ✅ |
 | SessionLog 不再写 `config.json` | `Core/Sessions/SessionLog.cs` | ✅ |
 | 组合根决策入配置（prompt/迭代上限/默认模型/UI） | `Di.Cli/Program.cs` | ✅ |
+| Skills：SKILL.md 解析 + 两级发现 + 激活注入 | `Core/Skills/` + `Di.Cli/Repl.cs` | ✅ MVP |
 
 ## 6. 将来扩展（格式预留给定）
 
-- **skills**：`skills/<name>/SKILL.md`，frontmatter（name/description）+ 正文指令，对齐
-  Claude Code 的 SKILL.md 格式，可直接迁移社区 skill。
+- **skills**：`skills/<name>/SKILL.md`（frontmatter `name`/`description` + 正文指令）。已实现 MVP：
+  用户级 + 项目级两级发现（项目覆盖同名用户级），`/skills` 列出、`/skill <名称>` 激活（指令随每回合
+  注入系统上下文）、`/skill off` 停用。对齐 Claude Code 的 SKILL.md，社区 skill 可直接迁移。
 - **commands**：`commands/<name>.md`，把 `Repl.RunCommand` 的 if/else 换成从该目录加载的注册表。
 - **MCP**：`mcp.json` 声明服务器（stdio 命令 + 环境），通过 `ICoreTool`/`IToolProvider` 桥接，
   ReAct 循环无感。

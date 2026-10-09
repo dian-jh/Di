@@ -3,6 +3,7 @@ using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
 using Core.Sessions;
+using Core.Skills;
 using Di.Cli;
 
 namespace Di.Cli.Tests;
@@ -104,6 +105,75 @@ public sealed class ReplTests
     }
 
     [Fact]
+    public async Task SkillsCommand_ListsAvailableSkills()
+    {
+        var skill = new Skill { Name = "backend-tests", Description = "跑后端测试", Instructions = "i" };
+        var (repl, output, _) = SetupWithSkills([skill], "/skills", "/exit");
+
+        await repl.RunAsync();
+
+        var text = output.ToString();
+        Assert.Contains("backend-tests", text);
+        Assert.Contains("跑后端测试", text);
+    }
+
+    [Fact]
+    public async Task SkillsCommand_WhenNone_PrintsHint()
+    {
+        var (repl, output, _) = Setup("/skills", "/exit");
+
+        await repl.RunAsync();
+
+        Assert.Contains("没有可用 skill", output.ToString());
+    }
+
+    [Fact]
+    public async Task SkillCommand_ActivatesSkill()
+    {
+        var skill = new Skill { Name = "backend-tests", Description = "跑后端测试", Instructions = "i" };
+        var (repl, output, runner) = SetupWithSkills([skill], "/skill backend-tests", "/exit");
+
+        await repl.RunAsync();
+
+        Assert.Same(skill, runner.ActiveSkill);
+        Assert.Contains("已激活 skill：backend-tests", output.ToString());
+    }
+
+    [Fact]
+    public async Task SkillCommand_UnknownSkill_PrintsError()
+    {
+        var (repl, output, runner) = Setup("/skill nope", "/exit");
+
+        await repl.RunAsync();
+
+        Assert.Null(runner.ActiveSkill);
+        Assert.Contains("未找到 skill：nope", output.ToString());
+    }
+
+    [Fact]
+    public async Task SkillCommand_Off_Deactivates()
+    {
+        var skill = new Skill { Name = "backend-tests", Description = "d", Instructions = "i" };
+        var (repl, output, runner) = SetupWithSkills([skill], "/skill backend-tests", "/skill off", "/exit");
+
+        await repl.RunAsync();
+
+        Assert.Null(runner.ActiveSkill);
+        Assert.Contains("已停用 skill", output.ToString());
+    }
+
+    [Fact]
+    public async Task SkillCommand_NoArgument_ShowsCurrentOrUsage()
+    {
+        var (repl, output, runner) = Setup("/skill", "/exit");
+
+        await repl.RunAsync();
+
+        Assert.Null(runner.ActiveSkill);
+        Assert.Contains("用法: /skill", output.ToString());
+    }
+
+    [Fact]
     public async Task EmptyLine_IsIgnored()
     {
         var (repl, _, runner) = Setup("", "hi", "/exit");
@@ -187,11 +257,15 @@ public sealed class ReplTests
     }
 
     private static (Repl Repl, StringWriter Output, FakeRunner Runner) Setup(params string?[] lines)
+        => SetupWithSkills([], lines);
+
+    private static (Repl Repl, StringWriter Output, FakeRunner Runner) SetupWithSkills(
+        IReadOnlyList<Skill> skills, params string?[] lines)
     {
         var output = new StringWriter();
         var bus = new InMemoryEventBus();
         var runner = new FakeRunner { Bus = bus };
-        var repl = new Repl(runner, bus, new FakeLineReader(lines), output, new ReplOptions());
+        var repl = new Repl(runner, bus, new FakeLineReader(lines), output, new ReplOptions(), skills: skills);
         return (repl, output, runner);
     }
 
@@ -209,6 +283,8 @@ public sealed class ReplTests
         public IEventBus? Bus { get; set; }
 
         public string CurrentModel { get; set; } = "deepseek-flash";
+
+        public Skill? ActiveSkill { get; set; }
 
         public List<string> Messages { get; } = [];
 
@@ -238,6 +314,8 @@ public sealed class ReplTests
     private sealed class ThrowingRunner : IAgentRunner
     {
         public string CurrentModel { get; set; } = "deepseek-flash";
+
+        public Skill? ActiveSkill { get; set; }
 
         public Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("boom");

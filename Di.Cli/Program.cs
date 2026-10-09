@@ -3,6 +3,7 @@ using Core.AgentLoop;
 using Core.Configuration;
 using Core.Llm;
 using Core.Sessions;
+using Core.Skills;
 using Core.Tools;
 using Di.Cli;
 using Microsoft.Extensions.Configuration;
@@ -65,6 +66,12 @@ var runner = new AgentRunner(
 // 记录为尽力而为——磁盘错误只告警，绝不中断聊天。
 var sessionLog = new SessionLog(new SessionLogOptions { RootDirectory = diHome.RootDirectory });
 
+// Skills：两级发现（用户 ~/.di/skills + 项目 .di/skills，项目覆盖同名用户级）；无效文件只告警。
+var skills = SkillRepository.Load(
+    diHome.SkillsDirectory,
+    Path.Combine(DiHome.ProjectDirectory(workspace), "skills"),
+    warn: msg => Console.Error.WriteLine($"⚠ {msg}"));
+
 // 输出重定向（管道/文件）时不写 ANSI 控制序列，避免污染捕获输出（覆盖配置默认）。
 if (Console.IsOutputRedirected)
     replOptions.UseAnsi = false;
@@ -75,7 +82,8 @@ var repl = new Repl(
     new ConsoleLineReader(),
     Console.Out,
     replOptions,
-    sessionLog);
+    sessionLog,
+    skills);
 
 await repl.RunAsync();
 return 0;
