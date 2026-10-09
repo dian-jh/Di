@@ -128,9 +128,10 @@ public sealed class AgentRunnerTests
         await runner.RunAsync("hi");
 
         var request = Assert.Single(model.Requests);
-        var system = Assert.IsType<SystemMessage>(request.Messages[0]);
-        Assert.Contains("backend-tests", system.Text);
-        Assert.Contains("先 dotnet build 再 dotnet test", system.Text);
+        Assert.Equal("sys", Assert.IsType<SystemMessage>(request.Messages[0]).Text);   // 稳定前缀独立
+        var skillCtx = Assert.IsType<SystemMessage>(request.Messages[^1]);             // 激活 skill 置请求末尾
+        Assert.Contains("backend-tests", skillCtx.Text);
+        Assert.Contains("先 dotnet build 再 dotnet test", skillCtx.Text);
     }
 
     [Fact]
@@ -151,7 +152,7 @@ public sealed class AgentRunnerTests
         await runner.RunAsync("hi");
 
         var request = Assert.Single(model.Requests);
-        var system = Assert.IsType<SystemMessage>(request.Messages[0]);
+        var system = Assert.IsType<SystemMessage>(request.Messages[^1]);   // 激活 skill 置请求末尾
         var indexA = system.Text.IndexOf("指令 A", StringComparison.Ordinal);
         var indexB = system.Text.IndexOf("指令 B", StringComparison.Ordinal);
         Assert.True(indexA >= 0 && indexB >= 0);
@@ -190,10 +191,11 @@ public sealed class AgentRunnerTests
         await runner.RunAsync("hi");
 
         var request = Assert.Single(model.Requests);
-        var system = Assert.IsType<SystemMessage>(request.Messages[0]);
-        Assert.Contains("可用 skills", system.Text);
-        Assert.Contains("backend-tests", system.Text);
-        Assert.Contains("运行并修复后端测试", system.Text);
+        Assert.Equal("sys", Assert.IsType<SystemMessage>(request.Messages[0]).Text);
+        var advertise = Assert.IsType<SystemMessage>(request.Messages[^1]);   // 广告块置请求末尾
+        Assert.Contains("可用 skills", advertise.Text);
+        Assert.Contains("backend-tests", advertise.Text);
+        Assert.Contains("运行并修复后端测试", advertise.Text);
         Assert.Contains(request.Tools, t => t.Name == "load_skill");
     }
 
@@ -214,10 +216,10 @@ public sealed class AgentRunnerTests
             await runner.RunAsync("hi");
 
             var request = Assert.Single(model.Requests);
-            var system = Assert.IsType<SystemMessage>(request.Messages[0]);
-            Assert.Contains("sys", system.Text);
-            Assert.Contains("工作目录", system.Text);
-            Assert.Contains(dir, system.Text);
+            Assert.Equal("sys", Assert.IsType<SystemMessage>(request.Messages[0]).Text);   // 稳定前缀独立
+            var snapshot = Assert.IsType<SystemMessage>(request.Messages[^1]);             // 环境快照置请求末尾
+            Assert.Contains("工作目录", snapshot.Text);
+            Assert.Contains(dir, snapshot.Text);
         }
         finally
         {

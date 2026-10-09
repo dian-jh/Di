@@ -179,23 +179,23 @@ public sealed class ReAct
             ?? throw new LlmException("模型流在结束前中断，未收到 Completed。", LlmErrorCodes.BadResponse);
     }
 
-    /// <summary>stable_prefix + 请求级系统上下文（环境快照）+ 轨迹。工具定义经 <see cref="ModelRequest.Tools"/> 传递。</summary>
+    /// <summary>
+    /// 布局：[稳定 system prompt] + [完整轨迹(历史+当前回合)] + [易变 SystemContext(环境快照/skills) 于末尾]。
+    ///
+    /// 快照带 git 状态，回合间会变；若把它并进第一条 system 消息或插在轨迹中间，一旦变化就
+    /// 从字节 0 起击穿 DeepSeek 的前缀缓存，整段历史全部 miss。放在<b>请求末尾</b>后：
+    /// 稳定前缀（system prompt + 全部历史）逐字节不变、跨回合单调增长，历史始终可命中；
+    /// 易变快照只在末尾（每次请求重发，但代价有界），且不进入持久历史（不污染跨回合记忆）。
+    /// 工具定义经 <see cref="ModelRequest.Tools"/> 传递。
+    /// </summary>
     private IReadOnlyList<ChatMessage> BuildContext(AgentRequest request, IReadOnlyList<ChatMessage> trajectory)
     {
-        // 合并成单条 system 消息：stable_prefix 在前，追加系统上下文（环境快照）在后。
-        var parts = new List<string>(2);
+        var context = new List<ChatMessage>(trajectory.Count + 2);
         if (!string.IsNullOrWhiteSpace(_options.SystemPrompt))
-            parts.Add(_options.SystemPrompt);
-        if (!string.IsNullOrWhiteSpace(request.SystemContext))
-            parts.Add(request.SystemContext);
-        if (parts.Count == 0)
-            return trajectory;
-
-        var context = new List<ChatMessage>(trajectory.Count + 1)
-        {
-            ChatMessage.System(string.Join("\n\n", parts)),
-        };
+            context.Add(ChatMessage.System(_options.SystemPrompt));
         context.AddRange(trajectory);
+        if (!string.IsNullOrWhiteSpace(request.SystemContext))
+            context.Add(ChatMessage.System(request.SystemContext));
         return context;
     }
 

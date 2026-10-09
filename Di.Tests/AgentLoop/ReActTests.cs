@@ -144,7 +144,7 @@ public sealed class ReActTests
     }
 
     [Fact]
-    public async Task RunAsync_SystemContext_IsMergedIntoSystemMessage()
+    public async Task RunAsync_SystemContext_IsSeparateTrailingSystemMessage()
     {
         var model = new FakeChatModel();
         model.Enqueue(_ => Response("ok"));
@@ -153,15 +153,20 @@ public sealed class ReActTests
         await loop.RunAsync(Request(systemContext: "## 环境\n- 工作目录: /tmp/x"));
 
         var request = Assert.Single(model.Requests);
-        Assert.Equal(2, request.Messages.Count);   // [system, user]，system 仍是单条
-        var system = Assert.IsType<SystemMessage>(request.Messages[0]);
-        Assert.Contains(SystemPrompt, system.Text);
-        Assert.Contains("## 环境", system.Text);
-        Assert.Contains("/tmp/x", system.Text);
+        // 稳定 system prompt 在前，易变 SystemContext（快照）单独成条置于请求末尾——
+        // 稳定前缀（system prompt + 轨迹）逐字节不变，DeepSeek 前缀缓存才能命中。
+        Assert.Equal(3, request.Messages.Count);
+        var stable = Assert.IsType<SystemMessage>(request.Messages[0]);
+        Assert.Equal(SystemPrompt, stable.Text);
+        Assert.DoesNotContain("## 环境", stable.Text);   // 快照不再并进稳定前缀
+        Assert.IsType<UserMessage>(request.Messages[1]);
+        var snapshot = Assert.IsType<SystemMessage>(request.Messages[2]);
+        Assert.Contains("## 环境", snapshot.Text);
+        Assert.Contains("/tmp/x", snapshot.Text);
     }
 
     [Fact]
-    public async Task RunAsync_SystemContextWithoutSystemPrompt_IsSystemMessage()
+    public async Task RunAsync_SystemContextWithoutSystemPrompt_IsTrailingSystemMessage()
     {
         var model = new FakeChatModel();
         model.Enqueue(_ => Response("ok"));
@@ -170,7 +175,9 @@ public sealed class ReActTests
         await loop.RunAsync(Request(systemContext: "snapshot only"));
 
         var request = Assert.Single(model.Requests);
-        var system = Assert.IsType<SystemMessage>(request.Messages[0]);
+        Assert.Equal(2, request.Messages.Count);   // [user, system(snapshot)]
+        Assert.IsType<UserMessage>(request.Messages[0]);
+        var system = Assert.IsType<SystemMessage>(request.Messages[1]);
         Assert.Equal("snapshot only", system.Text);
     }
 
