@@ -1,18 +1,19 @@
 using Common.Events;
 using Core.AgentLoop;
+using Core.Configuration;
 using Core.Llm;
 using Core.Sessions;
 using Core.Tools;
 using Di.Cli;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
-// 组合根：加载真实配置（appsettings.json + 环境变量）→ AddDi() 装配模型层与事件总线。
-var configuration = new ConfigurationBuilder()
-    .SetBasePath(AppContext.BaseDirectory)   // appsettings.json 随构建拷贝到输出目录
-    .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
-    .AddEnvironmentVariables()
-    .Build();
+// 组合根：分层配置（appsettings → ~/.di/config.json → <workspace>/.di/config.json → 环境变量）
+// → AddDi() 装配模型层与事件总线。
+var diHome = DiHome.Resolve();
+var workspace = Directory.GetCurrentDirectory();
+var configuration = DiConfig.Load(workspace, diHome.RootDirectory);
 
 var services = new ServiceCollection();
 services.AddDi(configuration);
@@ -32,38 +33,48 @@ catch (InvalidOperationException ex)
     return 1;
 }
 
-var workspace = Directory.GetCurrentDirectory();
+var agentLoop = provider.GetRequiredService<IOptions<AgentLoopOptions>>().Value;
+var modelOptions = provider.GetRequiredService<IOptions<ModelOptions>>().Value;
+var replOptions = provider.GetRequiredService<IOptions<ReplOptions>>().Value;
 
 using var executor = CoreTools.CreateExecutor(workspace);
+
+// 默认提示词 = 内置工具说明 + 简洁助手人格；配置里显式写了 AgentLoop:SystemPrompt 则整体覆盖。
+var systemPrompt = string.IsNullOrWhiteSpace(agentLoop.SystemPrompt)
+    ? CoreTools.Instructions + "\n\n" +
+      "你是一个简洁的 ReAct 助手。需要事实信息时调用工具，不要编造。回答用中文。"
+    : agentLoop.SystemPrompt;
 
 var runner = new AgentRunner(
     provider.GetRequiredService<Func<string, IChatModel>>(),
     executor,
     new AgentLoopOptions
     {
-        // stable_prefix：核心工具使用说明（七个内置编码工具）始终在系统提示最前面。
-        SystemPrompt = CoreTools.Instructions + "\n\n" +
-                       "你是一个简洁的 ReAct 助手。需要事实信息时调用工具，不要编造。回答用中文。",
-        MaxIterations = 8,
+        SystemPrompt = systemPrompt,
+        MaxIterations = agentLoop.MaxIterations,
     },
     provider.GetRequiredService<IEventBus>(),
     CoreTools.Definitions(workspace),
-    workingDirectory: workspace);
+    workingDirectory: workspace)
+{
+    // 默认模型来自配置（Model:DefaultModel），之后仍可 /model 切换。
+    CurrentModel = modelOptions.DefaultModel,
+};
 
 // 会话持久化：整个 CLI 运行写成一个 JSONL（~/.di/sessions/YYYY/MM/DD/）。
 // 记录为尽力而为——磁盘错误只告警，绝不中断聊天。
-var sessionLog = new SessionLog(new SessionLogOptions());
+var sessionLog = new SessionLog(new SessionLogOptions { RootDirectory = diHome.RootDirectory });
+
+// 输出重定向（管道/文件）时不写 ANSI 控制序列，避免污染捕获输出（覆盖配置默认）。
+if (Console.IsOutputRedirected)
+    replOptions.UseAnsi = false;
 
 var repl = new Repl(
     runner,
     provider.GetRequiredService<IEventBus>(),
     new ConsoleLineReader(),
     Console.Out,
-    new ReplOptions
-    {
-        // 输出重定向（管道/文件）时不写 ANSI 控制序列，避免污染捕获输出。
-        UseAnsi = !Console.IsOutputRedirected,
-    },
+    replOptions,
     sessionLog);
 
 await repl.RunAsync();
