@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Common.Events;
 using Core.AgentLoop;
@@ -200,7 +201,7 @@ public sealed class AgentRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_WithWorkingDirectory_InjectsEnvironmentSnapshot()
+    public async Task RunAsync_WithWorkingDirectory_InjectsSnapshotIntoHistory()
     {
         var dir = Directory.CreateTempSubdirectory("di-runner-").FullName;
         try
@@ -217,7 +218,8 @@ public sealed class AgentRunnerTests
 
             var request = Assert.Single(model.Requests);
             Assert.Equal("sys", Assert.IsType<SystemMessage>(request.Messages[0]).Text);   // 稳定前缀独立
-            var snapshot = Assert.IsType<SystemMessage>(request.Messages[^1]);             // 环境快照置请求末尾
+            // 环境快照进持久历史，位于 system prompt 之后、用户消息之前（不再每回合在请求末尾重复注入）。
+            var snapshot = Assert.IsType<SystemMessage>(request.Messages[1]);
             Assert.Contains("工作目录", snapshot.Text);
             Assert.Contains(dir, snapshot.Text);
         }
@@ -225,6 +227,142 @@ public sealed class AgentRunnerTests
         {
             try { Directory.Delete(dir, recursive: true); } catch { }
         }
+    }
+
+    [Fact]
+    public async Task RunAsync_SnapshotUnchanged_NotReinjectedNextTurn()
+    {
+        var dir = Directory.CreateTempSubdirectory("di-runner-").FullName;
+        try
+        {
+            var model = new FakeChatModel();
+            var runner = new AgentRunner(
+                _ => model,
+                new FakeToolExecutor(),
+                new AgentLoopOptions { SystemPrompt = "sys" },
+                new InMemoryEventBus(),
+                workingDirectory: dir);
+
+            await runner.RunAsync("第一问");
+            await runner.RunAsync("第二问");
+
+            var second = model.Requests[1];
+            // 快照内容未变：只在历史里出现一次，不重复注入。
+            var snapshots = second.Messages.OfType<SystemMessage>()
+                .Where(m => m.Text.Contains("工作目录")).ToList();
+            Assert.Single(snapshots);
+            // 布局 [0]=sys [1]=快照 [2]=第一问 —— 快照仍是历史首条，第二问直接跟在轨迹后面。
+            Assert.Equal("第一问", ChatMessageExtensions.GetText(second.Messages[2]));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_SnapshotChanged_AppendsUpdatedSnapshot()
+    {
+        if (FindGit() is null) return;   // 无 git 则跳过（与 Di.Tests 同款策略）
+        var repo = InitGitRepo();
+        try
+        {
+            var model = new FakeChatModel();
+            var runner = new AgentRunner(
+                _ => model,
+                new FakeToolExecutor(),
+                new AgentLoopOptions { SystemPrompt = "sys" },
+                new InMemoryEventBus(),
+                workingDirectory: repo);
+
+            await runner.RunAsync("第一问");
+            File.WriteAllText(Path.Combine(repo, "changed.txt"), "x");   // 让 git 状态发生变化
+            await runner.RunAsync("第二问");
+
+            var second = model.Requests[1];
+            var snapshots = second.Messages.OfType<SystemMessage>()
+                .Where(m => m.Text.Contains("工作目录")).ToList();
+            Assert.Equal(2, snapshots.Count);                 // 旧快照 + 变化后的新快照
+            Assert.Contains("changed.txt", snapshots[1].Text);   // 新快照带上未提交变更
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task ResetHistory_ReinjectsFreshSnapshot()
+    {
+        var dir = Directory.CreateTempSubdirectory("di-runner-").FullName;
+        try
+        {
+            var model = new FakeChatModel();
+            var runner = new AgentRunner(
+                _ => model,
+                new FakeToolExecutor(),
+                new AgentLoopOptions { SystemPrompt = "sys" },
+                new InMemoryEventBus(),
+                workingDirectory: dir);
+
+            await runner.RunAsync("第一问");
+            runner.ResetHistory();
+            await runner.RunAsync("第二问");
+
+            var second = model.Requests[^1];
+            // 重置后历史清空，快照重新作为首条历史注入。
+            Assert.Equal("sys", Assert.IsType<SystemMessage>(second.Messages[0]).Text);
+            Assert.Contains("工作目录", Assert.IsType<SystemMessage>(second.Messages[1]).Text);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    // ---- 工具：git 探测 / 临时仓库（与 Di.Tests/EnvironmentSnapshotTests 同款策略）----
+
+    private static string? FindGit()
+    {
+        try
+        {
+            using var p = Process.Start(new ProcessStartInfo("git", "--version")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            p!.WaitForExit(5000);
+            return p.ExitCode == 0 ? "git" : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string InitGitRepo()
+    {
+        var dir = Directory.CreateTempSubdirectory("di-git-").FullName;
+        RunGit(dir, "init", "-q");
+        RunGit(dir, "config", "user.name", "Test");
+        RunGit(dir, "config", "user.email", "test@example.com");
+        RunGit(dir, "commit", "--allow-empty", "-q", "-m", "init");
+        return dir;
+    }
+
+    private static void RunGit(string dir, params string[] args)
+    {
+        using var p = Process.Start(new ProcessStartInfo("git", string.Join(' ', args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a)))
+        {
+            WorkingDirectory = dir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        })!;
+        p.WaitForExit(20000);
+        Assert.True(p.ExitCode == 0, $"git {string.Join(' ', args)} 失败: {p.StandardError.ReadToEnd()}");
     }
 
     private sealed class FakeChatModel : IChatModel

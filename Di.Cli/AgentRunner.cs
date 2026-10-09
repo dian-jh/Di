@@ -26,6 +26,10 @@ public sealed class AgentRunner : IAgentRunner
     private readonly int _maxHistoryTurns;
     private IReadOnlyList<ChatMessage> _history = [];
 
+    /// <summary>最近一次追加进历史的快照文本。快照只在内容变化时追加（见 <see cref="RunAsync"/>），
+    /// 未变时不重复注入 → 已进入历史的快照留在字节稳定前缀里，跨回合持续命中缓存。</summary>
+    private string? _lastSnapshotText;
+
     public AgentRunner(
         Func<string, IChatModel> modelFactory,
         IToolExecutor toolExecutor,
@@ -60,30 +64,40 @@ public sealed class AgentRunner : IAgentRunner
     /// </summary>
     public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
 
-    public void ResetHistory() => _history = [];
+    public void ResetHistory()
+    {
+        _history = [];
+        _lastSnapshotText = null;   // 重置后快照应重新注入
+    }
 
     public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
     {
         var model = _modelFactory(CurrentModel);
         var react = new ReAct(model, _options, _eventBus);
 
-        // 系统上下文 = 环境快照 + 已激活 skill 的指令。skill 是用户显式挂上的工作流，
-        // 放在快照之后更贴近本轮任务；两者都尽力而为，绝不阻塞回合。
-        string? systemContext = null;
+        // 环境快照进持久历史，且只在内容变化时追加：稳定时它留在字节稳定前缀里，跨回合/迭代
+        // 持续命中缓存，零重复支付；变化时（git 状态改变等）作为新 system 消息追加到历史末尾，
+        // 付一次成本后也进入缓存前缀。相比"每回合重发到请求末尾"，不再为未变化的环境反复花钱。
         if (!string.IsNullOrWhiteSpace(_workingDirectory))
         {
-            systemContext = await EnvironmentSnapshot.CaptureAsync(_workingDirectory, cancellationToken: cancellationToken)
+            var snapshot = await EnvironmentSnapshot.CaptureAsync(_workingDirectory, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
+            if (snapshot != _lastSnapshotText)
+            {
+                _lastSnapshotText = snapshot;
+                _history = [.. _history, ChatMessage.System(snapshot)];
+            }
         }
-        // 广告块：未激活的 skill 只注入 name+description（渐进式披露的 Advertise 阶段），
-        // 完整指令由模型按需 load_skill 加载，避免常驻全部正文。已激活的 skill 已完整注入，无需再广告。
+
+        // 系统上下文 = 已激活 skill 的指令 + 未激活 skill 的广告块（渐进式披露的 Advertise 阶段）。
+        // skill 是用户/匹配器按本轮任务选定的，语义上属于本轮，仍放请求末尾（易变但体量小、有界）。
+        // 广告块：未激活的 skill 只注入 name+description，完整指令由模型按需 load_skill 加载。
+        string? systemContext = null;
         var advertised = _skills.Where(s => !ActiveSkills.Contains(s)).ToList();
         if (advertised.Count > 0)
         {
             var advertise = "可用 skills（需要时用 load_skill 加载完整指令）：\n" + SkillContext.BuildAdvertisement(advertised);
-            systemContext = systemContext is null
-                ? advertise
-                : systemContext + "\n\n" + advertise;
+            systemContext = advertise;
         }
         // 固定激活（/skill）与自动匹配的 skill：完整指令注入——这是用户/匹配器显式选定的工作流。
         if (ActiveSkills is { Count: > 0 })
