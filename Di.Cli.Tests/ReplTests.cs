@@ -135,7 +135,7 @@ public sealed class ReplTests
 
         await repl.RunAsync();
 
-        Assert.Same(skill, runner.ActiveSkill);
+        Assert.Contains(skill, runner.ActiveSkills);
         Assert.Contains("已激活 skill：backend-tests", output.ToString());
     }
 
@@ -146,20 +146,48 @@ public sealed class ReplTests
 
         await repl.RunAsync();
 
-        Assert.Null(runner.ActiveSkill);
+        Assert.Empty(runner.ActiveSkills);
         Assert.Contains("未找到 skill：nope", output.ToString());
     }
 
     [Fact]
-    public async Task SkillCommand_Off_Deactivates()
+    public async Task SkillCommand_Stacking_PinsMultiple()
+    {
+        var a = new Skill { Name = "backend-tests", Description = "跑后端测试", Instructions = "i" };
+        var b = new Skill { Name = "deploy", Description = "部署到生产", Instructions = "i" };
+        var (repl, output, runner) = SetupWithSkills([a, b],
+            "/skill backend-tests", "/skill deploy", "/skills", "/exit");
+
+        await repl.RunAsync();
+
+        Assert.Equal(2, runner.ActiveSkills.Count);
+        Assert.Contains(a, runner.ActiveSkills);
+        Assert.Contains(b, runner.ActiveSkills);
+        Assert.Contains("[*] backend-tests", output.ToString());   // /skills 以 * 标记固定项
+    }
+
+    [Fact]
+    public async Task SkillCommand_Toggle_UnpinsOnSecondActivate()
+    {
+        var skill = new Skill { Name = "backend-tests", Description = "d", Instructions = "i" };
+        var (repl, output, runner) = SetupWithSkills([skill], "/skill backend-tests", "/skill backend-tests", "/exit");
+
+        await repl.RunAsync();
+
+        Assert.Empty(runner.ActiveSkills);
+        Assert.Contains("已停用 skill：backend-tests", output.ToString());
+    }
+
+    [Fact]
+    public async Task SkillCommand_Off_DeactivatesAll()
     {
         var skill = new Skill { Name = "backend-tests", Description = "d", Instructions = "i" };
         var (repl, output, runner) = SetupWithSkills([skill], "/skill backend-tests", "/skill off", "/exit");
 
         await repl.RunAsync();
 
-        Assert.Null(runner.ActiveSkill);
-        Assert.Contains("已停用 skill", output.ToString());
+        Assert.Empty(runner.ActiveSkills);
+        Assert.Contains("已停用全部 skill", output.ToString());
     }
 
     [Fact]
@@ -169,8 +197,57 @@ public sealed class ReplTests
 
         await repl.RunAsync();
 
-        Assert.Null(runner.ActiveSkill);
+        Assert.Empty(runner.ActiveSkills);
         Assert.Contains("用法: /skill", output.ToString());
+    }
+
+    [Fact]
+    public async Task AutoMatch_LoadsRelevantSkill_OnEachTurn()
+    {
+        var skill = new Skill { Name = "backend-tests", Description = "运行并修复后端测试", Instructions = "i" };
+        var (repl, output, runner) = SetupWithSkills([skill], "运行测试", "/exit");
+
+        await repl.RunAsync();
+
+        Assert.Contains(skill, runner.ActiveSkills);
+        Assert.Contains("自动加载 skill：backend-tests", output.ToString());
+    }
+
+    [Fact]
+    public async Task AutoMatch_DoesNotAccumulateAcrossTurns()
+    {
+        var skill = new Skill { Name = "backend-tests", Description = "运行并修复后端测试", Instructions = "i" };
+        var (repl, _, runner) = SetupWithSkills([skill], "运行测试", "今天天气如何", "/exit");
+
+        await repl.RunAsync();
+
+        // 第一回合自动加载；第二回合不相关 → 每回合重算，不累积。
+        Assert.Empty(runner.ActiveSkills);
+    }
+
+    [Fact]
+    public async Task AutoMatch_UnrelatedMessage_LoadsNothing()
+    {
+        var skill = new Skill { Name = "backend-tests", Description = "运行并修复后端测试", Instructions = "i" };
+        var (repl, output, runner) = SetupWithSkills([skill], "今天天气如何", "/exit");
+
+        await repl.RunAsync();
+
+        Assert.Empty(runner.ActiveSkills);
+        Assert.DoesNotContain("自动加载 skill", output.ToString());
+    }
+
+    [Fact]
+    public async Task AutoMatch_DoesNotDuplicatePinnedSkill()
+    {
+        var skill = new Skill { Name = "backend-tests", Description = "运行并修复后端测试", Instructions = "i" };
+        var (repl, _, runner) = SetupWithSkills([skill], "/skill backend-tests", "运行测试", "/exit");
+
+        await repl.RunAsync();
+
+        // 固定集已含该 skill，自动匹配不重复加。
+        Assert.Single(runner.ActiveSkills);
+        Assert.Contains(skill, runner.ActiveSkills);
     }
 
     [Fact]
@@ -284,7 +361,7 @@ public sealed class ReplTests
 
         public string CurrentModel { get; set; } = "deepseek-flash";
 
-        public Skill? ActiveSkill { get; set; }
+        public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
 
         public List<string> Messages { get; } = [];
 
@@ -315,7 +392,7 @@ public sealed class ReplTests
     {
         public string CurrentModel { get; set; } = "deepseek-flash";
 
-        public Skill? ActiveSkill { get; set; }
+        public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
 
         public Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("boom");

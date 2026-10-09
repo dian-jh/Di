@@ -45,8 +45,11 @@ public sealed class AgentRunner : IAgentRunner
 
     public string CurrentModel { get; set; } = "deepseek-flash";
 
-    /// <summary>当前激活的 skill（/skill 命令设置）：指令随每个回合注入系统上下文。null = 未激活。</summary>
-    public Skill? ActiveSkill { get; set; }
+    /// <summary>
+    /// 当前注入的 skills（可叠加）：固定激活（/skill 设置，跨回合保持）+ 每回合自动匹配（host 临时算）。
+    /// 指令按顺序拼进系统上下文。
+    /// </summary>
+    public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
 
     public void ResetHistory() => _history = [];
 
@@ -63,9 +66,10 @@ public sealed class AgentRunner : IAgentRunner
             systemContext = await EnvironmentSnapshot.CaptureAsync(_workingDirectory, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
-        if (ActiveSkill is not null)
+        if (ActiveSkills is { Count: > 0 })
         {
-            var skillContext = $"【已激活 Skill：{ActiveSkill.Name}】\n{ActiveSkill.Instructions}";
+            var skillContext = string.Join("\n\n", ActiveSkills
+                .Select(s => $"【已激活 Skill：{s.Name}】\n{s.Instructions}"));
             systemContext = systemContext is null
                 ? skillContext
                 : systemContext + "\n\n" + skillContext;

@@ -12,8 +12,8 @@ public interface IAgentRunner
     /// <summary>当前生效的模型名（/model 命令可切换）。</summary>
     string CurrentModel { get; set; }
 
-    /// <summary>当前激活的 skill（/skill 命令设置），其指令随每个回合注入系统上下文。null = 未激活。</summary>
-    Skill? ActiveSkill { get; set; }
+    /// <summary>当前注入的 skills（固定激活 + 每回合自动匹配，可叠加），指令随每个回合注入系统上下文。</summary>
+    IReadOnlyList<Skill> ActiveSkills { get; set; }
 
     /// <summary>运行一个用户回合，返回最终结果。</summary>
     Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default);

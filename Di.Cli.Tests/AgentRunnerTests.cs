@@ -121,18 +121,41 @@ public sealed class AgentRunnerTests
             new AgentLoopOptions { SystemPrompt = "sys" },
             new InMemoryEventBus());
 
-        runner.ActiveSkill = new Skill
-        {
-            Name = "backend-tests",
-            Description = "跑后端测试",
-            Instructions = "先 dotnet build 再 dotnet test",
-        };
+        runner.ActiveSkills =
+        [
+            new Skill { Name = "backend-tests", Description = "跑后端测试", Instructions = "先 dotnet build 再 dotnet test" },
+        ];
         await runner.RunAsync("hi");
 
         var request = Assert.Single(model.Requests);
         var system = Assert.IsType<SystemMessage>(request.Messages[0]);
         Assert.Contains("backend-tests", system.Text);
         Assert.Contains("先 dotnet build 再 dotnet test", system.Text);
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMultipleActiveSkills_AppendsAllInOrder()
+    {
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus());
+
+        runner.ActiveSkills =
+        [
+            new Skill { Name = "a", Description = "d", Instructions = "指令 A" },
+            new Skill { Name = "b", Description = "d", Instructions = "指令 B" },
+        ];
+        await runner.RunAsync("hi");
+
+        var request = Assert.Single(model.Requests);
+        var system = Assert.IsType<SystemMessage>(request.Messages[0]);
+        var indexA = system.Text.IndexOf("指令 A", StringComparison.Ordinal);
+        var indexB = system.Text.IndexOf("指令 B", StringComparison.Ordinal);
+        Assert.True(indexA >= 0 && indexB >= 0);
+        Assert.True(indexA < indexB, "多个 skill 应按 ActiveSkills 顺序注入");
     }
 
     [Fact]

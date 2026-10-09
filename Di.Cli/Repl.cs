@@ -19,10 +19,14 @@ public sealed class Repl
     private readonly ReplOptions _options;
     private readonly EventRenderer _renderer;
     private readonly SessionLog? _sessionLog;
-    private readonly IReadOnlyList<Skill>? _skills;
+    private readonly IReadOnlyList<Skill> _skills;
+    private readonly ISkillMatcher _matcher;
+
+    /// <summary>固定激活的 skills（/skill 手动设置，跨回合保持）。自动匹配的结果是每回合临时算的，不存这里。</summary>
+    private readonly List<Skill> _pinned = [];
 
     public Repl(IAgentRunner runner, IEventBus bus, ILineReader reader, TextWriter output, ReplOptions options,
-        SessionLog? sessionLog = null, IReadOnlyList<Skill>? skills = null)
+        SessionLog? sessionLog = null, IReadOnlyList<Skill>? skills = null, ISkillMatcher? matcher = null)
     {
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
@@ -31,7 +35,8 @@ public sealed class Repl
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _renderer = new EventRenderer(output, options.UseAnsi);
         _sessionLog = sessionLog;
-        _skills = skills;
+        _skills = skills ?? [];
+        _matcher = matcher ?? new LexicalSkillMatcher();
     }
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
@@ -80,6 +85,15 @@ public sealed class Repl
         using var renderCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         var renderTask = RenderAsync(consumer, renderCts.Token);
+
+        // 自动匹配：按本条消息与 skill 描述的语义相关度加载未固定的 skill。
+        // 固定集（/skill 手动激活）不受影响，二者可叠加；匹配结果每回合重算，不累积。
+        var autoMatched = _matcher.Match(userMessage, _skills)
+            .Where(m => !_pinned.Contains(m.Skill))
+            .ToList();
+        _runner.ActiveSkills = [.. _pinned, .. autoMatched.Select(m => m.Skill)];
+        if (autoMatched.Count > 0)
+            _output.WriteLine("⟦ 自动加载 skill：" + string.Join("、", autoMatched.Select(m => m.Skill.Name)) + "⟧");
 
         // 模型首个输出可能延迟数秒（网络/思考），先给出可见反馈，首个事件到达时被擦除。
         _renderer.ShowStatus(_options.WorkingStatusText);
@@ -191,41 +205,54 @@ public sealed class Repl
         return space < 0 ? (command, string.Empty) : (command[..space], command[(space + 1)..].Trim());
     }
 
-    /// <summary>/skills：列出所有可用 skill（用户级 + 项目级已合并）。</summary>
+    /// <summary>/skills：列出所有可用 skill（用户级 + 项目级已合并），固定的以 * 标记。</summary>
     private void ListSkills()
     {
-        if (_skills is null || _skills.Count == 0)
+        if (_skills.Count == 0)
         {
             _output.WriteLine("没有可用 skill。把 SKILL.md 放在 ~/.di/skills/<名称>/ 或 <工作区>/.di/skills/<名称>/ 下。");
             return;
         }
         foreach (var skill in _skills)
-            _output.WriteLine($"  {skill.Name} —— {skill.Description}");
+        {
+            var marker = _pinned.Contains(skill) ? "*" : " ";
+            _output.WriteLine($"  [{marker}] {skill.Name} —— {skill.Description}");
+        }
     }
 
-    /// <summary>/skill：带名称激活，off/none 停用，无参数显示当前与用法。</summary>
+    /// <summary>/skill：带名称切换固定激活，off/none 清空固定集，无参数显示当前与用法。</summary>
     private void ActivateSkill(string name)
     {
         if (name.Length == 0)
         {
-            _output.WriteLine(_runner.ActiveSkill is null
-                ? "当前未激活 skill。用法: /skill <名称>（/skills 查看列表，/skill off 停用）"
-                : $"当前已激活：{_runner.ActiveSkill.Name}。用法: /skill <名称>（/skill off 停用）");
+            _output.WriteLine(_pinned.Count == 0
+                ? "当前未固定任何 skill。用法: /skill <名称> 激活（再输一次停用，/skill off 全部停用）。匹配到的 skill 也会自动加载。"
+                : $"当前已固定：{string.Join("、", _pinned.Select(s => s.Name))}。用法: /skill <名称> 切换。");
             return;
         }
         if (name is "off" or "none")
         {
-            _runner.ActiveSkill = null;
-            _output.WriteLine("已停用 skill");
+            _pinned.Clear();
+            _runner.ActiveSkills = [.. _pinned];
+            _output.WriteLine("已停用全部 skill");
             return;
         }
-        var skill = _skills?.FirstOrDefault(s => s.Name == name);
+        var skill = _skills.FirstOrDefault(s => s.Name == name);
         if (skill is null)
         {
             _output.WriteLine($"未找到 skill：{name}（/skills 查看可用列表）");
             return;
         }
-        _runner.ActiveSkill = skill;
-        _output.WriteLine($"已激活 skill：{skill.Name}");
+        if (_pinned.Contains(skill))
+        {
+            _pinned.Remove(skill);
+            _output.WriteLine($"已停用 skill：{skill.Name}");
+        }
+        else
+        {
+            _pinned.Add(skill);
+            _output.WriteLine($"已激活 skill：{skill.Name}");
+        }
+        _runner.ActiveSkills = [.. _pinned];
     }
 }

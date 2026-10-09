@@ -120,9 +120,12 @@ export Model__DefaultModel=deepseek-flash
 
 ## 6. 将来扩展（格式预留给定）
 
-- **skills**：`skills/<name>/SKILL.md`（frontmatter `name`/`description` + 正文指令）。已实现 MVP：
-  用户级 + 项目级两级发现（项目覆盖同名用户级），`/skills` 列出、`/skill <名称>` 激活（指令随每回合
-  注入系统上下文）、`/skill off` 停用。对齐 Claude Code 的 SKILL.md，社区 skill 可直接迁移。
+- **skills**：`skills/<name>/SKILL.md`（frontmatter `name`/`description` + 正文指令）。已实现：
+  - 两级发现（用户 `~/.di/skills` + 项目 `.di/skills`，项目覆盖同名用户级）。
+  - **两种激活可叠加**：`/skill <名称>` 固定激活（跨回合保持，`/skills` 以 `*` 标记）；语义自动匹配
+    ——每回合按用户消息与 skill `name+description` 的相关度自动加载（`ISkillMatcher` 可替换接缝，
+    当前为离线词法匹配，将来可换 embedding 实现），固定与自动去重、每回合重算不累积。
+  - 对齐 Claude Code 的 SKILL.md，社区 skill 可直接迁移。
 - **commands**：`commands/<name>.md`，把 `Repl.RunCommand` 的 if/else 换成从该目录加载的注册表。
 - **MCP**：`mcp.json` 声明服务器（stdio 命令 + 环境），通过 `ICoreTool`/`IToolProvider` 桥接，
   ReAct 循环无感。
