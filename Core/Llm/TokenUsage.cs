@@ -23,10 +23,18 @@ public sealed record TokenUsage(
     public TokenUsage Add(TokenUsage other) => new(
         InputTokens + other.InputTokens,
         OutputTokens + other.OutputTokens,
-        TotalTokens is null || other.TotalTokens is null ? null : TotalTokens + other.TotalTokens,
-        CacheReadTokens is null || other.CacheReadTokens is null ? null : CacheReadTokens + other.CacheReadTokens,
-        CacheWriteTokens is null || other.CacheWriteTokens is null ? null : CacheWriteTokens + other.CacheWriteTokens,
-        ReasoningTokens is null || other.ReasoningTokens is null ? null : ReasoningTokens + other.ReasoningTokens);
+        SumOrNull(TotalTokens, other.TotalTokens),
+        SumOrNull(CacheReadTokens, other.CacheReadTokens),
+        SumOrNull(CacheWriteTokens, other.CacheWriteTokens),
+        SumOrNull(ReasoningTokens, other.ReasoningTokens));
+
+    /// <summary>
+    /// 可空字段的累加：单侧为 null（未上报/初始 Zero）时保留另一侧，避免
+    /// <c>TokenUsage.Zero.Add(x)</c> 把 x 的缓存/推理字段折叠成 null；
+    /// 两侧都有值才求和。null 语义是"未上报"，不是 0，因此不抹掉已知数据。
+    /// </summary>
+    private static int? SumOrNull(int? a, int? b) =>
+        a is null ? b : b is null ? a : a + b;
 
     public override string ToString() =>
         $"in={InputTokens} (cache_read={CacheReadTokens ?? 0}) out={OutputTokens} (reasoning={ReasoningTokens ?? 0}) total={TotalTokens ?? BillableInputTokens + OutputTokens}";
