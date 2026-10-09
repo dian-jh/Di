@@ -116,18 +116,36 @@ export Model__DefaultModel=deepseek-flash
 | 配置段绑定 | `Di.Cli/DiServiceCollectionExtensions.cs` | ✅ |
 | SessionLog 不再写 `config.json` | `Core/Sessions/SessionLog.cs` | ✅ |
 | 组合根决策入配置（prompt/迭代上限/默认模型/UI） | `Di.Cli/Program.cs` | ✅ |
-| Skills：SKILL.md 解析 + 两级发现 + 激活注入 | `Core/Skills/` + `Di.Cli/Repl.cs` | ✅ MVP |
+| Skills：MS 规范解析 + 两级发现 + 激活注入 | `Core/Skills/` + `Di.Cli/Repl.cs` | ✅ |
+| Skills：渐进式披露（广告块 + `load_skill` 工具） | `Core/Skills/SkillTools.cs` + `AgentRunner` | ✅ |
+| Skills：匹配器质量与上下文成本指标 | `Core/Skills/SkillEvaluator.cs` | ✅ |
 
 ## 6. 将来扩展（格式预留给定）
 
-- **skills**：`skills/<name>/SKILL.md`（frontmatter `name`/`description` + 正文指令）。已实现：
-  - 两级发现（用户 `~/.di/skills` + 项目 `.di/skills`，项目覆盖同名用户级）。
-  - **两种激活可叠加**：`/skill <名称>` 固定激活（跨回合保持，`/skills` 以 `*` 标记）；语义自动匹配
-    ——每回合按用户消息与 skill `name+description` 的相关度自动加载（`ISkillMatcher` 可替换接缝，
-    当前为离线词法匹配，将来可换 embedding 实现），固定与自动去重、每回合重算不累积。
-  - 对齐 Claude Code 的 SKILL.md，社区 skill 可直接迁移。
 - **commands**：`commands/<name>.md`，把 `Repl.RunCommand` 的 if/else 换成从该目录加载的注册表。
 - **MCP**：`mcp.json` 声明服务器（stdio 命令 + 环境），通过 `ICoreTool`/`IToolProvider` 桥接，
   ReAct 循环无感。
 - **项目级指令**：将来支持 `<workspace>/AGENTS.md` 作为项目指令注入（当前
   `CoreTools.Instructions` 是代码内默认，可被 `AgentLoop:SystemPrompt` 覆盖）。
+
+## 7. Skill 测试与指标
+
+对每个重要 skill 建议三类测试：
+
+| 类别 | 例子 | 验收目标 |
+|---|---|---|
+| 触发测试 | 用户提出符合 skill 用途的任务 | 正确选中该 skill |
+| 排除测试 | 用户提出相似但不适用的任务 | 不误触发 |
+| 执行测试 | 提供真实输入并运行完整工作流 | 结果符合预定义验收条件 |
+
+自动匹配的质量指标由 `Core/Skills/SkillEvaluator.cs` 在带标签用例集
+（`SkillTestCase(Message, ExpectedSkills)`）上统计，触发/排除测试即对应的标签用例：
+
+- **精确率** = 激活且应激活 ÷ 激活：被选中的 skill 里有多少确实该选。
+- **召回率** = 激活且应激活 ÷ 应激活：该选的 skill 里有多少被选中。
+- **无匹配率** = 未激活任何 skill 的用例占比（排除测试的反面）。
+- **上下文成本** = 每回合 skill 相关平均估算 token：`SkillContext.EstimateTokens`
+  （广告块 + 激活 skill 完整指令，约 4 字符/token）——衡量渐进式披露是否真的省了上下文。
+
+执行测试超出匹配器范围：按 skill 的实际工作流（调工具跑通）单独做集成验证。
+示例 skill：`examples/skills/backend-tests/SKILL.md`。

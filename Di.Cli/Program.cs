@@ -40,6 +40,13 @@ var replOptions = provider.GetRequiredService<IOptions<ReplOptions>>().Value;
 
 using var executor = CoreTools.CreateExecutor(workspace);
 
+// Skills：两级发现（用户 ~/.di/skills + 项目 .di/skills，项目覆盖同名用户级）；无效文件只告警。
+// 传给 AgentRunner（广告块 + load_skill 工具）与 Repl（列表 / 自动匹配）。
+var skills = SkillRepository.Load(
+    diHome.SkillsDirectory,
+    Path.Combine(DiHome.ProjectDirectory(workspace), "skills"),
+    warn: msg => Console.Error.WriteLine($"⚠ {msg}"));
+
 // 默认提示词 = 内置工具说明 + 简洁助手人格；配置里显式写了 AgentLoop:SystemPrompt 则整体覆盖。
 var systemPrompt = string.IsNullOrWhiteSpace(agentLoop.SystemPrompt)
     ? CoreTools.Instructions + "\n\n" +
@@ -56,7 +63,8 @@ var runner = new AgentRunner(
     },
     provider.GetRequiredService<IEventBus>(),
     CoreTools.Definitions(workspace),
-    workingDirectory: workspace)
+    workingDirectory: workspace,
+    skills: skills)
 {
     // 默认模型来自配置（Model:DefaultModel），之后仍可 /model 切换。
     CurrentModel = modelOptions.DefaultModel,
@@ -65,12 +73,6 @@ var runner = new AgentRunner(
 // 会话持久化：整个 CLI 运行写成一个 JSONL（~/.di/sessions/YYYY/MM/DD/）。
 // 记录为尽力而为——磁盘错误只告警，绝不中断聊天。
 var sessionLog = new SessionLog(new SessionLogOptions { RootDirectory = diHome.RootDirectory });
-
-// Skills：两级发现（用户 ~/.di/skills + 项目 .di/skills，项目覆盖同名用户级）；无效文件只告警。
-var skills = SkillRepository.Load(
-    diHome.SkillsDirectory,
-    Path.Combine(DiHome.ProjectDirectory(workspace), "skills"),
-    warn: msg => Console.Error.WriteLine($"⚠ {msg}"));
 
 // 输出重定向（管道/文件）时不写 ANSI 控制序列，避免污染捕获输出（覆盖配置默认）。
 if (Console.IsOutputRedirected)

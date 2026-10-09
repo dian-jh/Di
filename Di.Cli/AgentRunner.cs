@@ -21,6 +21,7 @@ public sealed class AgentRunner : IAgentRunner
     private readonly IEventBus _eventBus;
     private readonly IReadOnlyList<ChatTool> _tools;
     private readonly IToolExecutor _toolExecutor;
+    private readonly IReadOnlyList<Skill> _skills;
     private readonly string? _workingDirectory;
     private readonly int _maxHistoryTurns;
     private IReadOnlyList<ChatMessage> _history = [];
@@ -32,13 +33,21 @@ public sealed class AgentRunner : IAgentRunner
         IEventBus eventBus,
         IReadOnlyList<ChatTool>? tools = null,
         string? workingDirectory = null,
-        int maxHistoryTurns = DefaultMaxHistoryTurns)
+        int maxHistoryTurns = DefaultMaxHistoryTurns,
+        IReadOnlyList<Skill>? skills = null)
     {
         _modelFactory = modelFactory ?? throw new ArgumentNullException(nameof(modelFactory));
-        _toolExecutor = toolExecutor ?? throw new ArgumentNullException(nameof(toolExecutor));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
-        _tools = tools ?? [];
+        _skills = skills ?? [];
+        // 有 skill 时：给模型提供 load_skill 工具，并把执行器包一层拦截该调用；其余委托原执行器。
+        var toolList = tools is null ? new List<ChatTool>() : [.. tools];
+        if (_skills.Count > 0)
+            toolList.Add(SkillTools.LoadSkillTool);
+        _tools = toolList;
+        _toolExecutor = _skills.Count > 0
+            ? new SkillAwareExecutor(toolExecutor, _skills)
+            : toolExecutor ?? throw new ArgumentNullException(nameof(toolExecutor));
         _workingDirectory = workingDirectory;
         _maxHistoryTurns = Math.Max(0, maxHistoryTurns);
     }
@@ -66,6 +75,16 @@ public sealed class AgentRunner : IAgentRunner
             systemContext = await EnvironmentSnapshot.CaptureAsync(_workingDirectory, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
+        // 广告块：全部 skill 只注入 name+description（渐进式披露的 Advertise 阶段），
+        // 完整指令由模型按需 load_skill 加载，避免常驻全部正文。
+        if (_skills.Count > 0)
+        {
+            var advertise = "可用 skills（需要时用 load_skill 加载完整指令）：\n" + SkillContext.BuildAdvertisement(_skills);
+            systemContext = systemContext is null
+                ? advertise
+                : systemContext + "\n\n" + advertise;
+        }
+        // 固定激活（/skill）与自动匹配的 skill：完整指令注入——这是用户/匹配器显式选定的工作流。
         if (ActiveSkills is { Count: > 0 })
         {
             var skillContext = string.Join("\n\n", ActiveSkills

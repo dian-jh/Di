@@ -176,6 +176,28 @@ public sealed class AgentRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_WithSkills_AdvertisesAndAddsLoadSkillTool()
+    {
+        var model = new FakeChatModel();
+        var skill = new Skill { Name = "backend-tests", Description = "运行并修复后端测试", Instructions = "body" };
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus(),
+            skills: [skill]);
+
+        await runner.RunAsync("hi");
+
+        var request = Assert.Single(model.Requests);
+        var system = Assert.IsType<SystemMessage>(request.Messages[0]);
+        Assert.Contains("可用 skills", system.Text);
+        Assert.Contains("backend-tests", system.Text);
+        Assert.Contains("运行并修复后端测试", system.Text);
+        Assert.Contains(request.Tools, t => t.Name == "load_skill");
+    }
+
+    [Fact]
     public async Task RunAsync_WithWorkingDirectory_InjectsEnvironmentSnapshot()
     {
         var dir = Directory.CreateTempSubdirectory("di-runner-").FullName;
