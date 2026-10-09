@@ -292,6 +292,36 @@ public sealed class AgentRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_SnapshotTrimmedFromHistory_ReinjectedNextTurn()
+    {
+        var dir = Directory.CreateTempSubdirectory("di-runner-").FullName;
+        try
+        {
+            var model = new FakeChatModel();
+            var runner = new AgentRunner(
+                _ => model,
+                new FakeToolExecutor(),
+                new AgentLoopOptions { SystemPrompt = "sys" },
+                new InMemoryEventBus(),
+                workingDirectory: dir,
+                maxHistoryTurns: 1);
+
+            await runner.RunAsync("第一问");   // 快照进历史
+            await runner.RunAsync("第二问");   // 历史裁剪到 1 回合，快照被裁掉
+            await runner.RunAsync("第三问");   // 快照应重新注入
+
+            var third = model.Requests[^1];
+            Assert.Equal("sys", Assert.IsType<SystemMessage>(third.Messages[0]).Text);
+            // 裁剪把旧快照裁出历史后，第三回合应重新注入（快照作为历史末尾的 system 消息存在）。
+            Assert.Contains(third.Messages, m => m is SystemMessage s && s.Text.Contains("工作目录"));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task ResetHistory_ReinjectsFreshSnapshot()
     {
         var dir = Directory.CreateTempSubdirectory("di-runner-").FullName;

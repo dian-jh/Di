@@ -120,6 +120,9 @@ public sealed class AgentRunner : IAgentRunner
 
         // 累加本回合轨迹作为下一回合的记忆，并裁剪到最近 N 轮（按整回合在 user 消息处切）。
         _history = TrimHistory(result.Trajectory, _maxHistoryTurns);
+        // 裁剪可能把最早注入的快照裁出历史：重置标记，让下一回合重新注入（否则长期会话会失去环境上下文）。
+        if (_lastSnapshotText is not null && !_history.OfType<SystemMessage>().Any(m => m.Text == _lastSnapshotText))
+            _lastSnapshotText = null;
         return result;
     }
 
