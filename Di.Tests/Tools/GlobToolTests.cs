@@ -233,6 +233,22 @@ public sealed class GlobToolTests : IDisposable
     }
 
     [Fact]
+    public void Execute_SkipsBuildArtifactDirectories()
+    {
+        Write("src/real.cs");
+        Directory.CreateDirectory(Path.Combine(_base, "obj", "Debug"));
+        Directory.CreateDirectory(Path.Combine(_base, "bin", "Debug"));
+        File.WriteAllText(Path.Combine(_base, "obj", "Debug", "generated.cs"), "x");
+        File.WriteAllText(Path.Combine(_base, "bin", "Debug", "output.cs"), "x");
+
+        var result = NewTool().ExecuteAsync("""{"pattern":"**/*.cs"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("src/real.cs", result);
+        Assert.DoesNotContain("obj/", result);
+        Assert.DoesNotContain("bin/", result);
+    }
+
+    [Fact]
     public void Execute_TrailingSlashPattern_IsHarmless()
     {
         Write("src/a.cs");

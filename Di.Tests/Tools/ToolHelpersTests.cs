@@ -139,6 +139,24 @@ public sealed class ToolHelpersTests : IDisposable
     }
 
     [Fact]
+    public void EnumerateFiles_SkipsBuildAndVcsDirectories()
+    {
+        Directory.CreateDirectory(Path.Combine(_base, "src"));
+        File.WriteAllText(Path.Combine(_base, "src", "a.cs"), "x");
+        Directory.CreateDirectory(Path.Combine(_base, "obj"));
+        Directory.CreateDirectory(Path.Combine(_base, "node_modules"));
+        Directory.CreateDirectory(Path.Combine(_base, ".git"));
+        File.WriteAllText(Path.Combine(_base, "obj", "gen.cs"), "x");
+        File.WriteAllText(Path.Combine(_base, "node_modules", "lib.js"), "x");
+        File.WriteAllText(Path.Combine(_base, ".git", "config"), "x");
+
+        var files = ToolHelpers.EnumerateFiles(_base).ToList();
+
+        Assert.Single(files);   // 只命中 src/a.cs，obj/node_modules/.git 下的被跳过
+        Assert.Contains(files, f => f.EndsWith("a.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void EnumerateFiles_SymlinkCycle_TerminatesWithoutInfiniteLoop()
     {
         // 链接目录指向祖先 → 朴素遍历会无限循环（Windows junction / Unix symlink）。

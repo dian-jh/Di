@@ -92,6 +92,8 @@ internal static class ToolHelpers
 
     /// <summary>
     /// 递归列出目录下所有文件；无权限/被占用的子目录跳过，不让整个遍历失败。
+    /// 构建产物/依赖/版本控制等目录（obj、bin、node_modules、.git、__pycache__……）按名跳过——
+    /// glob/grep 都不该搜它们（真实测试里 obj/Debug 的生成文件曾污染 glob 结果）。
     /// 符号链接/联接（junction）子目录被跳过：Windows 常见 junction 环（如指向祖先目录）
     /// 会让朴素遍历无限循环。搜索起点本身若是链接仍正常遍历（用户可能把工作区建在链接上）。
     /// </summary>
@@ -119,9 +121,22 @@ internal static class ToolHelpers
             foreach (var file in files)
                 yield return file;
             foreach (var sub in dirs)
+            {
+                if (IsExcludedDirectory(sub))
+                    continue;
                 pending.Push((sub, false));
+            }
         }
     }
+
+    /// <summary>按目录名排除的构建产物/依赖/版本控制目录（大小写不敏感）。</summary>
+    private static readonly HashSet<string> ExcludedDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "obj", "bin", "node_modules", ".git", ".hg", ".svn", ".vs", ".idea", "__pycache__", ".venv", "venv",
+    };
+
+    private static bool IsExcludedDirectory(string dir) =>
+        ExcludedDirectoryNames.Contains(Path.GetFileName(dir));
 
     /// <summary>判断目录是否为符号链接/联接（junction）——深入会带来目录环，遍历时跳过。</summary>
     private static bool IsLink(string dir)
