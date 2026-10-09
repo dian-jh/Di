@@ -9,6 +9,7 @@ public static class SkillRepository
 {
     /// <summary>
     /// 加载全部 skill，按名称排序返回。发现规则：&lt;root&gt;/&lt;name&gt;/SKILL.md。
+    /// frontmatter 的 name 必须与父目录名一致（MS 规范），否则该 skill 跳过并告警。
     /// <paramref name="warn"/> 用于上报无效条目（null = 静默跳过）。
     /// </summary>
     public static IReadOnlyList<Skill> Load(string userDirectory, string projectDirectory, Action<string>? warn = null)
@@ -30,7 +31,7 @@ public static class SkillRepository
                 continue;   // 目录下没有 SKILL.md 就不是 skill
             try
             {
-                var skill = SkillMarkdown.Parse(File.ReadAllText(markdown));
+                var skill = SkillMarkdown.Parse(File.ReadAllText(markdown), expectedName: Path.GetFileName(dir));
                 into[skill.Name] = skill;
             }
             catch (Exception ex) when (ex is SkillFormatException or IOException or UnauthorizedAccessException)

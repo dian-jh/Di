@@ -96,4 +96,20 @@ public sealed class SkillRepositoryTests : IDisposable
         var warning = Assert.Single(warnings);
         Assert.Contains("bad", warning);
     }
+
+    [Fact]
+    public void Load_SkipsSkillWhoseNameMismatchesDirectory_AndWarns()
+    {
+        // frontmatter name 必须匹配父目录名（MS 规范）：目录 foo 里写 name: bar → 跳过并告警。
+        var dir = Path.Combine(UserDir, "foo");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "SKILL.md"), "---\nname: bar\ndescription: y\n---\nbody");
+
+        var warnings = new List<string>();
+        var skills = SkillRepository.Load(UserDir, ProjectDir, warn: warnings.Add);
+
+        Assert.Empty(skills);
+        var warning = Assert.Single(warnings);
+        Assert.Contains("foo", warning);
+    }
 }
