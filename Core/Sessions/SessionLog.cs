@@ -4,16 +4,16 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Core.AgentLoop;
+using Core.Configuration;
 using Core.Llm;
 
 namespace Core.Sessions;
 
-/// <summary>会话持久化的根配置。默认写入 ~/.di（config.json + sessions/YYYY/MM/DD/*.jsonl）。</summary>
+/// <summary>会话持久化的根配置。默认写入 ~/.di/sessions/YYYY/MM/DD/*.jsonl（根目录经 <see cref="DiHome"/> 解析）。</summary>
 public sealed class SessionLogOptions
 {
     /// <summary>会话根目录。</summary>
-    public string RootDirectory { get; init; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".di");
+    public string RootDirectory { get; init; } = DiHome.Resolve().RootDirectory;
 
     /// <summary>写进 config.json 与 session_meta 的版本号。</summary>
     public string CliVersion { get; init; } = "0.1.0";
@@ -59,7 +59,6 @@ public sealed class SessionLog
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _cwd = Directory.GetCurrentDirectory();
         SessionId = Guid.NewGuid().ToString("N");
-        EnsureConfig();
         LogFilePath = BuildFilePath(_options.RootDirectory, SessionId);
         Directory.CreateDirectory(Path.GetDirectoryName(LogFilePath)!);
     }
@@ -200,21 +199,6 @@ public sealed class SessionLog
             Payload = payload,
         }, Json);
         File.AppendAllText(LogFilePath, line + "\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-    }
-
-    /// <summary>config.json 不存在时创建（含 schema 版本与 cli 版本）；已存在则原样保留。</summary>
-    private void EnsureConfig()
-    {
-        Directory.CreateDirectory(_options.RootDirectory);
-        var configPath = Path.Combine(_options.RootDirectory, "config.json");
-        if (File.Exists(configPath))
-            return;
-        var content = JsonSerializer.Serialize(new
-        {
-            SchemaVersion = 1,
-            CliVersion = _options.CliVersion,
-        }, Json);
-        File.WriteAllText(configPath, content + "\n", new UTF8Encoding(false));
     }
 
     private static string GetUserText(UserMessage user) =>

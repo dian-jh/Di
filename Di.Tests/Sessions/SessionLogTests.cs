@@ -56,21 +56,16 @@ public sealed class SessionLogTests : IDisposable
     }
 
     [Fact]
-    public void Ctor_CreatesConfigJson_WhenMissing_AndPreservesExisting()
+    public void Ctor_DoesNotCreateOrOverwriteUserConfigJson()
     {
-        _ = NewLog();   // 构造即应创建 config.json
+        // config.json 归用户所有：程序只读，不创建、不覆盖（见 docs/di-home.md §4 所有权规则）。
+        _ = NewLog();
 
-        var configPath = Path.Combine(_root, "config.json");
-        Assert.True(File.Exists(configPath));
+        Assert.False(File.Exists(Path.Combine(_root, "config.json")));
 
-        using var doc = JsonDocument.Parse(File.ReadAllText(configPath));
-        Assert.Equal(1, doc.RootElement.GetProperty("schema_version").GetInt32());
-        Assert.Equal("0.1.0", doc.RootElement.GetProperty("cli_version").GetString());
-
-        // 已存在的 config.json 不应被覆盖
-        File.WriteAllText(configPath, "{\"custom\":true}");
+        File.WriteAllText(Path.Combine(_root, "config.json"), "{\"custom\":true}");
         _ = new SessionLog(new SessionLogOptions { RootDirectory = _root });
-        Assert.Equal("{\"custom\":true}", File.ReadAllText(configPath));
+        Assert.Equal("{\"custom\":true}", File.ReadAllText(Path.Combine(_root, "config.json")));
     }
 
     [Fact]
