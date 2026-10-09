@@ -74,10 +74,16 @@ public sealed class SkillEvaluatorTests
     [Fact]
     public void EstimateTokens_GrowsWhenSkillsAreActive()
     {
-        var idle = SkillContext.EstimateTokens(TwoSkills, new HashSet<string>());
-        var active = SkillContext.EstimateTokens(TwoSkills, new HashSet<string> { "backend-tests" });
+        // 激活 = 广告行换成完整正文；正文比广告行长时成本上升（广告块会跳过已激活 skill）。
+        var skills = new[]
+        {
+            Skill("backend-tests", "运行并修复后端测试") with { Instructions = new string('x', 200) },
+            Skill("deploy", "部署到生产环境"),
+        };
+        var idle = SkillContext.EstimateTokens(skills, new HashSet<string>());
+        var active = SkillContext.EstimateTokens(skills, new HashSet<string> { "backend-tests" });
 
         Assert.True(idle > 0);
-        Assert.True(active > idle, "激活 skill 应比纯广告块更耗上下文");
+        Assert.True(active > idle, "激活长正文 skill 应比纯广告块更耗上下文");
     }
 }

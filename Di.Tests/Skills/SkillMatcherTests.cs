@@ -62,6 +62,19 @@ public sealed class SkillMatcherTests
     }
 
     [Fact]
+    public void Match_LongDescription_IsNotDiluted()
+    {
+        // 查询覆盖率：长描述不再稀释得分（Dice 的已知弱点——真实测试里 0.21 贴阈值导致没触发）。
+        var skill = Skill("backend-tests", "运行并修复后端测试，包括构建、失败定位与重跑。");
+        var matcher = new LexicalSkillMatcher();
+
+        var matches = matcher.Match("运行测试", [skill]);
+
+        var match = Assert.Single(matches);
+        Assert.True(match.Relevance >= 0.30, $"覆盖率过低: {match.Relevance}");
+    }
+
+    [Fact]
     public void Match_RespectsMaxMatches()
     {
         var skills = new[]

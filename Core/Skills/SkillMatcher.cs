@@ -18,13 +18,15 @@ public interface ISkillMatcher
 
 /// <summary>
 /// 词法匹配器：把用户消息与每个 skill 的 name+description 分词（ASCII 单词 + 中文二元组），
-/// 用 Dice 系数算重叠度，低于 <see cref="MinRelevance"/> 的过滤、超过 <see cref="MaxMatches"/> 的截断。
-/// 轻量、离线；中英混杂的转述匹配能力弱于 embedding 方案（那是升级路径，见 <see cref="ISkillMatcher"/>）。
+/// 用<b>查询覆盖率</b>（查询 token 里有多大比例出现在 skill 中）算相关度——
+/// 长描述不会被稀释（Dice 对称系数的已知弱点），低于 <see cref="MinRelevance"/> 的过滤、
+/// 超过 <see cref="MaxMatches"/> 的截断。轻量、离线；中英混杂的转述匹配能力弱于 embedding
+/// 方案（那是升级路径，见 <see cref="ISkillMatcher"/>）。
 /// </summary>
 public sealed class LexicalSkillMatcher : ISkillMatcher
 {
-    /// <summary>自动激活的最低相关度（Dice 系数，0~1）。</summary>
-    public double MinRelevance { get; init; } = 0.20;
+    /// <summary>自动激活的最低相关度（查询覆盖率，0~1）。</summary>
+    public double MinRelevance { get; init; } = 0.30;
 
     /// <summary>单条消息最多自动激活几个（防止描述宽泛的 skill 误伤一片）。</summary>
     public int MaxMatches { get; init; } = 3;
@@ -48,7 +50,7 @@ public sealed class LexicalSkillMatcher : ISkillMatcher
         foreach (var skill in skills)
         {
             var skillTokens = Tokenize($"{skill.Name} {skill.Description}");
-            var relevance = Dice(msgTokens, skillTokens);
+            var relevance = Coverage(msgTokens, skillTokens);
             if (relevance >= MinRelevance)
                 matches.Add(new SkillMatch(skill, relevance));
         }
@@ -93,14 +95,15 @@ public sealed class LexicalSkillMatcher : ISkillMatcher
         }
     }
 
-    private static double Dice(HashSet<string> a, HashSet<string> b)
+    /// <summary>查询覆盖率 = |查询 ∩ skill| / |查询|：衡量查询里多大比例被 skill 覆盖，长描述不稀释。</summary>
+    private static double Coverage(HashSet<string> query, HashSet<string> skill)
     {
-        if (a.Count == 0 || b.Count == 0)
+        if (query.Count == 0)
             return 0;
         var overlap = 0;
-        foreach (var token in a)
-            if (b.Contains(token))
+        foreach (var token in query)
+            if (skill.Contains(token))
                 overlap++;
-        return 2.0 * overlap / (a.Count + b.Count);
+        return (double)overlap / query.Count;
     }
 }

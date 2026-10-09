@@ -75,11 +75,12 @@ public sealed class AgentRunner : IAgentRunner
             systemContext = await EnvironmentSnapshot.CaptureAsync(_workingDirectory, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
-        // 广告块：全部 skill 只注入 name+description（渐进式披露的 Advertise 阶段），
-        // 完整指令由模型按需 load_skill 加载，避免常驻全部正文。
-        if (_skills.Count > 0)
+        // 广告块：未激活的 skill 只注入 name+description（渐进式披露的 Advertise 阶段），
+        // 完整指令由模型按需 load_skill 加载，避免常驻全部正文。已激活的 skill 已完整注入，无需再广告。
+        var advertised = _skills.Where(s => !ActiveSkills.Contains(s)).ToList();
+        if (advertised.Count > 0)
         {
-            var advertise = "可用 skills（需要时用 load_skill 加载完整指令）：\n" + SkillContext.BuildAdvertisement(_skills);
+            var advertise = "可用 skills（需要时用 load_skill 加载完整指令）：\n" + SkillContext.BuildAdvertisement(advertised);
             systemContext = systemContext is null
                 ? advertise
                 : systemContext + "\n\n" + advertise;
