@@ -1,11 +1,13 @@
-using Core.AgentLoop;
 using Core.Skills;
 
-namespace Di.Cli;
+namespace Core.AgentLoop;
 
 /// <summary>
-/// 一次聊天回合的驱动者：把用户输入变成一次 <see cref="ReAct"/> 运行。
-/// 由 UI 层调用；运行中的循环事件经共享总线发布，UI 再从总线消费渲染。
+/// 一次聊天回合的驱动者（harness 层会话 API）：把用户输入变成一次 <see cref="ReAct"/> 运行。
+/// 由 CLI 层调用；运行中的循环事件经共享总线发布，UI 再从总线消费渲染。
+///
+/// 这是 harness 与 CLI 之间的<b>稳定契约</b>：任何语言重写 CLI 层时，都通过这个接口
+/// 驱动同一个会话（配合 <see cref="AgentLoopEvent"/> 事件流与 <see cref="AgentResult"/> 结果）。
 /// </summary>
 public interface IAgentRunner
 {

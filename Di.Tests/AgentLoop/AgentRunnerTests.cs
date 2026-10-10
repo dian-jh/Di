@@ -4,9 +4,8 @@ using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
 using Core.Skills;
-using Di.Cli;
 
-namespace Di.Cli.Tests;
+namespace Di.Tests;
 
 /// <summary>
 /// 针对 <see cref="AgentRunner"/> 的单元测试：模型工厂按当前模型名解析模型，
