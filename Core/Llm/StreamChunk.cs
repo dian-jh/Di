@@ -28,6 +28,9 @@ public abstract record StreamChunk
     /// <summary>块结束，携带装配好的完整块。</summary>
     public sealed record BlockEnd(int Index, IContentBlock Block) : StreamChunk;
 
+    /// <summary>提供方响应标识（首个 chunk 携带，用于追溯/日志）。协议上非必须、可缺失。</summary>
+    public sealed record ResponseInfo(string? ResponseId) : StreamChunk;
+
     /// <summary>★ 必须在 Finish 之前发出。</summary>
     public sealed record Usage(TokenUsage Tokens) : StreamChunk;
 

@@ -25,22 +25,17 @@ public static class DeepSeekServiceCollectionExtensions
             .ConfigureHttpClient((sp, client) => client.Timeout =
                 TimeSpan.FromSeconds(sp.GetRequiredService<IOptions<DeepSeekAdapterConfig>>().Value.TimeoutSeconds));
 
+        // API Key 不再在装配时解析/抛错：缺省读环境变量，由 LlmRuntime 在<b>请求时</b>经凭证存储解析
+        // （宿主无密钥也能启动，UI 显示"未配置"）。
         services.AddSingleton<ChatAdapter>(sp =>
         {
             var config = sp.GetRequiredService<IOptions<DeepSeekAdapterConfig>>().Value;
-
-            var apiKey = config.ApiKey
-                ?? Environment.GetEnvironmentVariable(DeepSeekDefaults.ApiKeyEnvironmentVariable)
-                ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(apiKey))
-                throw new InvalidOperationException(
-                    "未配置 DeepSeek API Key：请设置环境变量 DEEPSEEK_API_KEY 或 appsettings.json 的 DeepSeek:ApiKey。");
 
             var baseUrl = config.BaseUrl
                 ?? (config.StrictTools ? DeepSeekDefaults.BetaEndpoint : DeepSeekDefaults.Endpoint);
 
             var http = sp.GetRequiredService<IHttpClientFactory>().CreateClient(DeepSeekDefaults.ProviderId);
-            return new DeepSeekAdapter(http, apiKey, config, baseUrl);
+            return new DeepSeekAdapter(http, config, baseUrl);
         });
 
         return services;

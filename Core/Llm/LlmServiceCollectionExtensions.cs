@@ -12,6 +12,9 @@ public static class LlmServiceCollectionExtensions
 {
     public static IServiceCollection AddLlm(this IServiceCollection services)
     {
+        // 凭证存储（默认环境变量实现；宿主可覆盖成持久化凭证库）。
+        services.AddSingleton<ILlmCredentialStore, EnvironmentCredentialStore>();
+
         services.AddSingleton<ILlmService>(sp =>
         {
             var adapters = sp.GetServices<ChatAdapter>().ToList();
@@ -19,7 +22,7 @@ public static class LlmServiceCollectionExtensions
                 throw new InvalidOperationException(
                     "未注册任何 ChatAdapter（例如调用 AddDeepSeek()）。模型层没有可用的 provider。");
 
-            var runtime = new LlmRuntime();
+            var runtime = new LlmRuntime(sp.GetRequiredService<ILlmCredentialStore>());
             foreach (var adapter in adapters)
             {
                 if (adapter.ProviderIds.Count == 0)

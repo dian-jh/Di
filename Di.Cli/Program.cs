@@ -20,19 +20,9 @@ var services = new ServiceCollection();
 services.AddDi(configuration);
 await using var provider = services.BuildServiceProvider();
 
-ILlmService llm;
-try
-{
-    // 首次解析会触发适配器装配；DeepSeek API Key 缺失时在这里抛 InvalidOperationException。
-    llm = provider.GetRequiredService<ILlmService>();
-}
-catch (InvalidOperationException ex)
-{
-    Console.Error.WriteLine($"模型层初始化失败: {ex.Message}");
-    if (ex.Message.Contains("API Key", StringComparison.OrdinalIgnoreCase))
-        Console.Error.WriteLine("提示：请先设置环境变量 DEEPSEEK_API_KEY 再运行。");
-    return 1;
-}
+// 首次解析触发适配器装配。API Key 不在启动时要求：凭据由模型层在<b>请求时</b>解析，
+// 未配置时 REPL 仍可启动，/model 列表与请求路径会提示"未配置"。
+_ = provider.GetRequiredService<ILlmService>();
 
 var agentLoop = provider.GetRequiredService<IOptions<AgentLoopOptions>>().Value;
 var modelOptions = provider.GetRequiredService<IOptions<ModelOptions>>().Value;

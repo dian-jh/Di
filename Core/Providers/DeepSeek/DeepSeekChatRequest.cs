@@ -36,6 +36,10 @@ internal sealed class DeepSeekChatRequest
 
     public double? TopP { get; set; }
 
+    public double? FrequencyPenalty { get; set; }
+
+    public double? PresencePenalty { get; set; }
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public List<DeepSeekTool>? Tools { get; set; }
 

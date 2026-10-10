@@ -49,11 +49,16 @@ public abstract record ChatToolChoice
 /// <item>推理强度是<b>不透明字符串 ID</b>（由适配器声明值域），不是共享枚举。</item>
 /// <item>不支持的值由适配器抛 <see cref="LlmErrorCodes.UnsupportedOption"/>，不静默降级。</item>
 /// </list>
+/// 用 record 而非 class：宿主（LlmRuntime）经 <c>with</c> 把请求时解析出的
+/// <see cref="ApiKey"/> 注入副本，保持其余字段不可变。
 /// </summary>
-public sealed class GenerateOptions
+public sealed record GenerateOptions
 {
     /// <summary>注册的 provider 路由，选择适配器实例。</summary>
     public required string Provider { get; init; }
+
+    /// <summary>请求时解析出的 API Key（宿主注入；缺失凭据时请求已被拒绝，不会到达这里）。</summary>
+    public string? ApiKey { get; init; }
 
     /// <summary>提供方自己的模型 ID。</summary>
     public required string Model { get; init; }
@@ -70,6 +75,15 @@ public sealed class GenerateOptions
     public ChatToolChoice ToolChoice { get; init; } = ChatToolChoice.AutoChoice;
 
     public double? Temperature { get; init; }
+
+    /// <summary>核采样（OpenAI 语义 top_p）。未设置不序列化。</summary>
+    public double? TopP { get; init; }
+
+    /// <summary>频率惩罚（OpenAI 语义 frequency_penalty）。未设置不序列化。</summary>
+    public double? FrequencyPenalty { get; init; }
+
+    /// <summary>存在惩罚（OpenAI 语义 presence_penalty）。未设置不序列化。</summary>
+    public double? PresencePenalty { get; init; }
 
     public int? MaxTokens { get; init; }
 

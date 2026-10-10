@@ -12,6 +12,13 @@ public sealed class LlmRuntime : ILlmService
     private readonly ConcurrentDictionary<string, (ChatAdapter Adapter, AdapterRegistrationHandle Handle)> _routes =
         new(StringComparer.Ordinal);
 
+    private readonly ILlmCredentialStore _credentials;
+
+    public LlmRuntime(ILlmCredentialStore? credentials = null)
+    {
+        _credentials = credentials ?? new EnvironmentCredentialStore();
+    }
+
     public event Action? AdaptersUpdated;
 
     public IAdapterRegistration RegisterAdapter(string[] providers, ChatAdapter adapter)
@@ -43,6 +50,38 @@ public sealed class LlmRuntime : ILlmService
     public IReadOnlyList<LlmProviderInfo> ListProviders() =>
         _routes.Select(kv => kv.Value.Adapter.ProviderInfo(kv.Key)).ToList();
 
+    public IReadOnlyList<LlmModelInfo> ListModels(string? provider = null)
+    {
+        if (provider is not null)
+            return _routes.TryGetValue(provider, out var entry) ? SafeListModels(entry.Adapter, provider) : [];
+
+        var models = new List<LlmModelInfo>();
+        foreach (var (id, (adapter, _)) in _routes)
+            models.AddRange(SafeListModels(adapter, id));
+        return models;
+    }
+
+    /// <summary>尽力而为：坏适配器只贡献零模型，绝不连锁抛异常（Pi：getModels 同步且永不抛）。</summary>
+    private static IReadOnlyList<LlmModelInfo> SafeListModels(ChatAdapter adapter, string provider)
+    {
+        try
+        {
+            return adapter.ListModels(provider);
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    public UsageCost? CalculateCost(string provider, string model, TokenUsage usage)
+    {
+        if (!_routes.TryGetValue(provider, out var entry))
+            return null;
+        var rates = entry.Adapter.Catalog.FirstOrDefault(m => m.Id == model)?.Cost;
+        return rates is null ? null : CostCalculator.Calculate(rates, usage);
+    }
+
     public async Task<LlmResolvedModelInfo> ResolveModelAsync(string provider, string model, CancellationToken cancellationToken = default)
     {
         var adapter = RequireAdapter(provider);
@@ -52,6 +91,16 @@ public sealed class LlmRuntime : ILlmService
     public async IAsyncEnumerable<StreamChunk> StreamAsync(GenerateOptions options)
     {
         var adapter = RequireAdapter(options.Provider);
+
+        // 请求时鉴权解析：声明了 ApiKey 鉴权但解析不到 → MISSING_CREDENTIAL，不静默放行。
+        // （Pi：applyAuth 在请求路径解析；缺失 → 请求级错误，宿主正常启动后 UI 提示"未配置"。）
+        var apiKey = await adapter.ResolveApiKeyAsync(options.Provider, _credentials, options.CancellationToken)
+            .ConfigureAwait(false);
+        if (adapter.Auth is LlmAuthDefinition.ApiKey && string.IsNullOrWhiteSpace(apiKey))
+            throw new LlmException(
+                $"provider '{options.Provider}' 未配置 API Key（请设置环境变量或配置段后重试）。",
+                LlmErrorCodes.MissingCredential);
+
         var prepared = await adapter.PrepareCallAsync(options.Provider, options.Model, options.CancellationToken)
             .ConfigureAwait(false);
 
@@ -66,8 +115,20 @@ public sealed class LlmRuntime : ILlmService
                 LlmErrorCodes.UnsupportedOption);
         }
 
-        await foreach (var chunk in prepared.Stream(options, options.CancellationToken).ConfigureAwait(false))
+        var callOptions = options with { ApiKey = apiKey };
+        await foreach (var chunk in prepared.Stream(callOptions, options.CancellationToken).ConfigureAwait(false))
             yield return chunk;
+    }
+
+    public async Task<bool> CheckAuthAsync(string provider, CancellationToken cancellationToken = default)
+    {
+        if (!_routes.TryGetValue(provider, out var entry))
+            return false;
+        var adapter = entry.Adapter;
+        if (adapter.Auth is not LlmAuthDefinition.ApiKey)
+            return true;   // 无鉴权要求的 provider 恒为已配置
+        var key = await adapter.ResolveApiKeyAsync(provider, _credentials, cancellationToken).ConfigureAwait(false);
+        return !string.IsNullOrWhiteSpace(key);
     }
 
     private ChatAdapter RequireAdapter(string provider)

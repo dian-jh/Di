@@ -21,52 +21,64 @@ namespace Core.Providers.DeepSeek;
 internal sealed class DeepSeekAdapter : ChatAdapter
 {
     private readonly HttpClient _http;
-    private readonly string _apiKey;
     private readonly string _baseUrl;
     private readonly DeepSeekAdapterConfig _config;
 
     private readonly Uri _chatCompletionsUri;
 
-    public DeepSeekAdapter(HttpClient http, string apiKey, DeepSeekAdapterConfig config, string? baseUrl = null)
+    public DeepSeekAdapter(HttpClient http, DeepSeekAdapterConfig config, string? baseUrl = null)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
-        _apiKey = apiKey ?? throw new ArgumentNullException(nameof(apiKey));
-        _config = config;
+        _config = config ?? throw new ArgumentNullException(nameof(config));
         _baseUrl = baseUrl ?? DeepSeekDefaults.Endpoint;
         _chatCompletionsUri = new Uri(new Uri(_baseUrl, UriKind.Absolute), DeepSeekDefaults.ChatCompletionsPath);
+    }
+
+    public override LlmAuthDefinition Auth =>
+        LlmAuthDefinition.EnvApiKey("DeepSeek API key", DeepSeekDefaults.ApiKeyEnvironmentVariable);
+
+    /// <summary>解析顺序：配置段（appsettings "DeepSeek:ApiKey"）优先，其次环境变量 —— 都在<b>请求时</b>解析。</summary>
+    public override Task<string?> ResolveApiKeyAsync(string provider, ILlmCredentialStore store, CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(_config.ApiKey))
+            return Task.FromResult<string?>(_config.ApiKey);
+        return store.ResolveApiKeyAsync(provider, [DeepSeekDefaults.ApiKeyEnvironmentVariable], cancellationToken);
     }
 
     public override IReadOnlyList<string> ProviderIds => [DeepSeekDefaults.ProviderId];
 
     public override LlmProviderInfo ProviderInfo(string provider) => new(DeepSeekDefaults.ProviderId, "DeepSeek");
 
-    public override Task<IReadOnlyList<LlmModelInfo>> ListModelsAsync(string provider, CancellationToken cancellationToken = default)
-    {
-        // 官方当前可用模型（2026-04）。
-        IReadOnlyList<LlmModelInfo> models =
-        [
-            new(provider, "deepseek-flash", "DeepSeek Flash (V4.1)"),
-            new(provider, "deepseek-v4-pro", "DeepSeek V4 Pro"),
-        ];
-        return Task.FromResult(models);
-    }
+    /// <summary>
+    /// 模型目录（纯数据）：官方当前可用模型及其元数据/成本费率。
+    /// 加模型 = 在这里加一条记录，引擎零改动（对应 Pi：模型是纯数据）。
+    /// ⚠ 成本费率是占位值，需按官方最新定价核对后更新（数据，非代码）。
+    /// </summary>
+    public override IReadOnlyList<ModelSpec> Catalog { get; } =
+    [
+        new("deepseek-flash", "DeepSeek Flash (V4.1)",
+            ContextWindow: 1_000_000,
+            DefaultMaxTokens: 64 * 1024,
+            ReasoningEfforts: DeepSeekReasoning.Efforts,
+            Cost: new ModelCostRates(InputPerMillion: 0.28, OutputPerMillion: 0.42, CacheReadPerMillion: 0.07)),
+        new("deepseek-v4-pro", "DeepSeek V4 Pro",
+            ContextWindow: 1_000_000,
+            DefaultMaxTokens: 64 * 1024,
+            ReasoningEfforts: DeepSeekReasoning.Efforts,
+            Cost: new ModelCostRates(InputPerMillion: 1.20, OutputPerMillion: 4.00, CacheReadPerMillion: 0.30)),
+    ];
 
     public override Task<LlmResolvedModelInfo> ResolveModelAsync(string provider, string model, CancellationToken cancellationToken = default)
     {
-        var (contextWindow, defaultMaxTokens, efforts) = model switch
-        {
-            "deepseek-flash" => (1_000_000, 64 * 1024, DeepSeekReasoning.Efforts),
-            "deepseek-v4-pro" => (1_000_000, 64 * 1024, DeepSeekReasoning.Efforts),
-            _ => (null as int?, null as int?, DeepSeekReasoning.Efforts),
-        };
-
+        // 精确元数据从目录派生；推理强度是所有 DeepSeek 模型共有的，缺省档位来自配置。
+        var spec = Catalog.FirstOrDefault(m => m.Id == model);
         return Task.FromResult(new LlmResolvedModelInfo(
             provider,
             model,
-            model,
-            Context: contextWindow is null ? null : new LlmModelContext(contextWindow.Value),
-            DefaultMaxTokens: defaultMaxTokens,
-            Reasoning: new LlmModelReasoningInfo(efforts, _config.DefaultReasoningEffort)));
+            spec?.Name ?? model,
+            Context: spec?.ContextWindow is { } contextWindow ? new LlmModelContext(contextWindow) : null,
+            DefaultMaxTokens: spec?.DefaultMaxTokens,
+            Reasoning: new LlmModelReasoningInfo(DeepSeekReasoning.Efforts, _config.DefaultReasoningEffort)));
     }
 
     public override async IAsyncEnumerable<StreamChunk> StreamAsync(
@@ -75,11 +87,14 @@ internal sealed class DeepSeekAdapter : ChatAdapter
     {
         var wire = DeepSeekTranslator.ToWire(options);
 
+        // 请求级鉴权：ApiKey 由宿主（LlmRuntime）在请求时解析后注入 options；直连适配器时兜底自校验。
+        if (string.IsNullOrWhiteSpace(options.ApiKey))
+            throw new LlmException("DeepSeek 未配置 API Key。", LlmErrorCodes.MissingCredential);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, _chatCompletionsUri)
         {
             Content = JsonContent.Create(wire, options: DeepSeekJson.Options),
         };
-        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
         httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         var response = await SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
@@ -91,6 +106,7 @@ internal sealed class DeepSeekAdapter : ChatAdapter
 
             // SSE 分帧（DSH：eventsource-parser 的职责，这里是手写最小实现）。
             var sawDone = false;
+            var responseIdEmitted = false;
 
             while (true)
             {
@@ -123,6 +139,13 @@ internal sealed class DeepSeekAdapter : ChatAdapter
 
                 if (chunk is null)
                     continue;
+
+                // 首个携带 id 的 chunk 上报响应标识（用于追溯/日志）。
+                if (!responseIdEmitted && chunk.Id is { } responseId)
+                {
+                    responseIdEmitted = true;
+                    yield return new StreamChunk.ResponseInfo(responseId);
+                }
 
                 foreach (var evt in TranslateChunk(chunk))
                     yield return evt;

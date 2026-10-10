@@ -16,6 +16,24 @@ public interface ILlmService
     /// <summary>当前所有 provider 路由的展示元数据。</summary>
     IReadOnlyList<LlmProviderInfo> ListProviders();
 
+    /// <summary>
+    /// 统一模型目录（同步、尽力而为）：列出某 provider 或全部 provider 的咨询性模型列表。
+    /// 坏适配器只贡献零模型，绝不抛异常（对应 Pi 的"读模型同步且永不抛"）。
+    /// </summary>
+    IReadOnlyList<LlmModelInfo> ListModels(string? provider = null);
+
+    /// <summary>
+    /// 按模型目录的费率把用量折算成成本。未知 provider / 模型 / 无费率时返回 null。
+    /// 同步、尽力而为、永不抛。
+    /// </summary>
+    UsageCost? CalculateCost(string provider, string model, TokenUsage usage);
+
+    /// <summary>
+    /// 检查某 provider 是否已配置完整鉴权（无密钥也能启动，UI 据此显示"未配置"）。
+    /// 未知 provider 返回 false。
+    /// </summary>
+    Task<bool> CheckAuthAsync(string provider, CancellationToken cancellationToken = default);
+
     /// <summary>精确模型元数据（咨询性目录之外的真实解析）。</summary>
     Task<LlmResolvedModelInfo> ResolveModelAsync(string provider, string model, CancellationToken cancellationToken = default);
 

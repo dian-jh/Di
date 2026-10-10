@@ -24,7 +24,7 @@ public interface IChatModel
 }
 
 /// <summary>一次请求（不含 provider/model，它们在模型实例上绑定）。</summary>
-public sealed class ModelRequest
+public sealed record ModelRequest
 {
     public required IReadOnlyList<ChatMessage> Messages { get; init; }
 
@@ -34,6 +34,15 @@ public sealed class ModelRequest
     public string? ReasoningEffort { get; init; }
 
     public double? Temperature { get; init; }
+
+    /// <summary>核采样（top_p）。未设置由适配器缺省。</summary>
+    public double? TopP { get; init; }
+
+    /// <summary>频率惩罚。未设置由适配器缺省。</summary>
+    public double? FrequencyPenalty { get; init; }
+
+    /// <summary>存在惩罚。未设置由适配器缺省。</summary>
+    public double? PresencePenalty { get; init; }
 
     public int? MaxTokens { get; init; }
 
@@ -51,6 +60,18 @@ public sealed class ModelResponse
 
     /// <summary>实际被调用的模型 ID（用于日志）。</summary>
     public string Model { get; init; } = "";
+
+    /// <summary>按模型目录费率折算的成本（目录无费率时为 null）。</summary>
+    public UsageCost? Cost { get; init; }
+
+    /// <summary>提供方响应标识（用于追溯/日志；适配器未上报时为空）。</summary>
+    public string? ResponseId { get; init; }
+
+    /// <summary>请求开始的 Unix 毫秒时间戳。</summary>
+    public long Timestamp { get; init; }
+
+    /// <summary>请求耗时（毫秒，单调时钟）。</summary>
+    public long? DurationMs { get; init; }
 }
 
 /// <summary>

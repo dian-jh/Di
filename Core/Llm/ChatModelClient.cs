@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
 namespace Core.Llm;
@@ -39,6 +40,9 @@ public sealed class ChatModelClient : IChatModel
             Tools = request.Tools,
             ReasoningEffort = request.ReasoningEffort,
             Temperature = request.Temperature,
+            TopP = request.TopP,
+            FrequencyPenalty = request.FrequencyPenalty,
+            PresencePenalty = request.PresencePenalty,
             MaxTokens = request.MaxTokens,
             Stop = request.Stop,
             CancellationToken = cancellationToken,
@@ -47,9 +51,17 @@ public sealed class ChatModelClient : IChatModel
         var assembler = new ChatAssembler();
         var usage = TokenUsage.Zero;
         var finish = (FinishReason)new FinishReason.Stop();
+        string? responseId = null;
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var stopwatch = Stopwatch.StartNew();
+        var streamEnded = false;
 
         await foreach (var chunk in _llm.StreamAsync(options).ConfigureAwait(false))
         {
+            // 协议义务：Finish 之后不得再有任何块 —— 防御坏适配器，收到即终止枚举。
+            if (streamEnded)
+                break;
+
             assembler.Add(chunk);
 
             switch (chunk)
@@ -71,11 +83,19 @@ public sealed class ChatModelClient : IChatModel
                     yield return new ModelEvent.Usage(usage);
                     break;
 
+                case StreamChunk.ResponseInfo info:
+                    responseId = info.ResponseId;
+                    break;
+
                 case StreamChunk.Finish finishChunk:
                     finish = finishChunk.Reason;
+                    streamEnded = true;
                     break;
             }
         }
+
+        stopwatch.Stop();
+        var cost = _llm.CalculateCost(_provider, _model, usage);
 
         yield return new ModelEvent.Completed(new ModelResponse
         {
@@ -83,6 +103,10 @@ public sealed class ChatModelClient : IChatModel
             FinishReason = finish,
             Usage = usage,
             Model = _model,
+            Cost = cost,
+            ResponseId = responseId,
+            Timestamp = timestamp,
+            DurationMs = stopwatch.ElapsedMilliseconds,
         });
     }
 
