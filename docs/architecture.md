@@ -2,7 +2,8 @@
 
 > 本文件是 Di（agent harness）的**架构快照**：分层结构、模块职责、一次回合的数据流、
 > 已实现功能清单与关键设计决策。随代码演进维护；改架构时同步更新这里。
-> 配置规范另见 [di-home.md](./di-home.md)。
+> 配置规范另见 [di-home.md](./di-home.md)；harness 能力清单、MVP 差距与工业级路线图另见
+> [harness.md](./harness.md)。
 
 ---
 
