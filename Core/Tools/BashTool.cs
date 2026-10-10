@@ -5,12 +5,16 @@ namespace Core.Tools;
 
 /// <summary>
 /// Bash Shell 工具：在终端中执行命令（跑测试、处理特殊格式文件等）。
-/// 每次调用在独立进程中执行（MVP 阶段；持久化终端会话是后续迭代，见第五章）。
-/// 超时会被强杀并返回结构化错误，长输出自动截断头部/尾部。
+/// 支持两种模式：一次性独立进程（可指定 working_dir）与共享持久化终端会话（cwd/环境变量
+/// 跨调用保持，经 <see cref="ShellSession"/> 交互）。超时强杀（含进程树）并返回结构化错误；
+/// 输出经 <see cref="OutputBuffer"/> 有界累积，长输出自动截断头尾。
 /// </summary>
 public sealed class BashTool : ICoreTool
 {
     public const int DefaultTimeoutSeconds = 30;
+
+    /// <summary>单次调用可用 timeout 参数覆盖的超时上限（秒）。</summary>
+    public const int MaxTimeoutSeconds = 3600;
 
     private readonly string _baseDirectory;
     private readonly ShellCommand _shell;
@@ -30,13 +34,15 @@ public sealed class BashTool : ICoreTool
 
     public ChatTool Definition => _session is not null
         ? ChatTool.Create("bash",
-            "在共享的持久化终端会话中执行一条命令（stdout + stderr 合并）。cd、环境变量、激活的虚拟环境等状态在多次调用之间保持——切换目录请用 cd，而不是 working_dir。命令超时（30 秒）会终止会话并在下次调用时自动重建。长输出自动截断头尾。",
-            ToolHelpers.Schema(
-                ("command", "string", "要执行的命令")))
-        : ChatTool.Create("bash",
-            "在 shell 中执行一条命令，返回退出码与合并后的输出（stdout + stderr）。命令超时（30 秒）会被终止并返回 error。长输出自动截断头尾。",
+            "在共享的持久化终端会话中执行一条命令（stdout + stderr 合并）。cd、环境变量、激活的虚拟环境等状态在多次调用之间保持——切换目录请用 cd，而不是 working_dir。命令超时（默认 30 秒，可用 timeout 参数覆盖，单位秒）会终止会话并在下次调用时自动重建。长输出自动截断头尾。",
             ToolHelpers.Schema(
                 ("command", "string", "要执行的命令"),
+                ("timeout", "integer", $"可选：超时秒数（默认 {DefaultTimeoutSeconds}，最大 {MaxTimeoutSeconds}）")))
+        : ChatTool.Create("bash",
+            "在 shell 中执行一条命令，返回退出码与合并后的输出（stdout + stderr）。命令超时（默认 30 秒，可用 timeout 参数覆盖，单位秒）会被终止并返回 error。长输出自动截断头尾。",
+            ToolHelpers.Schema(
+                ("command", "string", "要执行的命令"),
+                ("timeout", "integer", $"可选：超时秒数（默认 {DefaultTimeoutSeconds}，最大 {MaxTimeoutSeconds}）"),
                 ("working_dir", "string", "可选：工作目录（默认工作区根目录）")));
 
     public async Task<string> ExecuteAsync(string argumentsJson, CancellationToken cancellationToken = default)
@@ -47,11 +53,18 @@ public sealed class BashTool : ICoreTool
             if (!ToolHelpers.TryGetString(doc.RootElement, "command", out var command, out var error))
                 return error!;
 
+            // 可选 timeout（秒）：单条命令覆盖默认超时，如"构建可能要 5 分钟"。上限见 MaxTimeoutSeconds。
+            if (!ToolHelpers.TryGetOptionalInt(doc.RootElement, "timeout", out var timeoutArg, out var timeoutError))
+                return timeoutError!;
+            if (timeoutArg is not null && (timeoutArg.Value <= 0 || timeoutArg.Value > MaxTimeoutSeconds))
+                return $"error: timeout 必须是 1 到 {MaxTimeoutSeconds} 之间的整数秒";
+            var timeout = timeoutArg is null ? _timeout : TimeSpan.FromSeconds(timeoutArg.Value);
+
             if (_session is not null)
             {
                 // 持久化模式：命令在共享会话中执行；cwd/环境变量跨调用保持，
                 // working_dir 由会话状态决定（模型用 cd 切换），这里不做单独处理。
-                var sessionResult = await _session.ExecuteAsync(command!, _timeout, cancellationToken);
+                var sessionResult = await _session.ExecuteAsync(command!, timeout, cancellationToken);
                 return sessionResult.ToObservation();
             }
 
@@ -65,13 +78,13 @@ public sealed class BashTool : ICoreTool
             // /s 让 cmd 无条件剥离首尾各一层引号，命令里的 " & | > 等特殊字符原样生效。
             if (OperatingSystem.IsWindows() && _shell.IsPlatformDefault)
             {
-                var result = await ProcessRunner.RunAsync(_shell.FileName, [], workingDir, _timeout, cancellationToken,
+                var result = await ProcessRunner.RunAsync(_shell.FileName, [], workingDir, timeout, cancellationToken,
                     rawArguments: $"/d /s /c \"{command!}\"");
                 return result.ToObservation();
             }
 
             var args = new List<string>(_shell.PrefixArguments) { command! };
-            var unixResult = await ProcessRunner.RunAsync(_shell.FileName, args, workingDir, _timeout, cancellationToken);
+            var unixResult = await ProcessRunner.RunAsync(_shell.FileName, args, workingDir, timeout, cancellationToken);
             return unixResult.ToObservation();
         }
         catch (JsonException)

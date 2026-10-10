@@ -15,10 +15,15 @@ public sealed class BashToolTests : IDisposable
         try { Directory.Delete(_base, recursive: true); } catch { }
     }
 
-    private static string Args(string command, string? workingDir = null)
-        => workingDir is null
-            ? $$"""{"command":{{JsonQuote(command)}}}"""
-            : $$"""{"command":{{JsonQuote(command)}},"working_dir":{{JsonQuote(workingDir)}}}""";
+    private static string Args(string command, string? workingDir = null, int? timeout = null)
+    {
+        var parts = new List<string> { $"\"command\":{JsonQuote(command)}" };
+        if (workingDir is not null)
+            parts.Add($"\"working_dir\":{JsonQuote(workingDir)}");
+        if (timeout is not null)
+            parts.Add($"\"timeout\":{timeout}");
+        return "{" + string.Join(",", parts) + "}";
+    }
 
     private static string JsonQuote(string s) => System.Text.Json.JsonSerializer.Serialize(s);
 
@@ -100,6 +105,57 @@ public sealed class BashToolTests : IDisposable
         Assert.Contains("秒", result);   // 第五章：超时返回结构化错误而非静默杀死
     }
 
+    // ---- per-call timeout 参数（对齐生产级：模型可对单条命令覆盖默认超时）----
+
+    [Fact]
+    public async Task Execute_TimeoutArg_OverridesDefaultAndTimesOut()
+    {
+        // 工具默认 5 秒本不会触发；per-call timeout=1 秒必须生效 → 约 1 秒内返回 error。
+        var tool = new BashTool(_base, timeout: TimeSpan.FromSeconds(5));
+        var sleep = OperatingSystem.IsWindows() ? "for /l %i in (1,1,100000000) do @rem" : "sleep 60";
+
+        var result = await tool.ExecuteAsync(Args(sleep, timeout: 1));
+
+        Assert.StartsWith("error:", result);
+        Assert.Contains("秒", result);
+    }
+
+    [Fact]
+    public async Task Execute_TimeoutArg_LongerThanDefault_Completes()
+    {
+        // 工具默认 300ms 会误杀一条 ~1 秒的命令；per-call timeout=2 秒覆盖后应正常完成。
+        var tool = new BashTool(_base, timeout: TimeSpan.FromMilliseconds(300));
+        var shortCmd = OperatingSystem.IsWindows() ? "ping -n 2 127.0.0.1 >nul" : "sleep 1";
+
+        var result = await tool.ExecuteAsync(Args(shortCmd, timeout: 2));
+
+        Assert.StartsWith("exit: 0", result);
+    }
+
+    [Fact]
+    public async Task Execute_InvalidTimeoutArg_ReturnsError()
+    {
+        var tool = new BashTool(_base);
+
+        Assert.Contains("timeout", await tool.ExecuteAsync(Args("echo x", timeout: 0)));
+        Assert.Contains("timeout", await tool.ExecuteAsync(Args("echo x", timeout: -3)));
+        Assert.Contains("timeout", await tool.ExecuteAsync(Args("echo x", timeout: 99999)));   // 超过上限 3600
+        var nonInteger = await tool.ExecuteAsync("""{"command":"echo x","timeout":"abc"}""");
+        Assert.Contains("timeout", nonInteger);
+    }
+
+    [Fact]
+    public async Task Execute_WithSession_TimeoutArg_OverridesDefault()
+    {
+        using var session = new ShellSession(_base);
+        var tool = new BashTool(_base, session: session, timeout: TimeSpan.FromMilliseconds(300));
+        var shortCmd = OperatingSystem.IsWindows() ? "ping -n 2 127.0.0.1 >nul" : "sleep 1";
+
+        var result = await tool.ExecuteAsync(Args(shortCmd, timeout: 3));
+
+        Assert.StartsWith("exit: 0", result);   // 覆盖默认 300ms 后未被误杀
+    }
+
     [Fact]
     public async Task Execute_NonexistentWorkingDirectory_ReturnsError()
     {
@@ -141,15 +197,16 @@ public sealed class BashToolTests : IDisposable
     [Fact]
     public async Task Execute_LongOutput_IsTruncatedWithMarker()
     {
-        // echo 是内建命令：单行 4000 字符超过截断阈值，不依赖外部命令。
+        // 输出超过截断预算（头 6000 + 尾 18000 字符）→ 保留头尾、标记截断、整体受预算约束。
+        // Windows 用 for 循环避免单条命令超长；Unix 用 head/tr 生成一条超长行。
         var big = OperatingSystem.IsWindows()
-            ? "echo " + new string('a', 4000)
-            : "head -c 5000 < /dev/zero | tr '\\0' x";
+            ? "for /l %i in (1,1,500) do @echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            : "head -c 30000 < /dev/zero | tr '\\0' x";
         var result = await new BashTool(_base).ExecuteAsync(Args(big));
 
         Assert.StartsWith("exit: 0", result);
         Assert.Contains("已截断", result);
-        Assert.True(result.Length < 5000, $"截断后应显著小于原始输出，实际 {result.Length} 字符");
+        Assert.True(result.Length < 30000, $"截断后应受预算约束（头+尾+标记），实际 {result.Length} 字符");
     }
 
     [Fact]

@@ -15,40 +15,6 @@ public sealed class ToolHelpersTests : IDisposable
         try { Directory.Delete(_base, recursive: true); } catch { }
     }
 
-    // ---- Truncate ----
-
-    [Fact]
-    public void Truncate_ShortText_IsUnchanged()
-    {
-        var text = new string('a', 100);
-        Assert.Equal(text, ToolHelpers.Truncate(text));
-    }
-
-    [Fact]
-    public void Truncate_ExactlyAtLimit_IsUnchanged()
-    {
-        var text = new string('a', 3000 + 1000);
-        Assert.Equal(text, ToolHelpers.Truncate(text));   // 等于头+尾阈值 → 不截
-    }
-
-    [Fact]
-    public void Truncate_Empty_ReturnsEmpty()
-    {
-        Assert.Equal(string.Empty, ToolHelpers.Truncate(string.Empty));
-    }
-
-    [Fact]
-    public void Truncate_LongText_KeepsHeadAndTailWithMarker()
-    {
-        var text = new string('a', 3000) + new string('b', 500) + new string('c', 1000);
-        var result = ToolHelpers.Truncate(text);
-
-        Assert.StartsWith(new string('a', 3000), result);
-        Assert.EndsWith(new string('c', 1000), result);
-        Assert.Contains("已截断", result);
-        Assert.DoesNotContain('b', result);   // 中间被删掉
-    }
-
     // ---- ResolvePath ----
 
     [Fact]

@@ -153,15 +153,4 @@ internal static class ToolHelpers
             return true;
         }
     }
-
-    /// <summary>长输出截断：保留头部（通常含错误上下文）与尾部（通常含错误总结），中间以提示行替代。</summary>
-    public static string Truncate(string text, int headChars = 3000, int tailChars = 1000)
-    {
-        if (text.Length <= headChars + tailChars)
-            return text;
-        return string.Concat(
-            text.AsSpan(0, headChars),
-            $"\n…[输出过长，已截断中间 {text.Length - headChars - tailChars} 字符]…\n",
-            text.AsSpan(text.Length - tailChars));
-    }
 }

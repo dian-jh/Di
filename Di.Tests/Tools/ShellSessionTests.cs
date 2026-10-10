@@ -181,13 +181,13 @@ public sealed class ShellSessionTests : IDisposable
     {
         using var session = new ShellSession(_base);
         var big = OperatingSystem.IsWindows()
-            ? "echo " + new string('a', 4000)
-            : "head -c 5000 < /dev/zero | tr '\\0' x";
+            ? "for /l %i in (1,1,500) do @echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            : "head -c 30000 < /dev/zero | tr '\\0' x";
         var result = await session.ExecuteAsync(big, Timeout);
 
         Assert.StartsWith("exit: 0", result.ToObservation());
         Assert.Contains("已截断", result.ToObservation());
-        Assert.True(result.ToObservation().Length < 5000);
+        Assert.True(result.ToObservation().Length < 30000);
     }
 
     [Fact]

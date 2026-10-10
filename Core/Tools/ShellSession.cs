@@ -19,9 +19,6 @@ namespace Core.Tools;
 /// </summary>
 public sealed class ShellSession : IDisposable
 {
-    /// <summary>单条命令最多收集的输出行数（内存上限，仍会继续读取到标记为止）。</summary>
-    private const int MaxCollectedLines = 2000;
-
     private readonly string _workingDirectory;
     private readonly ShellCommand _shell;
     private readonly SemaphoreSlim _serial = new(1, 1);
@@ -66,7 +63,9 @@ public sealed class ShellSession : IDisposable
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(timeout);
-            var output = new List<string>();
+            // 有界累积：边收边丢（头尾预算），不会因单条命令输出过大而打爆内存；
+            // 超出预算会被标记为截断，而不是像旧的按行上限那样静默丢行。
+            var output = new OutputBuffer();
 
             try
             {
@@ -85,12 +84,12 @@ public sealed class ShellSession : IDisposable
                     if (line.EndsWith(_marker, StringComparison.Ordinal))
                     {
                         // 命令输出不带末尾换行：标记拼到了同一行末尾，前缀仍属命令输出。
-                        Add(output, line[..^_marker.Length]);
+                        output.AppendLine(line[..^_marker.Length]);
                         break;
                     }
                     if (IsEchoLine(line))
                         continue;   // Windows：丢弃"提示符+命令"回显行
-                    Add(output, line);
+                    output.AppendLine(line);
                 }
 
                 // 退出码行（标记之后）
@@ -109,7 +108,7 @@ public sealed class ShellSession : IDisposable
                     }
                 }
 
-                return new ProcessResult(exitCode, ToolHelpers.Truncate(string.Join('\n', output)), null);
+                return new ProcessResult(exitCode, output.Text, null);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -120,7 +119,7 @@ public sealed class ShellSession : IDisposable
             {
                 // 超时：按第五章返回结构化错误；终止会话，下次调用自动重建。
                 Kill();
-                return new ProcessResult(-1, ToolHelpers.Truncate(string.Join('\n', output)),
+                return new ProcessResult(-1, output.Text,
                     $"执行超过 {timeout.TotalSeconds:0} 秒未完成，已终止终端会话（下次调用自动重建）");
             }
             catch (ChannelClosedException)
@@ -262,17 +261,11 @@ public sealed class ShellSession : IDisposable
         }
     }
 
-    private static void Add(List<string> output, string line)
-    {
-        if (output.Count < MaxCollectedLines)
-            output.Add(line);
-    }
-
-    private ProcessResult SessionEnded(List<string> output)
+    private ProcessResult SessionEnded(OutputBuffer output)
     {
         var rc = _process is not null && _process.HasExited ? _process.ExitCode : -1;
         _process = null;
-        return new ProcessResult(rc, ToolHelpers.Truncate(string.Join('\n', output)), null);
+        return new ProcessResult(rc, output.Text, null);
     }
 
     private void Kill()

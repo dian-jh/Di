@@ -47,6 +47,11 @@ public sealed record ProcessResult(int ExitCode, string Output, string? Error)
 /// </summary>
 internal static class ProcessRunner
 {
+    /// <summary>进程退出后，等待异步读事件把残留输出派发完的最长时间（毫秒）。
+    /// 不带超时的 WaitForExit() 可能被继承了 stdout/stderr 管道的后台子进程挂住，
+    /// 所以这里必须有界。</summary>
+    private const int DrainTimeoutMs = 1000;
+
     public static async Task<ProcessResult> RunAsync(
         string fileName,
         IReadOnlyList<string> arguments,
@@ -82,7 +87,8 @@ internal static class ProcessRunner
         }
 
         using var process = new Process { StartInfo = psi };
-        var output = new StringBuilder();
+        // 有界累积：边收边丢，任意长度的输出都不会把内存打爆（见 OutputBuffer）。
+        var output = new OutputBuffer();
         process.OutputDataReceived += (_, e) => { if (e.Data is not null) output.AppendLine(e.Data); };
         process.ErrorDataReceived += (_, e) => { if (e.Data is not null) output.AppendLine(e.Data); };
 
@@ -117,11 +123,14 @@ internal static class ProcessRunner
             // 超时：按第五章，超时要向 Agent 返回结构化错误而非静默杀死。
             Kill(process);
             return new ProcessResult(-1,
-                ToolHelpers.Truncate(output.ToString()),
+                output.Text,
                 $"执行超过 {timeout.TotalSeconds:0} 秒未完成，已终止");
         }
 
-        return new ProcessResult(process.ExitCode, ToolHelpers.Truncate(output.ToString()), null);
+        // 排干：WaitForExitAsync 只等进程退出，BeginOutputReadLine 的最后几行事件可能
+        // 还没派发完，直接读会丢尾部。带超时的 WaitForExit 等异步读收尾（有界，不挂）。
+        process.WaitForExit(DrainTimeoutMs);
+        return new ProcessResult(process.ExitCode, output.Text, null);
     }
 
     private static void Kill(Process process)
