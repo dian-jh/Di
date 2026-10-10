@@ -17,7 +17,7 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 认证是声明、循环只发事件不渲染**。
 
 代码规模：Core + Common + Di.Cli 共 49 个源文件；Di.Tests + Di.Cli.Tests 共 39 个测试文件，
-**519 个用例全绿**（Di.Tests 460 + Di.Cli.Tests 59；另有 2 个 DeepSeek 集成测试默认跳过）。
+**584 个用例全绿**（Di.Tests 474 + Di.Cli.Tests 110；另有 2 个 DeepSeek 集成测试默认跳过）。
 
 ---
 
@@ -129,7 +129,7 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 
 ### 2.9 测试与质量
 
-- **519 个用例全绿**，横跨 loop / 模型层 / provider / 工具 / skills / 会话 / 配置 / 事件 / CLI 九大域。
+- **584 个用例全绿**，横跨 loop / 模型层 / provider / 工具 / skills / 会话 / 配置 / 事件 / CLI 九大域。
 - 工具域最厚（239），覆盖编码、超时、有界输出、会话保持、Windows 编码。
 - 2 个 DeepSeek 真实集成测试（`SkippableFact`）默认跳过，留作 CI 注入真实 key 时跑。
 - 全程 TDD：每个单元先写测试看红，再实现转绿（CLAUDE.md 强制）。
@@ -145,15 +145,16 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 成本可核算）。
 
 但作为**能被真实使用的产品**，还有 5 个"可用性"缺口。它们不涉及架构，是入口、健壮性与
-文档层面的补全：
+文档层面的补全。**#1（全局命令）、#2（headless 单发）、#5（README）已实现**（见 `docs/cli.md`），
+剩余 2 个：
 
 | # | 缺口 | 现状 | 为什么算 MVP 缺口 | 建议落点 |
 |---|---|---|---|---|
-| 1 | **全局命令与分发** | 只能 `dotnet run`；无 `di` 命令、无自包含发布、无 `--version` | 一个不能被"安装并运行"的 harness 不是 MVP | `dotnet publish` 自包含 + `di.cmd`/`di.exe` 入 PATH |
-| 2 | **非交互单发模式** | `Program.cs` 不接 `string[] args`；无 `di "prompt"` / `-m` / `--yes` | 脚本化、CI、自动化测试都需要 headless；Claude Code/Codex 均有 | Program 入口加参数解析；`IAgentRunner` 已可复用 |
+| 1 | **全局命令与分发** | ✅ 已实现：`di.exe`（win-x64 自包含单文件）+ `install.cmd`/`install.ps1` 入 PATH，幂等 | 一个不能被"安装并运行"的 harness 不是 MVP | `Di.Cli/Properties/PublishProfiles/di.pubxml` + 仓库根安装脚本 |
+| 2 | **非交互单发模式** | ✅ 已实现：`di "prompt"`、`di --mode json`、stdin 管道、`-m/--provider/--no-session/--no-ansi` | 脚本化、CI、自动化测试都需要 headless；Claude Code/Codex 均有 | `CliApp` 分派 + `modes/PrintMode`；契约见 `docs/cli.md` |
 | 3 | **回合级中断（Ctrl+C）** | 无 `Console.CancelKeyPress` 注册；取消 = 整个进程退出，会话无收尾 | 长回合（跑测试/大文件）中断应只取消当前回合，保留已写入会话 | `CancellationTokenSource` 挂到 `CancelKeyPress` |
 | 4 | **上下文 token 预算** | 仅按"最近 10 个整回合"裁剪；工具输出可让单回合暴涨 | 读大文件/跑测试可瞬间超窗，10 轮启发式防不住；架构 §5 已自记此缺口 | 按模型 context window 比例预算，超限压缩/裁剪/报错 |
-| 5 | **README 与上手文档** | 仓库根 README 是空文件 | 一个要被用的项目必须有"装什么/怎么跑/怎么配" | 写 README（或并入本文档 §2 快速上手） |
+| 5 | **README 与上手文档** | ✅ 已实现：README 安装/用法/配置 + `docs/cli.md` 契约 | 一个要被用的项目必须有"装什么/怎么跑/怎么配" | 仓库根 `README.md` + `docs/cli.md` |
 
 > 其余未实现项（`/resume`、命令注册表、MCP、子代理、权限审批流、遥测、多 provider、登录命令）
 > 都不属于 MVP 必须 —— 它们是工业级范畴，见 §4。
@@ -235,7 +236,7 @@ MVP（现状，已达成）           工业级
 ───────────────             ──────────────
 循环/流式/工具/skills/会话   A 分发与 UX（能分发/脚本化/中断友好）
 成本/目录/认证/元数据        B 安全与可信（权限审批/撤销/注入防御）★
-事件总线/分层配置/519 测试    C 上下文与记忆（token 预算/resume/项目记忆）
+事件总线/分层配置/584 测试    C 上下文与记忆（token 预算/resume/项目记忆）
                             D 生态（MCP/子代理/第二 provider/命令注册表）
                             E 可观测与产品化（遥测/评估/运维命令）
 ```
