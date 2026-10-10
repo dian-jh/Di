@@ -11,7 +11,7 @@ namespace Di.Tests.Tools;
 public sealed class CoreToolsTests : IDisposable
 {
     private static readonly string[] ExpectedNames =
-        ["read_file", "write_file", "edit_file", "glob", "grep", "bash", "python"];
+        ["read_file", "write_file", "edit_file", "glob", "grep", "bash", "powershell", "python"];
 
     private static readonly string? PythonExe = TestEnvironment.FindPython();
 
@@ -23,12 +23,12 @@ public sealed class CoreToolsTests : IDisposable
     }
 
     [Fact]
-    public void CreateTools_ReturnsSevenTools_WithUniqueNames()
+    public void CreateTools_ReturnsEightTools_WithUniqueNames()
     {
         var tools = CoreTools.CreateTools(_base);
 
-        Assert.Equal(7, tools.Count);
-        Assert.Equal(7, tools.Select(t => t.Name).Distinct().Count());
+        Assert.Equal(8, tools.Count);
+        Assert.Equal(8, tools.Select(t => t.Name).Distinct().Count());
         Assert.True(ExpectedNames.All(n => tools.Any(t => t.Name == n)),
             $"缺少工具: {string.Join(", ", ExpectedNames.Where(n => tools.All(t => t.Name != n)))}");
     }
@@ -79,7 +79,7 @@ public sealed class CoreToolsTests : IDisposable
     {
         var tools = CoreTools.CreateReadOnlyTools(_base);
 
-        Assert.DoesNotContain(tools, t => t.Name is "write_file" or "edit_file" or "bash" or "python");
+        Assert.DoesNotContain(tools, t => t.Name is "write_file" or "edit_file" or "bash" or "powershell" or "python");
     }
 
     [Fact]
@@ -99,10 +99,20 @@ public sealed class CoreToolsTests : IDisposable
     }
 
     [Fact]
-    public void AllToolNames_ContainsAllSeven()
+    public void AllToolNames_ContainsAllEight()
     {
-        Assert.Equal(7, CoreTools.AllToolNames.Count);
+        Assert.Equal(8, CoreTools.AllToolNames.Count);
         Assert.True(ExpectedNames.All(CoreTools.AllToolNames.Contains));
+    }
+
+    [Fact]
+    public void CreateTool_PowerShell_IsOneShotWithoutSession()
+    {
+        // 直接创建（无会话）→ 一次性模式：Definition 保留 working_dir。
+        var tool = CoreTools.CreateTool("powershell", _base);
+
+        Assert.Equal("powershell", tool.Name);
+        Assert.True(tool.Definition.Parameters["properties"]!.AsObject().ContainsKey("working_dir"));
     }
 
     [Fact]
@@ -147,6 +157,40 @@ public sealed class CoreToolsTests : IDisposable
         var result = await executor.ExecuteAsync(Call("bash", """{"command":"echo core-bash"}"""));
 
         Assert.Contains("core-bash", result);
+    }
+
+    [Fact]
+    public async Task Executor_PowerShell_RunsCommand()
+    {
+        using var executor = CoreTools.CreateExecutor(_base);
+        var result = await executor.ExecuteAsync(Call("powershell", """{"command":"Write-Output core-ps"}"""));
+
+        Assert.Contains("core-ps", result);
+    }
+
+    [Fact]
+    public async Task Executor_PowerShell_PersistentSession_StatePersists()
+    {
+        // 与 bash 一致：powershell 在共享持久化会话中运行——第一次 cd 的状态在后续调用中保持。
+        Directory.CreateDirectory(Path.Combine(_base, "work"));
+        using var executor = CoreTools.CreateExecutor(_base);
+
+        await executor.ExecuteAsync(Call("powershell", """{"command":"cd work"}"""));
+        var result = await executor.ExecuteAsync(Call("powershell", """{"command":"(Get-Location).Path"}"""));
+
+        Assert.StartsWith("exit: 0", result);
+        Assert.Contains("work", result);
+    }
+
+    [Fact]
+    public void Definitions_PowerShellIsPersistentSession_OmitsWorkingDir()
+    {
+        // Definitions 与 CreateExecutor 一致：powershell 是持久化会话模式，schema 里没有 working_dir。
+        var def = CoreTools.Definitions(_base).Single(d => d.Name == "powershell");
+
+        Assert.NotNull(def.Parameters["properties"]!["command"]);
+        Assert.False(def.Parameters["properties"]!.AsObject().ContainsKey("working_dir"));
+        Assert.Contains("持久化", def.Description);
     }
 
     [Fact]
@@ -209,6 +253,7 @@ public sealed class CoreToolsTests : IDisposable
         Assert.Contains("glob", text);
         Assert.Contains("grep", text);
         Assert.Contains("bash", text);
+        Assert.Contains("powershell", text);
         Assert.Contains("python", text);
     }
 

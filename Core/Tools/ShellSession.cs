@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using System.Threading.Channels;
 
 namespace Core.Tools;
@@ -13,6 +14,12 @@ namespace Core.Tools;
 /// - Windows（cmd.exe）：交互式管道模式会回显"提示符+命令"，初始化时用 <c>prompt &lt;tag&gt;$G</c>
 ///   把提示符设成唯一标签，读取输出时丢弃以该标签开头的回显行。
 /// - 其他平台（/bin/sh）：管道模式不回显、无横幅，直接收集输出。
+/// - PowerShell（-Command -）：不回显；输出编码按流拆分——stdout 按 UTF-8（.NET 重定向默认），
+///   stderr 按 OEM（PS 5.1 引擎错误记录写 OEM 字节，实测）。
+///
+/// 编码注意：PowerShell 会话的初始化前缀<b>不设置</b> [Console]::OutputEncoding —— 一旦改动，
+/// PS 5.1 宿主会把 stdin 读成 OEM 代码页，中文命令从 stdin 进入时乱码（实测）。保持默认
+/// （stdin 与宿主编译输出均为 UTF-8）即可让中文命令与中文输出两端无损。
 ///
 /// 超时或命令本身执行 exit 都会终止会话；下一次调用会自动重建（自愈）。
 /// 会话内部串行执行命令（同一时刻只有一条命令在跑）。
@@ -164,6 +171,10 @@ public sealed class ShellSession : IDisposable
         _initialized = false;
         _spawnError = null;
 
+        // PowerShell：stdout 按 UTF-8（宿主输出走 .NET 重定向默认编码）；stderr 沿用 OEM 代码页
+        // （PS 5.1 引擎错误记录写 OEM 字节，实测）。其余 shell 的 stdout 也沿用 OEM（cmd/sh 写 OEM 字节）。
+        var isPowerShell = _shell.SessionKind == ShellSessionKind.PowerShell;
+
         var psi = new ProcessStartInfo
         {
             FileName = _shell.FileName,
@@ -173,10 +184,15 @@ public sealed class ShellSession : IDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
-            // 显式用 OEM 代码页解码，避免按 Console.OutputEncoding（真实 CLI 里是 UTF-8）解出乱码。
-            StandardOutputEncoding = ProcessEncoding.ChildOutput,
+            // 显式指定解码编码，避免按 Console.OutputEncoding（真实 CLI 里是 UTF-8）解出乱码。
+            StandardOutputEncoding = isPowerShell ? Encoding.UTF8 : ProcessEncoding.ChildOutput,
             StandardErrorEncoding = ProcessEncoding.ChildOutput,
         };
+        // PowerShell 从 stdin 按 UTF-8 读命令（重定向默认）；而 StandardInput 默认按 Console.InputEncoding
+        // 写字节（测试宿主里是 GBK）→ 中文命令被写坏。显式钉成 UTF-8 使命令字节与 PS 读取一致。
+        // cmd/sh 不设：保持既有行为（OEM 字节），避免回归。
+        if (isPowerShell)
+            psi.StandardInputEncoding = Encoding.UTF8;
         foreach (var arg in _shell.PrefixArguments)
             psi.ArgumentList.Add(arg);
 
@@ -204,14 +220,25 @@ public sealed class ShellSession : IDisposable
         _process.BeginErrorReadLine();
     }
 
-    /// <summary>初始化：Windows 设置提示符标签；两边都回显就绪标记，排空横幅/回显到会话真正就绪。</summary>
+    /// <summary>
+    /// 初始化：cmd 设置提示符标签、PowerShell 前置进度抑制与退出码初始化；都回显就绪标记，
+    /// 排空横幅/回显到会话真正就绪。
+    /// </summary>
     private async Task<ProcessResult> InitializeAsync(CancellationToken cancellationToken)
     {
         var ready = _tag + "ready";
         try
         {
-            if (IsWindowsCmd())
+            if (IsCmd())
                 await _process!.StandardInput.WriteLineAsync($"prompt {_tag}$G").ConfigureAwait(false);
+            else if (_shell.SessionKind == ShellSessionKind.PowerShell)
+            {
+                // 前置脚本：抑制 PS 5.1 重定向 stdout 时的 CLIXML 进度流；把 $LASTEXITCODE 初始化为 0
+                // （未设置时是空串，标记行的 $rc=$global:LASTEXITCODE 会解析失败）。
+                // 注意：这里刻意不碰 [Console]::OutputEncoding —— 改了它 stdin 会被读成 OEM，中文命令乱码。
+                await _process!.StandardInput.WriteLineAsync(
+                    "$ProgressPreference='SilentlyContinue'; $global:LASTEXITCODE=0;").ConfigureAwait(false);
+            }
             await _process!.StandardInput.WriteLineAsync($"echo {ready}").ConfigureAwait(false);
             await _process!.StandardInput.FlushAsync().ConfigureAwait(false);
 
@@ -241,13 +268,21 @@ public sealed class ShellSession : IDisposable
         }
     }
 
-    private string MarkerLine() => IsWindowsCmd()
-        ? $"echo {_marker} & echo {_exitMarker}:%errorlevel%"
-        : $"__di_rc=$?; echo {_marker}; echo {_exitMarker}:$__di_rc";
+    private string MarkerLine() => _shell.SessionKind switch
+    {
+        ShellSessionKind.Cmd => $"echo {_marker} & echo {_exitMarker}:%errorlevel%",
+        ShellSessionKind.PowerShell =>
+            // PS 5.1 语义：cmdlet 成功 → $? 为 True（取 $LASTEXITCODE，初始 0）；原生命令失败 → $? 为 False
+            // 且 $LASTEXITCODE 是真实码；命令不存在 → $? 为 False 且 $LASTEXITCODE 保持 0 → 兜底为 1。
+            $"$ok=$?; $rc=$global:LASTEXITCODE; if (-not $ok) {{ $rc=[Math]::Max(1,$rc) }}; " +
+            $"Write-Output '{_marker}'; Write-Output ('{_exitMarker}:' + $rc)",
+        _ => $"__di_rc=$?; echo {_marker}; echo {_exitMarker}:$__di_rc",
+    };
 
-    private bool IsWindowsCmd() => OperatingSystem.IsWindows() && _shell.IsSessionDefault;
+    private bool IsCmd() => _shell.SessionKind == ShellSessionKind.Cmd;
 
-    private bool IsEchoLine(string line) => IsWindowsCmd() && line.StartsWith(_tag, StringComparison.Ordinal);
+    // 仅 cmd 的交互式管道会回显"提示符+命令"；/bin/sh 与 PowerShell（-Command -）都不回显。
+    private bool IsEchoLine(string line) => IsCmd() && line.StartsWith(_tag, StringComparison.Ordinal);
 
     private async Task<string?> ReadLineAsync(CancellationToken cancellationToken)
     {

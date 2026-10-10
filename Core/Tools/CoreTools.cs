@@ -4,7 +4,7 @@ using Core.Llm;
 namespace Core.Tools;
 
 /// <summary>
-/// 七个内置核心编码工具（第五章 Coding Agent）的注册表与聚合入口，
+/// 八个内置核心编码工具（第五章 Coding Agent）的注册表与聚合入口，
 /// 对应 pi 的 core/tools/index.ts：
 /// <list type="bullet">
 /// <item>工具名常量 + 工具集（all / coding / read-only）——可给不同场景暴露不同工具子集。</item>
@@ -12,7 +12,7 @@ namespace Core.Tools;
 /// <item>单工具路由 <see cref="CreateTool"/>（未知名字抛错）与组合工厂。</item>
 /// </list>
 /// Definitions（给模型的 ChatTool 列表）与 CreateExecutor（运行时执行器）共用同一注册表，
-/// 保证 schema 与实现一致（bash 均为持久化会话模式）。
+/// 保证 schema 与实现一致（bash/powershell 均为持久化会话模式）。
 /// </summary>
 public static class CoreTools
 {
@@ -26,12 +26,13 @@ public static class CoreTools
         public const string Glob = "glob";
         public const string Grep = "grep";
         public const string Bash = "bash";
+        public const string PowerShell = "powershell";
         public const string Python = "python";
     }
 
     /// <summary>全部内置工具名（对应 pi 的 allToolNames）。</summary>
     public static readonly IReadOnlySet<string> AllToolNames = new HashSet<string>(
-        [ToolNames.ReadFile, ToolNames.WriteFile, ToolNames.EditFile, ToolNames.Glob, ToolNames.Grep, ToolNames.Bash, ToolNames.Python],
+        [ToolNames.ReadFile, ToolNames.WriteFile, ToolNames.EditFile, ToolNames.Glob, ToolNames.Grep, ToolNames.Bash, ToolNames.PowerShell, ToolNames.Python],
         StringComparer.Ordinal);
 
     /// <summary>可写工具集（能修改文件系统）——对应 pi 的 coding tools。</summary>
@@ -74,6 +75,12 @@ public static class CoreTools
         public TimeSpan? Timeout { get; init; }
     }
 
+    public sealed class PowerShellOptions
+    {
+        /// <summary>覆盖默认超时（默认 30 秒）。</summary>
+        public TimeSpan? Timeout { get; init; }
+    }
+
     public sealed class PythonOptions
     {
         /// <summary>python 解释器路径/命令（默认走 PATH 的 python）。</summary>
@@ -93,6 +100,7 @@ public static class CoreTools
         public GlobOptions? Glob { get; init; }
         public GrepOptions? Grep { get; init; }
         public BashOptions? Bash { get; init; }
+        public PowerShellOptions? PowerShell { get; init; }
         public PythonOptions? Python { get; init; }
     }
 
@@ -100,6 +108,14 @@ public static class CoreTools
 
     /// <summary>按名字创建一个工具；未知名字抛 <see cref="InvalidOperationException"/>。</summary>
     public static ICoreTool CreateTool(string toolName, string baseDirectory, Options? options = null, ShellSession? session = null)
+        => BuildTool(toolName, baseDirectory, options, session, powerShellSession: null);
+
+    /// <summary>
+    /// 内部路由：shell 类工具按各自会话挂接——bash 用默认 shell 会话，powershell 用 PowerShell 会话
+    /// （-Command -，语法/编码与 cmd/sh 不同），两者不能共用同一个 <see cref="ShellSession"/>。
+    /// </summary>
+    private static ICoreTool BuildTool(string toolName, string baseDirectory, Options? options,
+        ShellSession? session, ShellSession? powerShellSession)
         => toolName switch
         {
             ToolNames.ReadFile => new ReadFileTool(baseDirectory, options?.ReadFile?.MaxBytes),
@@ -108,6 +124,7 @@ public static class CoreTools
             ToolNames.Glob => new GlobTool(baseDirectory, options?.Glob?.MaxResults),
             ToolNames.Grep => new GrepTool(baseDirectory, options?.Grep?.MaxResults, options?.Grep?.MaxFileBytes),
             ToolNames.Bash => new BashTool(baseDirectory, shell: options?.Bash?.Shell, timeout: options?.Bash?.Timeout, session: session),
+            ToolNames.PowerShell => new PowerShellTool(baseDirectory, timeout: options?.PowerShell?.Timeout, session: powerShellSession),
             ToolNames.Python => new PythonTool(
                 options?.Python?.Executable ?? "python",
                 options?.Python?.SandboxDirectory,
@@ -120,19 +137,23 @@ public static class CoreTools
     /// <summary>工具集的规范顺序（Definitions 与 Executor 共用，保证顺序一致）。</summary>
     private static readonly string[] CanonicalOrder =
     [
-        ToolNames.ReadFile, ToolNames.WriteFile, ToolNames.EditFile, ToolNames.Glob, ToolNames.Grep, ToolNames.Bash, ToolNames.Python,
+        ToolNames.ReadFile, ToolNames.WriteFile, ToolNames.EditFile, ToolNames.Glob, ToolNames.Grep, ToolNames.Bash,
+        ToolNames.PowerShell, ToolNames.Python,
     ];
 
     /// <summary>
-    /// 创建指定工具集（默认全部）。<paramref name="session"/> 非空时 bash 为共享持久化会话模式
-    /// （cwd/环境变量跨调用保持）；为 null 时 bash 为一次性进程模式。
+    /// 创建指定工具集（默认全部）。<paramref name="session"/> 非空时 bash 为共享持久化会话模式、
+    /// <paramref name="powerShellSession"/> 非空时 powershell 为共享持久化会话模式
+    /// （cwd/环境变量跨调用保持）；为 null 时对应工具为一次性模式。
     /// </summary>
     public static IReadOnlyList<ICoreTool> CreateTools(
-        string baseDirectory, Options? options = null, IReadOnlySet<string>? toolNames = null, ShellSession? session = null)
+        string baseDirectory, Options? options = null, IReadOnlySet<string>? toolNames = null,
+        ShellSession? session = null, ShellSession? powerShellSession = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseDirectory);
         var set = toolNames ?? AllToolNames;
-        return CanonicalOrder.Where(set.Contains).Select(name => CreateTool(name, baseDirectory, options, session)).ToList();
+        return CanonicalOrder.Where(set.Contains)
+            .Select(name => BuildTool(name, baseDirectory, options, session, powerShellSession)).ToList();
     }
 
     /// <summary>可写工具集（read/write/edit/bash）。</summary>
@@ -147,13 +168,14 @@ public static class CoreTools
 
     /// <summary>
     /// 指定工具集的 ChatTool 定义（传给模型以允许发起工具调用）。
-    /// bash 始终以共享持久化会话模式定义（与 <see cref="CreateExecutor"/> 一致）。
+    /// bash/powershell 始终以共享持久化会话模式定义（与 <see cref="CreateExecutor"/> 一致）。
     /// 会话是惰性的（不执行命令不会拉起进程）；这里只需要 Schema，取完定义立即释放，不留孤儿会话。
     /// </summary>
     public static IReadOnlyList<ChatTool> Definitions(string baseDirectory, Options? options = null, IReadOnlySet<string>? toolNames = null)
     {
         using var session = new ShellSession(baseDirectory);
-        return CreateTools(baseDirectory, options, toolNames, session).Select(t => t.Definition).ToList();
+        using var powerShellSession = new ShellSession(baseDirectory, ShellCommand.PowerShellSession);
+        return CreateTools(baseDirectory, options, toolNames, session, powerShellSession).Select(t => t.Definition).ToList();
     }
 
     /// <summary>可写工具集的定义。</summary>
@@ -166,17 +188,20 @@ public static class CoreTools
 
     /// <summary>
     /// 创建按工具名分发的执行器，供 ReAct 循环使用。
-    /// bash 挂接一个共享的持久化终端会话（惰性启动，第一次 bash 调用才拉起进程）；
+    /// bash 与 powershell 各挂接一个共享的持久化终端会话（惰性启动，第一次调用才拉起进程；
+    /// 两者 shell 不同，不能共用一个会话）。
     /// 返回的执行器实现 IDisposable，用完后请释放以终止会话进程。
     /// </summary>
     public static Executor CreateExecutor(string baseDirectory, Options? options = null, IReadOnlySet<string>? toolNames = null)
     {
         var session = new ShellSession(baseDirectory);
-        return new Executor(CreateTools(baseDirectory, options, toolNames, session), session);
+        var powerShellSession = new ShellSession(baseDirectory, ShellCommand.PowerShellSession);
+        return new Executor(
+            CreateTools(baseDirectory, options, toolNames, session, powerShellSession), session, powerShellSession);
     }
 
     /// <summary>
-    /// 工具使用说明：作为 stable_prefix 的一部分注入系统提示，让模型知道有哪七个工具、
+    /// 工具使用说明：作为 stable_prefix 的一部分注入系统提示，让模型知道有哪八个工具、
     /// 观察结果长什么样、以及各类工具的使用惯例。
     /// </summary>
     public static string Instructions { get; } =
@@ -198,7 +223,11 @@ public static class CoreTools
            cd、环境变量、激活的虚拟环境等状态在多次调用之间保持——切换目录用 cd 而不是 working_dir。
            适合跑测试、处理特殊格式文件、装依赖。超时默认 30 秒（可用 timeout 参数覆盖，单位秒），
            超时返回 error（会话自动重建），长输出自动截断头尾。
-        7. python —— 在沙盒临时目录中执行一段 Python 代码，适合计算、数据处理、生成图表。超时返回 error，长输出截断。
+        7. powershell —— 在共享的持久化 PowerShell 会话中执行命令，返回退出码与合并输出（stdout+stderr）。
+           cd、变量、环境变量等状态在多次调用之间保持——切换目录用 cd（Set-Location）而不是 working_dir。
+           适合在 Windows 上跑 PowerShell 脚本（.ps1）、调用 .NET 对象/命令行工具。超时默认 30 秒
+           （可用 timeout 参数覆盖，单位秒），超时返回 error（会话自动重建），长输出自动截断头尾。
+        8. python —— 在沙盒临时目录中执行一段 Python 代码，适合计算、数据处理、生成图表。超时返回 error，长输出截断。
 
         使用惯例：
         - 观察结果以 "exit: N"（N 为退出码）或 "error: ..."（本次调用出错）开头。error 表示需要修正参数后重试。
@@ -211,11 +240,13 @@ public static class CoreTools
     {
         private readonly IReadOnlyDictionary<string, ICoreTool> _tools;
         private readonly ShellSession? _session;
+        private readonly ShellSession? _powerShellSession;
 
-        public Executor(IEnumerable<ICoreTool> tools, ShellSession? session = null)
+        public Executor(IEnumerable<ICoreTool> tools, ShellSession? session = null, ShellSession? powerShellSession = null)
         {
             _tools = tools.ToDictionary(t => t.Name);
             _session = session;
+            _powerShellSession = powerShellSession;
         }
 
         public Task<string> ExecuteAsync(ToolCallBlock call, CancellationToken cancellationToken = default)
@@ -225,6 +256,10 @@ public static class CoreTools
             return Task.FromResult($"error: 未知工具 '{call.Name}'");
         }
 
-        public void Dispose() => _session?.Dispose();
+        public void Dispose()
+        {
+            _session?.Dispose();
+            _powerShellSession?.Dispose();
+        }
     }
 }

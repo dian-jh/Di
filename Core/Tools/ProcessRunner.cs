@@ -5,27 +5,49 @@ using System.Text;
 namespace Core.Tools;
 
 /// <summary>
-/// 一条进程命令：可执行文件 + 前缀参数（shell 工具用：cmd /c、/bin/sh -c）。
+/// 一条进程命令：可执行文件 + 前缀参数（shell 工具用：cmd /c、/bin/sh -c、powershell -Command -）。
 /// </summary>
-public sealed record ShellCommand(string FileName, IReadOnlyList<string> PrefixArguments)
+public sealed record ShellCommand(string FileName, IReadOnlyList<string> PrefixArguments,
+    ShellSessionKind SessionKind = ShellSessionKind.Sh)
 {
     /// <summary>平台默认 shell：Windows 用 COMSPEC（cmd.exe），其他平台用 /bin/sh。</summary>
     public static ShellCommand Default { get; } = OperatingSystem.IsWindows()
-        ? new ShellCommand(Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe", ["/c"])
+        ? new ShellCommand(Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe", ["/c"], ShellSessionKind.Cmd)
         : new ShellCommand("/bin/sh", ["-c"]);
 
     /// <summary>
     /// 持久化会话的 shell：Windows 用 cmd.exe（无 /c，交互式读 stdin），其他平台用 /bin/sh（管道模式）。
     /// </summary>
     public static ShellCommand SessionDefault { get; } = OperatingSystem.IsWindows()
-        ? new ShellCommand(Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe", [])
+        ? new ShellCommand(Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe", [], ShellSessionKind.Cmd)
         : new ShellCommand("/bin/sh", []);
+
+    /// <summary>
+    /// PowerShell 持久化会话：-Command - 从 stdin 读命令。
+    /// 输出编码策略（实测 PS 5.1）：不经 Console 编码行——宿主编译输出（Write-Output 等）走 .NET 重定向
+    /// 的 UTF-8 默认编码，引擎生成的错误记录（命令不存在等）走 OEM 代码页，两条流分别解码（见 ShellSession）。
+    /// </summary>
+    public static ShellCommand PowerShellSession { get; } =
+        new("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"], ShellSessionKind.PowerShell);
 
     /// <summary>是否为平台默认 shell（BashTool 借此决定用哪种命令行构造方式）。</summary>
     public bool IsPlatformDefault => ReferenceEquals(this, Default);
 
-    /// <summary>是否为平台默认会话 shell（ShellSession 借此决定回显过滤/标记行的语法）。</summary>
+    /// <summary>是否为平台默认会话 shell。</summary>
     public bool IsSessionDefault => ReferenceEquals(this, SessionDefault);
+}
+
+/// <summary>终端会话的 shell 变体：决定回显过滤、初始化与标记行的语法。</summary>
+public enum ShellSessionKind
+{
+    /// <summary>Windows cmd.exe：管道模式回显"提示符+命令"，标记行用 %errorlevel%。</summary>
+    Cmd,
+
+    /// <summary>/bin/sh：不回显，标记行用 $?。</summary>
+    Sh,
+
+    /// <summary>PowerShell 5.1：不回显，标记行用 $? + $LASTEXITCODE（cmdlet 成功→0、原生失败→真实码、未找到→1）。</summary>
+    PowerShell,
 }
 
 /// <summary>一次进程/会话命令执行的结果，渲染成回填给模型的观察文本。</summary>
