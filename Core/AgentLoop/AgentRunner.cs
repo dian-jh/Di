@@ -120,7 +120,8 @@ public sealed class AgentRunner : IAgentRunner
         }, cancellationToken).ConfigureAwait(false);
 
         // 累加本回合轨迹作为下一回合的记忆，并裁剪到最近 N 轮（按整回合在 user 消息处切）。
-        _history = TrimHistory(result.Trajectory, _maxHistoryTurns);
+        // 再对尾部做工具良构化：封顶/最终输出工具回合会留下"未执行的 tool_calls"，必须剔除。
+        _history = SanitizeHistory(TrimHistory(result.Trajectory, _maxHistoryTurns));
         // 裁剪可能把最早注入的快照裁出历史：重置标记，让下一回合重新注入（否则长期会话会失去环境上下文）。
         if (_lastSnapshotText is not null && !_history.OfType<SystemMessage>().Any(m => m.Text == _lastSnapshotText))
             _lastSnapshotText = null;
@@ -145,5 +146,21 @@ public sealed class AgentRunner : IAgentRunner
                 return trajectory.Skip(i).ToArray();
         }
         return trajectory;
+    }
+
+    /// <summary>
+    /// 跨回合记忆必须"工具良构"：assistant 的 tool_calls 必须紧跟对应的 tool 结果。
+    /// 封顶（<see cref="AgentStopReason.MaxIterations"/>）或最终输出工具
+    /// （<see cref="AgentStopReason.FinalOutputTool"/>）回合会以"未执行的 tool_calls"结尾——
+    /// 该悬空 assistant 消息若带进下一轮请求，provider（如 DeepSeek）会以 invalid_request_error
+    /// 拒绝整个请求。从尾部丢弃未获响应的 tool_calls，直到历史良构。
+    /// 只修剪<b>持久化记忆</b>，不动回合结果：轨迹仍是可重放的完整状态。
+    /// </summary>
+    private static IReadOnlyList<ChatMessage> SanitizeHistory(IReadOnlyList<ChatMessage> history)
+    {
+        var end = history.Count;
+        while (end > 0 && history[end - 1] is AssistantMessage { ToolCalls.Count: > 0 })
+            end--;
+        return end == history.Count ? history : history.Take(end).ToArray();
     }
 }

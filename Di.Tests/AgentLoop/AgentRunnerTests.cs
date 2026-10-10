@@ -349,6 +349,74 @@ public sealed class AgentRunnerTests
         }
     }
 
+    [Fact]
+    public async Task RunAsync_CappedTurnWithPendingToolCalls_NextTurnHistoryStaysToolWellFormed()
+    {
+        // 迭代预算封顶（MaxIterations）时模型仍输出 tool_calls：轨迹以"未获响应的
+        // assistant(tool_calls)"结尾。该悬空尾部绝不能带进下一轮请求 —— DeepSeek 会以
+        // invalid_request_error（"tool_calls must be followed by tool messages"）拒绝整个请求。
+        var model = new ScriptedModel(i => i < 3
+            ? new ModelResponse
+            {
+                Message = ChatMessage.Assistant(text: null, toolCalls: [new ToolCallBlock($"c{i}", $"tool_{i}", "{}")]),
+                FinishReason = new FinishReason.ToolCalls(),
+                Usage = TokenUsage.Zero,
+            }
+            : new ModelResponse
+            {
+                Message = ChatMessage.Assistant("第二问的回答"),
+                FinishReason = new FinishReason.Stop(),
+                Usage = TokenUsage.Zero,
+            });
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys", MaxIterations = 3 },
+            new InMemoryEventBus());
+
+        var first = await runner.RunAsync("第一问");
+        Assert.Equal(AgentStopReason.MaxIterations, first.StopReason);
+
+        await runner.RunAsync("第二问");
+
+        // 前三轮封顶（c0..c2）+ 第二轮第 1 轮：Requests[3] 是第二轮请求，其历史必须工具良构。
+        AssertToolWellFormed(model.Requests[3].Messages);
+    }
+
+    [Fact]
+    public async Task RunAsync_FinalOutputToolTurn_NextTurnHistoryStaysToolWellFormed()
+    {
+        // FinalOutputTool 回合同样以"assistant(调用最终输出工具)"结尾、后面没有 tool 结果
+        //（参数即答案，工具不执行）——悬空尾部同样会毒化下一轮请求。
+        var model = new ScriptedModel(i => i == 0
+            ? new ModelResponse
+            {
+                Message = ChatMessage.Assistant(text: null,
+                    toolCalls: [new ToolCallBlock("final-call", "final_output", "最终答案")]),
+                FinishReason = new FinishReason.ToolCalls(),
+                Usage = TokenUsage.Zero,
+            }
+            : new ModelResponse
+            {
+                Message = ChatMessage.Assistant("第二问的回答"),
+                FinishReason = new FinishReason.Stop(),
+                Usage = TokenUsage.Zero,
+            });
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys", FinalOutputTool = "final_output" },
+            new InMemoryEventBus());
+
+        var first = await runner.RunAsync("第一问");
+        Assert.Equal(AgentStopReason.FinalOutputTool, first.StopReason);
+        Assert.Equal("最终答案", first.Answer);
+
+        await runner.RunAsync("第二问");
+
+        AssertToolWellFormed(model.Requests[1].Messages);
+    }
+
     // ---- 工具：git 探测 / 临时仓库（与 Di.Tests/EnvironmentSnapshotTests 同款策略）----
 
     private static string? FindGit()
@@ -392,6 +460,49 @@ public sealed class AgentRunnerTests
         })!;
         p.WaitForExit(20000);
         Assert.True(p.ExitCode == 0, $"git {string.Join(' ', args)} 失败: {p.StandardError.ReadToEnd()}");
+    }
+
+    /// <summary>校验请求消息"工具良构"：每个 assistant(tool_calls) 后必须紧跟覆盖全部 call_id 的
+    /// tool 结果；请求必须以 user 消息结尾（当前回合）。悬空 tool_calls 会被 provider 拒绝。</summary>
+    private static void AssertToolWellFormed(IReadOnlyList<ChatMessage> messages)
+    {
+        Assert.IsType<UserMessage>(messages[^1]);
+        for (var i = 0; i < messages.Count; i++)
+        {
+            if (messages[i] is not AssistantMessage { ToolCalls.Count: > 0 } assistant)
+                continue;
+            var results = new List<string>();
+            for (var j = i + 1; j < messages.Count && messages[j] is ToolResultMessage tool; j++)
+                results.Add(tool.ToolCallId);
+            Assert.True(
+                assistant.ToolCalls.All(c => results.Contains(c.Id)),
+                $"index {i}: assistant(tool_calls) 后缺少对应的 tool 结果");
+        }
+    }
+
+    /// <summary>按调用序号响应的假模型：可编排"前 N 轮输出 tool_calls、之后输出回答"等跨回合剧本。</summary>
+    private sealed class ScriptedModel : IChatModel
+    {
+        private readonly Func<int, ModelResponse> _respond;
+
+        public ScriptedModel(Func<int, ModelResponse> respond) => _respond = respond;
+
+        public List<ModelRequest> Requests { get; } = [];
+
+        public int CallIndex { get; private set; }
+
+        public Task<ModelResponse> CompleteAsync(ModelRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(_respond(CallIndex++));
+        }
+
+        public async IAsyncEnumerable<ModelEvent> StreamAsync(
+            ModelRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            // AgentRunner 走流式路径：合成单个 Completed 事件。
+            yield return new ModelEvent.Completed(await CompleteAsync(request, cancellationToken));
+        }
     }
 
     private sealed class FakeChatModel : IChatModel
