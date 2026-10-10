@@ -23,9 +23,9 @@ public sealed class CoreToolsTests : IDisposable
     }
 
     [Fact]
-    public void Create_ReturnsSevenTools_WithUniqueNames()
+    public void CreateTools_ReturnsSevenTools_WithUniqueNames()
     {
-        var tools = CoreTools.Create(_base);
+        var tools = CoreTools.CreateTools(_base);
 
         Assert.Equal(7, tools.Count);
         Assert.Equal(7, tools.Select(t => t.Name).Distinct().Count());
@@ -36,11 +36,73 @@ public sealed class CoreToolsTests : IDisposable
     [Fact]
     public void Definitions_Names_MatchTools()
     {
-        var tools = CoreTools.Create(_base);
+        var tools = CoreTools.CreateTools(_base);
         var definitions = CoreTools.Definitions(_base);
 
         Assert.Equal(tools.Count, definitions.Count);
         Assert.Equal(tools.Select(t => t.Name), definitions.Select(d => d.Name));
+    }
+
+    // ---- 注册与路由（对应 pi index.ts 的 createTool / 工具集组合）----
+
+    [Fact]
+    public void CreateTool_UnknownName_Throws()
+    {
+        Assert.Throws<InvalidOperationException>(() => CoreTools.CreateTool("no_such_tool", _base));
+    }
+
+    [Fact]
+    public void CreateTool_ReadFileOptions_OverrideMaxBytes()
+    {
+        var tool = CoreTools.CreateTool("read_file", _base, new CoreTools.Options
+        {
+            ReadFile = new CoreTools.ReadFileOptions { MaxBytes = 10 },
+        });
+        File.WriteAllText(Path.Combine(_base, "big.txt"), new string('x', 100));
+
+        var result = tool.ExecuteAsync("""{"path":"big.txt"}""").GetAwaiter().GetResult();
+
+        Assert.StartsWith("error:", result);
+        Assert.Contains("过大", result);
+    }
+
+    [Fact]
+    public void CreateTools_WithToolNames_BuildsOnlyThatSubset()
+    {
+        var tools = CoreTools.CreateTools(_base, toolNames: CoreTools.ReadOnlyToolNames);
+
+        Assert.Equal(["read_file", "glob", "grep"], tools.Select(t => t.Name).ToArray());
+    }
+
+    [Fact]
+    public void CreateReadOnlyTools_ExcludesMutations()
+    {
+        var tools = CoreTools.CreateReadOnlyTools(_base);
+
+        Assert.DoesNotContain(tools, t => t.Name is "write_file" or "edit_file" or "bash" or "python");
+    }
+
+    [Fact]
+    public void CreateCodingTools_ExcludesSearchAndPython()
+    {
+        var tools = CoreTools.CreateCodingTools(_base);
+
+        Assert.Equal(["read_file", "write_file", "edit_file", "bash"], tools.Select(t => t.Name).ToArray());
+    }
+
+    [Fact]
+    public void Definitions_RespectToolNames_Subset()
+    {
+        var definitions = CoreTools.Definitions(_base, toolNames: CoreTools.ReadOnlyToolNames);
+
+        Assert.Equal(["read_file", "glob", "grep"], definitions.Select(d => d.Name).ToArray());
+    }
+
+    [Fact]
+    public void AllToolNames_ContainsAllSeven()
+    {
+        Assert.Equal(7, CoreTools.AllToolNames.Count);
+        Assert.True(ExpectedNames.All(CoreTools.AllToolNames.Contains));
     }
 
     [Fact]
@@ -116,7 +178,10 @@ public sealed class CoreToolsTests : IDisposable
     public async Task Executor_PythonRunsCode()
     {
         if (PythonExe is null) return;
-        using var executor = CoreTools.CreateExecutor(_base, PythonExe);
+        using var executor = CoreTools.CreateExecutor(_base, new CoreTools.Options
+        {
+            Python = new CoreTools.PythonOptions { Executable = PythonExe },
+        });
         var result = await executor.ExecuteAsync(Call("python", """{"code":"print(3 + 4)"}"""));
 
         Assert.StartsWith("exit: 0", result);

@@ -14,11 +14,13 @@ public sealed class ReadFileTool : ICoreTool
     public const long MaxBytes = 1 << 20;
 
     private readonly string _baseDirectory;
+    private readonly long _maxBytes;
 
-    public ReadFileTool(string baseDirectory)
+    public ReadFileTool(string baseDirectory, long? maxBytes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseDirectory);
         _baseDirectory = baseDirectory;
+        _maxBytes = maxBytes ?? MaxBytes;
     }
 
     public string Name => "read_file";
@@ -49,8 +51,8 @@ public sealed class ReadFileTool : ICoreTool
                 return Task.FromResult($"error: 文件不存在: {path}");
 
             var info = new FileInfo(full);
-            if (info.Length > MaxBytes)
-                return Task.FromResult($"error: 文件过大（{info.Length} 字节，上限 {MaxBytes} 字节）");
+            if (info.Length > _maxBytes)
+                return Task.FromResult($"error: 文件过大（{info.Length} 字节，上限 {_maxBytes} 字节），请用 start_line/end_line 分段读取");
 
             var lines = File.ReadAllLines(full);
             if (lines.Length == 0)

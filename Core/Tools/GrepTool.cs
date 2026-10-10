@@ -15,11 +15,15 @@ public sealed class GrepTool : ICoreTool
     public const long MaxFileBytes = 1 << 20;
 
     private readonly string _baseDirectory;
+    private readonly int _maxResults;
+    private readonly long _maxFileBytes;
 
-    public GrepTool(string baseDirectory)
+    public GrepTool(string baseDirectory, int? maxResults = null, long? maxFileBytes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseDirectory);
         _baseDirectory = baseDirectory;
+        _maxResults = maxResults ?? MaxResults;
+        _maxFileBytes = maxFileBytes ?? MaxFileBytes;
     }
 
     public string Name => "grep";
@@ -65,7 +69,7 @@ public sealed class GrepTool : ICoreTool
                 var rel = Path.GetRelativePath(searchRoot, file).Replace('\\', '/');
                 if (globRegex is not null && !globRegex.IsMatch(rel))
                     continue;
-                if (new FileInfo(file).Length > MaxFileBytes)
+                if (new FileInfo(file).Length > _maxFileBytes)
                     continue;
 
                 try
@@ -77,7 +81,7 @@ public sealed class GrepTool : ICoreTool
                         if (regex.IsMatch(line))
                         {
                             results.Add($"{rel}:{lineNo}: {line}");
-                            if (results.Count >= MaxResults)
+                            if (results.Count >= _maxResults)
                                 break;
                         }
                     }
@@ -87,7 +91,7 @@ public sealed class GrepTool : ICoreTool
                     continue;   // 单个文件读不动不阻塞整个搜索
                 }
 
-                if (results.Count >= MaxResults)
+                if (results.Count >= _maxResults)
                     break;
             }
 

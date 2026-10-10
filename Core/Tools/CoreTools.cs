@@ -4,49 +4,175 @@ using Core.Llm;
 namespace Core.Tools;
 
 /// <summary>
-/// 七个内置核心编码工具（第五章 Coding Agent）的聚合入口：
-/// 工具实例、JSON Schema 定义、<see cref="IToolExecutor"/> 分发、以及放进 stable_prefix 的使用说明。
+/// 七个内置核心编码工具（第五章 Coding Agent）的注册表与聚合入口，
+/// 对应 pi 的 core/tools/index.ts：
+/// <list type="bullet">
+/// <item>工具名常量 + 工具集（all / coding / read-only）——可给不同场景暴露不同工具子集。</item>
+/// <item>per-tool options（<see cref="Options"/>）——统一在注册层配置各工具的旋钮。</item>
+/// <item>单工具路由 <see cref="CreateTool"/>（未知名字抛错）与组合工厂。</item>
+/// </list>
+/// Definitions（给模型的 ChatTool 列表）与 CreateExecutor（运行时执行器）共用同一注册表，
+/// 保证 schema 与实现一致（bash 均为持久化会话模式）。
 /// </summary>
 public static class CoreTools
 {
-    /// <summary>
-    /// 创建全部七个核心工具实例（相对路径都以 baseDirectory 为根；pythonExecutable 默认走 PATH 的 python）。
-    /// bash 为一次性进程模式（每次命令独立进程）；共享持久化会话用 <see cref="CreateExecutor"/>。
-    /// </summary>
-    public static IReadOnlyList<ICoreTool> Create(string baseDirectory, string pythonExecutable = "python")
-        => CreateTools(baseDirectory, pythonExecutable, session: null);
+    // ---- 工具名（对应 pi 的 ToolName union）----
 
-    private static IReadOnlyList<ICoreTool> CreateTools(string baseDirectory, string pythonExecutable, ShellSession? session) =>
+    public static class ToolNames
+    {
+        public const string ReadFile = "read_file";
+        public const string WriteFile = "write_file";
+        public const string EditFile = "edit_file";
+        public const string Glob = "glob";
+        public const string Grep = "grep";
+        public const string Bash = "bash";
+        public const string Python = "python";
+    }
+
+    /// <summary>全部内置工具名（对应 pi 的 allToolNames）。</summary>
+    public static readonly IReadOnlySet<string> AllToolNames = new HashSet<string>(
+        [ToolNames.ReadFile, ToolNames.WriteFile, ToolNames.EditFile, ToolNames.Glob, ToolNames.Grep, ToolNames.Bash, ToolNames.Python],
+        StringComparer.Ordinal);
+
+    /// <summary>可写工具集（能修改文件系统）——对应 pi 的 coding tools。</summary>
+    public static readonly IReadOnlySet<string> CodingToolNames = new HashSet<string>(
+        [ToolNames.ReadFile, ToolNames.WriteFile, ToolNames.EditFile, ToolNames.Bash], StringComparer.Ordinal);
+
+    /// <summary>只读工具集（仅查看/搜索）——对应 pi 的 read-only tools。</summary>
+    public static readonly IReadOnlySet<string> ReadOnlyToolNames = new HashSet<string>(
+        [ToolNames.ReadFile, ToolNames.Glob, ToolNames.Grep], StringComparer.Ordinal);
+
+    // ---- per-tool options（对应 pi 的 ToolsOptions）----
+
+    public sealed class ReadFileOptions
+    {
+        /// <summary>单次读取的文件大小上限（默认 <see cref="ReadFileTool.MaxBytes"/>）。</summary>
+        public long? MaxBytes { get; init; }
+    }
+
+    public sealed class GlobOptions
+    {
+        /// <summary>最多返回的匹配条数（默认 <see cref="GlobTool.MaxResults"/>）。</summary>
+        public int? MaxResults { get; init; }
+    }
+
+    public sealed class GrepOptions
+    {
+        /// <summary>最多返回的匹配条数（默认 <see cref="GrepTool.MaxResults"/>）。</summary>
+        public int? MaxResults { get; init; }
+
+        /// <summary>跳过大于该字节数的文件（默认 <see cref="GrepTool.MaxFileBytes"/>）。</summary>
+        public long? MaxFileBytes { get; init; }
+    }
+
+    public sealed class BashOptions
+    {
+        /// <summary>覆盖平台默认 shell。</summary>
+        public ShellCommand? Shell { get; init; }
+
+        /// <summary>覆盖默认超时（默认 30 秒）。</summary>
+        public TimeSpan? Timeout { get; init; }
+    }
+
+    public sealed class PythonOptions
+    {
+        /// <summary>python 解释器路径/命令（默认走 PATH 的 python）。</summary>
+        public string? Executable { get; init; }
+
+        /// <summary>沙盒工作目录（默认系统临时目录）。</summary>
+        public string? SandboxDirectory { get; init; }
+
+        /// <summary>覆盖默认超时（默认 30 秒）。</summary>
+        public TimeSpan? Timeout { get; init; }
+    }
+
+    /// <summary>全部工具的可选配置；未设置的项用默认值。</summary>
+    public sealed class Options
+    {
+        public ReadFileOptions? ReadFile { get; init; }
+        public GlobOptions? Glob { get; init; }
+        public GrepOptions? Grep { get; init; }
+        public BashOptions? Bash { get; init; }
+        public PythonOptions? Python { get; init; }
+    }
+
+    // ---- 单工具路由（对应 pi 的 createTool：未知名字抛错）----
+
+    /// <summary>按名字创建一个工具；未知名字抛 <see cref="InvalidOperationException"/>。</summary>
+    public static ICoreTool CreateTool(string toolName, string baseDirectory, Options? options = null, ShellSession? session = null)
+        => toolName switch
+        {
+            ToolNames.ReadFile => new ReadFileTool(baseDirectory, options?.ReadFile?.MaxBytes),
+            ToolNames.WriteFile => new WriteFileTool(baseDirectory),
+            ToolNames.EditFile => new EditFileTool(baseDirectory),
+            ToolNames.Glob => new GlobTool(baseDirectory, options?.Glob?.MaxResults),
+            ToolNames.Grep => new GrepTool(baseDirectory, options?.Grep?.MaxResults, options?.Grep?.MaxFileBytes),
+            ToolNames.Bash => new BashTool(baseDirectory, shell: options?.Bash?.Shell, timeout: options?.Bash?.Timeout, session: session),
+            ToolNames.Python => new PythonTool(
+                options?.Python?.Executable ?? "python",
+                options?.Python?.SandboxDirectory,
+                options?.Python?.Timeout),
+            _ => throw new InvalidOperationException($"未知工具名: {toolName}"),
+        };
+
+    // ---- 工具集组合（对应 pi 的 createAllTools / createCodingTools / createReadOnlyTools）----
+
+    /// <summary>工具集的规范顺序（Definitions 与 Executor 共用，保证顺序一致）。</summary>
+    private static readonly string[] CanonicalOrder =
     [
-        new ReadFileTool(baseDirectory),
-        new WriteFileTool(baseDirectory),
-        new EditFileTool(baseDirectory),
-        new GlobTool(baseDirectory),
-        new GrepTool(baseDirectory),
-        new BashTool(baseDirectory, session: session),
-        new PythonTool(pythonExecutable),
+        ToolNames.ReadFile, ToolNames.WriteFile, ToolNames.EditFile, ToolNames.Glob, ToolNames.Grep, ToolNames.Bash, ToolNames.Python,
     ];
 
     /// <summary>
-    /// 七个工具的 ChatTool 定义，传给模型以允许其发起工具调用。
-    /// 与 <see cref="CreateExecutor"/> 保持一致：bash 走共享持久化会话（定义里不含 working_dir）。
+    /// 创建指定工具集（默认全部）。<paramref name="session"/> 非空时 bash 为共享持久化会话模式
+    /// （cwd/环境变量跨调用保持）；为 null 时 bash 为一次性进程模式。
+    /// </summary>
+    public static IReadOnlyList<ICoreTool> CreateTools(
+        string baseDirectory, Options? options = null, IReadOnlySet<string>? toolNames = null, ShellSession? session = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseDirectory);
+        var set = toolNames ?? AllToolNames;
+        return CanonicalOrder.Where(set.Contains).Select(name => CreateTool(name, baseDirectory, options, session)).ToList();
+    }
+
+    /// <summary>可写工具集（read/write/edit/bash）。</summary>
+    public static IReadOnlyList<ICoreTool> CreateCodingTools(string baseDirectory, Options? options = null, ShellSession? session = null)
+        => CreateTools(baseDirectory, options, CodingToolNames, session);
+
+    /// <summary>只读工具集（read/glob/grep）。</summary>
+    public static IReadOnlyList<ICoreTool> CreateReadOnlyTools(string baseDirectory, Options? options = null, ShellSession? session = null)
+        => CreateTools(baseDirectory, options, ReadOnlyToolNames, session);
+
+    // ---- 定义（给模型）与执行器 ----
+
+    /// <summary>
+    /// 指定工具集的 ChatTool 定义（传给模型以允许发起工具调用）。
+    /// bash 始终以共享持久化会话模式定义（与 <see cref="CreateExecutor"/> 一致）。
     /// 会话是惰性的（不执行命令不会拉起进程）；这里只需要 Schema，取完定义立即释放，不留孤儿会话。
     /// </summary>
-    public static IReadOnlyList<ChatTool> Definitions(string baseDirectory, string pythonExecutable = "python")
+    public static IReadOnlyList<ChatTool> Definitions(string baseDirectory, Options? options = null, IReadOnlySet<string>? toolNames = null)
     {
         using var session = new ShellSession(baseDirectory);
-        return CreateTools(baseDirectory, pythonExecutable, session).Select(t => t.Definition).ToList();
+        return CreateTools(baseDirectory, options, toolNames, session).Select(t => t.Definition).ToList();
     }
+
+    /// <summary>可写工具集的定义。</summary>
+    public static IReadOnlyList<ChatTool> CodingDefinitions(string baseDirectory, Options? options = null)
+        => Definitions(baseDirectory, options, CodingToolNames);
+
+    /// <summary>只读工具集的定义。</summary>
+    public static IReadOnlyList<ChatTool> ReadOnlyDefinitions(string baseDirectory, Options? options = null)
+        => Definitions(baseDirectory, options, ReadOnlyToolNames);
 
     /// <summary>
     /// 创建按工具名分发的执行器，供 ReAct 循环使用。
     /// bash 挂接一个共享的持久化终端会话（惰性启动，第一次 bash 调用才拉起进程）；
     /// 返回的执行器实现 IDisposable，用完后请释放以终止会话进程。
     /// </summary>
-    public static Executor CreateExecutor(string baseDirectory, string pythonExecutable = "python")
+    public static Executor CreateExecutor(string baseDirectory, Options? options = null, IReadOnlySet<string>? toolNames = null)
     {
         var session = new ShellSession(baseDirectory);
-        return new Executor(CreateTools(baseDirectory, pythonExecutable, session), session);
+        return new Executor(CreateTools(baseDirectory, options, toolNames, session), session);
     }
 
     /// <summary>

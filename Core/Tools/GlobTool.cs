@@ -12,11 +12,13 @@ public sealed class GlobTool : ICoreTool
     public const int MaxResults = 200;
 
     private readonly string _baseDirectory;
+    private readonly int _maxResults;
 
-    public GlobTool(string baseDirectory)
+    public GlobTool(string baseDirectory, int? maxResults = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseDirectory);
         _baseDirectory = baseDirectory;
+        _maxResults = maxResults ?? MaxResults;
     }
 
     public string Name => "glob";
@@ -50,7 +52,7 @@ public sealed class GlobTool : ICoreTool
                 if (regex.IsMatch(rel))
                 {
                     results.Add(rel);
-                    if (results.Count >= MaxResults)
+                    if (results.Count >= _maxResults)
                         break;
                 }
             }
