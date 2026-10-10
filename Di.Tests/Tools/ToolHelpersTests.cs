@@ -97,6 +97,39 @@ public sealed class ToolHelpersTests : IDisposable
     }
 
     [Fact]
+    public void TryGetOptionalBool_AcceptsTrueFalseAndMissing()
+    {
+        using var doc = JsonDocument.Parse("""{"t":true,"f":false}""");
+        var root = doc.RootElement;
+
+        Assert.True(ToolHelpers.TryGetOptionalBool(root, "t", out var t, out _));
+        Assert.True(t);
+        Assert.True(ToolHelpers.TryGetOptionalBool(root, "f", out var f, out _));
+        Assert.False(f);
+        Assert.True(ToolHelpers.TryGetOptionalBool(root, "missing", out var m, out _));
+        Assert.Null(m);
+    }
+
+    [Fact]
+    public void TryGetOptionalBool_RejectsNonBoolean()
+    {
+        using var doc = JsonDocument.Parse("""{"b":"yes"}""");
+        Assert.False(ToolHelpers.TryGetOptionalBool(doc.RootElement, "b", out _, out var err));
+        Assert.Contains("b", err!);
+    }
+
+    [Fact]
+    public void AddOptionalProperty_DoesNotAddToRequired()
+    {
+        var schema = ToolHelpers.Schema(("a", "string", "A 参数"));
+        ToolHelpers.AddOptionalProperty(schema, "b", "integer", "B 参数");
+
+        var required = schema["required"]!.AsArray().Select(x => x!.GetValue<string>()).ToList();
+        Assert.Equal(["a"], required);
+        Assert.Equal("integer", schema["properties"]!["b"]!["type"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void EnumerateFiles_SkipsMissingRoot_Gracefully()
     {
         // 根目录不存在：不应抛异常，返回空序列。

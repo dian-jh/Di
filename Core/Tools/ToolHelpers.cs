@@ -32,6 +32,12 @@ internal static class ToolHelpers
         return schema;
     }
 
+    /// <summary>给已构建的 schema 追加一个可选属性（进入 properties 但不进入 required）。</summary>
+    public static void AddOptionalProperty(JsonObject schema, string name, string type, string description)
+    {
+        ((JsonObject)schema["properties"]!)[name] = new JsonObject { ["type"] = type, ["description"] = description };
+    }
+
     /// <summary>读取必需的 string 参数；缺失/非字符串/空白时写出 error 观察并返回 false。</summary>
     public static bool TryGetString(JsonElement root, string name, out string? value, out string? error)
     {
@@ -86,6 +92,26 @@ internal static class ToolHelpers
             return false;
         }
         value = parsed;
+        error = null;
+        return true;
+    }
+
+    /// <summary>读取可选的布尔参数；存在但非法时写出 error 观察并返回 false。</summary>
+    public static bool TryGetOptionalBool(JsonElement root, string name, out bool? value, out string? error)
+    {
+        if (!root.TryGetProperty(name, out var prop))
+        {
+            value = null;
+            error = null;
+            return true;
+        }
+        if (prop.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+        {
+            value = null;
+            error = $"error: 参数 '{name}' 必须是布尔值";
+            return false;
+        }
+        value = prop.GetBoolean();
         error = null;
         return true;
     }

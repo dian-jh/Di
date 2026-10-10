@@ -143,13 +143,29 @@ public sealed class GlobToolTests : IDisposable
     [Fact]
     public void Execute_ResultCap_ReturnsAtMostMaxResults()
     {
-        // 创建超过上限的文件，验证结果数被截断（且不崩溃）。
+        // 创建超过上限的文件，验证结果数被截断（且不崩溃），并给出用 limit 续查的提示。
         for (var i = 0; i < GlobTool.MaxResults + 5; i++)
             Write($"f{i}.txt");
 
         var result = NewTool().ExecuteAsync("""{"pattern":"**/*.txt"}""").GetAwaiter().GetResult();
 
-        Assert.Equal(GlobTool.MaxResults, result.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+        var lines = result.Split('\n', StringSplitOptions.RemoveEmptyEntries).Where(l => l.EndsWith(".txt", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(GlobTool.MaxResults, lines.Length);
+        Assert.Contains("200 条结果上限", result);
+    }
+
+    [Fact]
+    public void Execute_LimitOption_StopsEarlyWithNotice()
+    {
+        for (var i = 0; i < 5; i++)
+            Write($"f{i}.txt");
+
+        var result = NewTool().ExecuteAsync("""{"pattern":"**/*.txt","limit":2}""").GetAwaiter().GetResult();
+
+        var lines = result.Split('\n', StringSplitOptions.RemoveEmptyEntries).Where(l => l.EndsWith(".txt", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(2, lines.Length);
+        Assert.Contains("2 条结果上限", result);
+        Assert.Contains("limit=4", result);
     }
 
     [Fact]

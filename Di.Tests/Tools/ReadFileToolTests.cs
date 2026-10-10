@@ -80,7 +80,10 @@ public sealed class ReadFileToolTests : IDisposable
         Write("a.txt", "1\n2\n3\n4\n5");
         var result = NewTool().ExecuteAsync("""{"path":"a.txt","start_line":2,"end_line":4}""").GetAwaiter().GetResult();
 
-        Assert.Equal("2: 2\n3: 3\n4: 4", result);
+        // end_line 提前收尾且文件还有内容 → 返回指定区间并提示剩余行数。
+        Assert.StartsWith("2: 2\n3: 3\n4: 4", result);
+        Assert.Contains("还有 1 行", result);
+        Assert.Contains("用 start_line=5 继续读取", result);
     }
 
     [Fact]
@@ -126,6 +129,45 @@ public sealed class ReadFileToolTests : IDisposable
         var result = NewTool().ExecuteAsync("""{"path":"a.txt","start_line":0}""").GetAwaiter().GetResult();
 
         Assert.StartsWith("error:", result);
+    }
+
+    // ---- 输出截断与续读提示（对应 pi read 的 truncateHead + offset 续读协议）----
+
+    [Fact]
+    public void Execute_OverMaxOutputLines_AddsContinuationNotice()
+    {
+        Write("big.txt", string.Join('\n', Enumerable.Range(1, ReadFileTool.MaxOutputLines + 500).Select(i => $"line {i}")));
+        var result = NewTool().ExecuteAsync("""{"path":"big.txt"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("1: line 1", result);
+        Assert.Contains($"{ReadFileTool.MaxOutputLines}: line {ReadFileTool.MaxOutputLines}", result);
+        Assert.DoesNotContain($"line {ReadFileTool.MaxOutputLines + 1}", result);   // 超出行数上限的行不出现
+        Assert.Contains($"用 start_line={ReadFileTool.MaxOutputLines + 1} 继续读取", result);
+        Assert.Contains($"共 {ReadFileTool.MaxOutputLines + 500} 行", result);
+    }
+
+    [Fact]
+    public void Execute_UserEndLineStopsEarly_AddsRemainingNotice()
+    {
+        Write("a.txt", string.Join('\n', Enumerable.Range(1, 100).Select(i => $"line {i}")));
+        var result = NewTool().ExecuteAsync("""{"path":"a.txt","start_line":1,"end_line":10}""").GetAwaiter().GetResult();
+
+        Assert.Contains("1: line 1", result);
+        Assert.Contains("10: line 10", result);
+        Assert.Contains("还有 90 行", result);
+        Assert.Contains("用 start_line=11 继续读取", result);
+    }
+
+    [Fact]
+    public void Execute_OutputOverByteBudget_TruncatesWithNotice()
+    {
+        // 每行 8KB × 20 行 > 输出字节预算 → 按行边界截断并给出续读提示。
+        var content = string.Join('\n', Enumerable.Range(0, 20).Select(_ => new string('x', ReadFileTool.MaxOutputBytes / 8)));
+        Write("wide.txt", content);
+        var result = NewTool().ExecuteAsync("""{"path":"wide.txt"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("继续读取", result);
+        Assert.True(result.Split('\n').Length < 20, $"应截断到部分行，实际 {result.Split('\n').Length} 行");
     }
 
     // ---- 失败路径 ----
@@ -241,10 +283,13 @@ public sealed class ReadFileToolTests : IDisposable
     [Fact]
     public void Execute_FileExactlyAtMaxBytes_IsReadable()
     {
-        Write("at.txt", new string('x', (int)ReadFileTool.MaxBytes));
+        // 恰在上限 → 不是 error；输出超行数上限时给出截断 + 续读提示。
+        var lines = Enumerable.Range(0, (int)(ReadFileTool.MaxBytes / 10)).Select(i => $"line{i}").ToArray();
+        Write("at.txt", string.Join('\n', lines));
         var result = NewTool().ExecuteAsync("""{"path":"at.txt"}""").GetAwaiter().GetResult();
 
-        Assert.StartsWith("1: ", result);   // 恰在上限 → 正常读取，不是 error
+        Assert.StartsWith("1: ", result);
+        Assert.Contains("继续读取", result);
     }
 
     [Fact]
@@ -257,13 +302,13 @@ public sealed class ReadFileToolTests : IDisposable
     }
 
     [Fact]
-    public void Execute_LongSingleLine_ReturnedInFull()
+    public void Execute_LongSingleLine_WithinOutputBudget_ReturnedInFull()
     {
         Write("long.txt", "x" + new string('y', 5000));
         var result = NewTool().ExecuteAsync("""{"path":"long.txt"}""").GetAwaiter().GetResult();
 
         Assert.StartsWith("1: x", result);
-        Assert.Contains(new string('y', 5000), result);   // 读文件不做截断，整行返回
+        Assert.Contains(new string('y', 5000), result);   // 单行未超输出预算，整行返回
     }
 
     [Fact]

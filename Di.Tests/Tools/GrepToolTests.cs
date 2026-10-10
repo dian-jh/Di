@@ -153,13 +153,15 @@ public sealed class GrepToolTests : IDisposable
     [Fact]
     public void Execute_ResultCap_LimitsMatches()
     {
-        // 单文件 120 行都命中 → 只返回前 MaxResults 条。
+        // 单文件 120 行都命中 → 只返回前 MaxResults 条（默认 limit）。
         // 注意：JSON 里正则的反斜杠必须写成 \\（\d 不是合法 JSON 转义）。
         var content = string.Join('\n', Enumerable.Range(0, GrepTool.MaxResults + 20).Select(i => $"line {i}"));
         Write("a.txt", content);
         var result = NewTool().ExecuteAsync("""{"pattern":"line \\d+$"}""").GetAwaiter().GetResult();
 
-        Assert.Equal(GrepTool.MaxResults, result.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+        var matchLines = result.Split('\n', StringSplitOptions.RemoveEmptyEntries).Where(l => l.StartsWith("a.txt:")).ToArray();
+        Assert.Equal(GrepTool.MaxResults, matchLines.Length);
+        Assert.Contains("100 条匹配上限", result);   // 达上限 → 给出用 limit 续查的提示
     }
 
     [Fact]
@@ -229,15 +231,66 @@ public sealed class GrepToolTests : IDisposable
     }
 
     [Fact]
-    public void Execute_LongLine_MatchAtEnd_IsReported()
+    public void Execute_LongMatchLine_IsTruncatedWithNotice()
     {
+        // 匹配行超过 MaxMatchLineChars → 截断并提示用 read_file 看完整行。
         Write("a.txt", new string('x', 5000) + "needle");
         var result = NewTool().ExecuteAsync("""{"pattern":"needle"}""").GetAwaiter().GetResult();
 
         var line = result.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
         Assert.NotNull(line);
         Assert.StartsWith("a.txt:1: ", line);
-        Assert.Contains("needle", line);
+        Assert.Contains("[truncated]", line);
+        Assert.Contains("已截断", result);
+        Assert.Contains("read_file", result);
+    }
+
+    // ---- 高级搜索选项（对应 pi grep 的 ignoreCase/literal/context/limit）----
+
+    [Fact]
+    public void Execute_IgnoreCaseOption_MatchesCaseInsensitively()
+    {
+        Write("a.txt", "TODO\ntodo\n");
+        var result = NewTool().ExecuteAsync("""{"pattern":"todo","ignore_case":true}""").GetAwaiter().GetResult();
+
+        var lines = result.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Contains("a.txt:1: TODO", lines);
+        Assert.Contains("a.txt:2: todo", lines);
+    }
+
+    [Fact]
+    public void Execute_LiteralOption_TreatsPatternAsLiteralText()
+    {
+        Write("a.txt", "a.b\naxb\n");
+        var result = NewTool().ExecuteAsync("""{"pattern":"a.b","literal":true}""").GetAwaiter().GetResult();
+
+        Assert.Contains("a.txt:1: a.b", result);
+        Assert.DoesNotContain("axb", result);   // literal 模式下 . 不再匹配任意字符
+    }
+
+    [Fact]
+    public void Execute_ContextOption_IncludesSurroundingLines()
+    {
+        Write("a.txt", "one\ntwo\nthree\nfour\nfive\nsix\nseven");
+        var result = NewTool().ExecuteAsync("""{"pattern":"four","context":2}""").GetAwaiter().GetResult();
+
+        Assert.Contains("a.txt:4: four", result);   // 匹配行
+        Assert.Contains("a.txt-2- two", result);    // 上下文行（- 分隔）
+        Assert.Contains("a.txt-3- three", result);
+        Assert.Contains("a.txt-5- five", result);
+        Assert.Contains("a.txt-6- six", result);
+    }
+
+    [Fact]
+    public void Execute_LimitOption_StopsEarlyWithNotice()
+    {
+        Write("a.txt", string.Join('\n', Enumerable.Range(0, 10).Select(i => $"hit {i}")));
+        var result = NewTool().ExecuteAsync("""{"pattern":"hit","limit":3}""").GetAwaiter().GetResult();
+
+        var matchLines = result.Split('\n', StringSplitOptions.RemoveEmptyEntries).Where(l => l.StartsWith("a.txt:")).ToArray();
+        Assert.Equal(3, matchLines.Length);
+        Assert.Contains("3 条匹配上限", result);
+        Assert.Contains("limit=6", result);   // 提示用 2 倍 limit 续查
     }
 
     [Fact]

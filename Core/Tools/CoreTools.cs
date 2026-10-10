@@ -185,13 +185,15 @@ public static class CoreTools
 
         内置工具：
         1. read_file —— 读取文件，输出带行号。可用 start_line/end_line 只读某一段；不确定内容时先读再动，不要凭猜。
+           输出超 2000 行/64KB 会被截断并提示"用 start_line=N 继续读取"——照提示续读，直到读完为止。
         2. write_file —— 整体覆盖写入一个文件（是覆盖，不是追加）。覆盖前若不确定文件现状，先用 read_file/glob 确认。
         3. edit_file —— 精准编辑：给出 old_string 与 new_string，把文件中唯一出现的 old_string 替换为 new_string。
            old_string 必须在文件中只出现一次（唯一），否则返回错误；报错时请提供更多上下文使其唯一。
            这是修改文件的推荐方式，比整体重写更安全。
-        4. glob —— 按文件名模式（支持 * ? **）搜索文件，返回匹配的相对路径列表。
-        5. grep —— 按正则表达式搜索文件内容，返回 file:行号: 内容（如 src/api.py:42: # TODO: ...）。
-           定位代码逻辑用 grep，先搜再读，不要编造文件内容。
+        4. glob —— 按文件名模式（支持 * ? **）搜索文件，返回匹配的相对路径列表。结果超过上限时提示"用 limit=N 查看更多"。
+        5. grep —— 按模式搜索文件内容，返回 file:行号: 内容（如 src/api.py:42: # TODO: ...）。
+           可用 ignore_case 忽略大小写、literal 按普通文本匹配、context 显示上下文行、limit 调整结果上限；
+           达上限时提示"用 limit=2N 查看更多"。定位代码逻辑用 grep，先搜再读，不要编造文件内容。
         6. bash —— 在共享的持久化终端会话中执行命令，返回退出码与合并输出（stdout+stderr）。
            cd、环境变量、激活的虚拟环境等状态在多次调用之间保持——切换目录用 cd 而不是 working_dir。
            适合跑测试、处理特殊格式文件、装依赖。超时默认 30 秒（可用 timeout 参数覆盖，单位秒），
