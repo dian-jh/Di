@@ -49,13 +49,18 @@ di --no-session --no-ansi "x"      :: 脚本友好：不写会话日志、无 AN
 3. `<工作区>/.di/config.json`（项目级，随仓库走）
 4. 环境变量（运行时覆盖）
 
-API Key：环境变量 `DEEPSEEK_API_KEY`，或写进 `~/.di/config.json`：
+API Key：环境变量 `DEEPSEEK_API_KEY`，或写进 `~/.di/config.json`。常用覆盖项：
 
 ```json
 {
-  "DeepSeek": { "ApiKey": "sk-..." }
+  "DeepSeek": { "ApiKey": "sk-..." },
+  "AgentLoop": { "MaxIterations": 24 }
 }
 ```
+
+`AgentLoop:MaxIterations` 是单回合的迭代预算（一次迭代 ≈ 一次模型往返，通常含一次工具调用），
+默认 24 轮——复杂分析/测试-修复循环动辄 10-20 轮；DeepSeek 上下文 1M token + 前缀缓存，
+放宽上限的边际成本极低。要更宽或更紧（脚本控成本）都可以在这里调。
 
 会话日志默认写入 `~/.di/sessions/YYYY/MM/DD/*.jsonl`。
 

@@ -417,6 +417,35 @@ public sealed class AgentRunnerTests
         AssertToolWellFormed(model.Requests[1].Messages);
     }
 
+    [Fact]
+    public async Task RunAsync_DefaultBudget_CompletesAMultiStepTask()
+    {
+        // 默认迭代预算必须能完成一个 10 步的工具任务（复杂分析/测试-修复循环动辄 10+ 轮，
+        // 8 轮封顶会让模型在信息不足时被截断）。用默认 MaxIterations，不显式覆盖。
+        var model = new ScriptedModel(i => i < 10
+            ? new ModelResponse
+            {
+                Message = ChatMessage.Assistant(text: null, toolCalls: [new ToolCallBlock($"c{i}", $"tool_{i}", "{}")]),
+                FinishReason = new FinishReason.ToolCalls(),
+                Usage = TokenUsage.Zero,
+            }
+            : new ModelResponse
+            {
+                Message = ChatMessage.Assistant("搞定"),
+                FinishReason = new FinishReason.Stop(),
+                Usage = TokenUsage.Zero,
+            });
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys" },   // 默认迭代预算
+            new InMemoryEventBus());
+
+        var result = await runner.RunAsync("多步任务");
+
+        Assert.Equal(AgentStopReason.Answer, result.StopReason);
+    }
+
     // ---- 工具：git 探测 / 临时仓库（与 Di.Tests/EnvironmentSnapshotTests 同款策略）----
 
     private static string? FindGit()
