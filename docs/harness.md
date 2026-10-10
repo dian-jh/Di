@@ -116,16 +116,22 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 | 异常隔离 | `EventBusOptions.OnHandlerError` | 单个坏订阅者不拖垮循环，只告警 |
 | 循环/UI 解耦 | `Repl.RunTurnAsync` | ReAct 只发事件，UI 从总线消费渲染；日志/遥测走同一总线 |
 
-### 2.8 CLI / UI —— Di.Cli（59 测试）
+### 2.8 CLI / UI —— Di.Cli（110 测试）
 
 | 能力 | 落点 | 说明 |
 |---|---|---|
 | REPL 外层循环 | `Repl` | 读行 → 斜杠命令 → 回合；回合事件实时渲染 + 兜底排空 |
 | 流式渲染 | `EventRenderer` | 逐字输出；工具调用/思考轮/用量+成本脚注；ANSI 状态行（重定向自动禁用） |
 | 斜杠命令 | `Repl.RunCommand` | `/help` `/clear` `/model` `/skills` `/skill` `/exit` |
+| 纯参数解析（语言无关契约） | `cli/CliArgs.cs` | `string[] → CliArgs` 纯数据 + 诊断；`--` 截断、未知/缺值/非法模式报错 |
+| 纯模式解析 | `cli/CliMode.cs` | `Resolve(args, stdinTty, stdoutTty)`；短路径优先（version/help/list-models 不建 DI） |
+| 分派壳 | `CliApp` | 解析 → 校验 → 模式 → 建宿主 → 分派；不碰 Console（流与 TTY 由调用方注入） |
+| 组合根 | `CliHost.Create` | 配置 → AddDi() → 工具/skills/runner/会话；`--provider/--model/--thinking` 覆盖在此生效 |
+| headless 单发 | `modes/PrintMode` | 文本流式渲染 / JSON 单文档；stdin 读提示词；错误 exit 1；会话日志（`--no-session` 关闭） |
+| 全局命令分发 | `Properties/PublishProfiles/di.pubxml` + `install.cmd/ps1` | win-x64 自包含单文件 di.exe → `~/.di/bin` → PATH 幂等 |
 | 模型切换 | `AgentRunner.CurrentModel` | 运行中切换，按名经工厂解析 |
 | 模型工厂 | `DiServiceCollectionExtensions` | `RetryingChatModel(ChatModelClient(llm, provider, name))` 组合 |
-| 组合根 | `Program.cs` | 配置 → AddDi() → 解析；无 key 也能启动（请求时才报 MissingCredential） |
+| UTF-8 输出 | `Program.cs` | 显式 `Console.OutputEncoding=UTF8`：GBK 代码页下中文不乱码（管道/脚本安全） |
 
 ### 2.9 测试与质量
 
