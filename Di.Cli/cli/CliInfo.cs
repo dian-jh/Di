@@ -1,0 +1,56 @@
+using System.Reflection;
+
+namespace Di.Cli;
+
+/// <summary>
+/// CLI 的展示元数据：版本号与 --help 文本。
+/// 版本号从程序集信息读取（csproj 的 <c>&lt;Version&gt;</c> 写入 AssemblyInformationalVersion），
+/// 不硬编码字符串，避免与打包配置漂移。
+/// </summary>
+public static class CliInfo
+{
+    /// <summary>全局命令名（也是产物名 di.exe）。</summary>
+    public const string Name = "di";
+
+    /// <summary>版本号（AssemblyInformationalVersion；含 +commit 后缀时截断）。</summary>
+    public static string Version { get; } = ReadVersion();
+
+    /// <summary>--help 的完整用法文本。</summary>
+    public static string HelpText { get; } = """
+        di —— 简洁的 ReAct 编码助手（harness）
+
+        用法: di [选项] [提示词...]
+
+        headless 单发（给一个提示词即跑一个回合后退出）：
+          di "读一下 README"               文本输出（默认）
+          di --mode json "分析这个函数"      JSON 输出（脚本友好，单文档）
+          echo "总结" | di                 无位置参数时从 stdin 读提示词
+
+        交互模式：
+          di                               进入 REPL（斜杠命令: /help /model /skills /clear /exit）
+
+        选项：
+          -m, --model <名>      指定模型（覆盖配置 Model:DefaultModel）
+          --provider <id>       指定 provider（覆盖配置 Model:Provider）
+          --mode <模式>         interactive / print / json / rpc
+          --print               强制文本单发
+          --thinking <级别>      推理强度（透传）
+          --list-models [pat]   列出可用模型（可按 id/provider 过滤）
+          --no-session          headless 不写会话日志（默认写入 ~/.di/sessions/）
+          --no-ansi             禁用 ANSI 控制序列（脚本友好）
+          -h, --help            显示本帮助
+          --version             显示版本
+
+        配置: ~/.di/config.json 与 &lt;workspace&gt;/.di/config.json（JSON，覆盖 appsettings 默认值）。
+        """;
+
+    private static string ReadVersion()
+    {
+        var info = typeof(CliInfo).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (string.IsNullOrWhiteSpace(info))
+            return "0.0.0";
+        var plus = info.IndexOf('+');
+        return plus >= 0 ? info[..plus] : info;
+    }
+}

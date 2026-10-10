@@ -1,81 +1,12 @@
-using Common.Events;
-using Core.AgentLoop;
-using Core.Configuration;
-using Core.Llm;
-using Core.Sessions;
-using Core.Skills;
-using Core.Tools;
 using Di.Cli;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 
-// 组合根：分层配置（appsettings → ~/.di/config.json → <workspace>/.di/config.json → 环境变量）
-// → AddDi() 装配模型层与事件总线。
-var diHome = DiHome.Resolve();
-var workspace = Directory.GetCurrentDirectory();
-var configuration = DiConfig.Load(workspace, diHome.RootDirectory);
-
-var services = new ServiceCollection();
-services.AddDi(configuration);
-await using var provider = services.BuildServiceProvider();
-
-// 首次解析触发适配器装配。API Key 不在启动时要求：凭据由模型层在<b>请求时</b>解析，
-// 未配置时 REPL 仍可启动，/model 列表与请求路径会提示"未配置"。
-_ = provider.GetRequiredService<ILlmService>();
-
-var agentLoop = provider.GetRequiredService<IOptions<AgentLoopOptions>>().Value;
-var modelOptions = provider.GetRequiredService<IOptions<ModelOptions>>().Value;
-var replOptions = provider.GetRequiredService<IOptions<ReplOptions>>().Value;
-
-using var executor = CoreTools.CreateExecutor(workspace);
-
-// Skills：两级发现（用户 ~/.di/skills + 项目 .di/skills，项目覆盖同名用户级）；无效文件只告警。
-// 传给 AgentRunner（广告块 + load_skill 工具）与 Repl（列表 / 自动匹配）。
-var skills = SkillRepository.Load(
-    diHome.SkillsDirectory,
-    Path.Combine(DiHome.ProjectDirectory(workspace), "skills"),
-    warn: msg => Console.Error.WriteLine($"⚠ {msg}"));
-
-// 默认提示词 = 内置工具说明 + 简洁助手人格；配置里显式写了 AgentLoop:SystemPrompt 则整体覆盖。
-var systemPrompt = string.IsNullOrWhiteSpace(agentLoop.SystemPrompt)
-    ? CoreTools.Instructions + "\n\n" +
-      "你是一个简洁的 ReAct 助手。需要事实信息时调用工具，不要编造。回答用中文。"
-    : agentLoop.SystemPrompt;
-
-var runner = new AgentRunner(
-    provider.GetRequiredService<Func<string, IChatModel>>(),
-    executor,
-    new AgentLoopOptions
-    {
-        SystemPrompt = systemPrompt,
-        MaxIterations = agentLoop.MaxIterations,
-    },
-    provider.GetRequiredService<IEventBus>(),
-    CoreTools.Definitions(workspace),
-    workingDirectory: workspace,
-    skills: skills)
-{
-    // 默认模型来自配置（Model:DefaultModel），之后仍可 /model 切换。
-    CurrentModel = modelOptions.DefaultModel,
-};
-
-// 会话持久化：整个 CLI 运行写成一个 JSONL（~/.di/sessions/YYYY/MM/DD/）。
-// 记录为尽力而为——磁盘错误只告警，绝不中断聊天。
-var sessionLog = new SessionLog(new SessionLogOptions { RootDirectory = diHome.RootDirectory });
-
-// 输出重定向（管道/文件）时不写 ANSI 控制序列，避免污染捕获输出（覆盖配置默认）。
-if (Console.IsOutputRedirected)
-    replOptions.UseAnsi = false;
-
-var repl = new Repl(
-    runner,
-    provider.GetRequiredService<IEventBus>(),
-    new ConsoleLineReader(),
+// 极薄的桥接：把真实控制台流 + TTY 探测交给 CliApp（CliApp 不碰 Console，因此可测、可移植）。
+// 组合根（配置 / DI / runner / 会话装配）在 CliHost；TTY 探测在此 —— 输出重定向（管道/文件）
+// 时禁 ANSI，避免控制序列污染捕获输出。
+return await new CliApp().RunAsync(
+    args,
+    Console.In,
     Console.Out,
-    replOptions,
-    sessionLog,
-    skills);
-
-await repl.RunAsync();
-return 0;
+    Console.Error,
+    !Console.IsInputRedirected,
+    !Console.IsOutputRedirected);
