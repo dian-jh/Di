@@ -376,7 +376,7 @@ public sealed class ReplTests
             if (Bus is not null)
             {
                 await Bus.PublishAsync(new AgentLoopEvent.TextDelta($"回答: {userMessage}"));
-                await Bus.PublishAsync(new AgentLoopEvent.TurnCompleted(1, TokenUsage.Zero, new FinishReason.Stop()));
+                await Bus.PublishAsync(new AgentLoopEvent.TurnCompleted(1, TokenUsage.Zero, Cost: null, new FinishReason.Stop()));
             }
             return new AgentResult
             {

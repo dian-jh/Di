@@ -70,6 +70,7 @@ public sealed class ReAct
         trajectory.Add(ChatMessage.User(request.UserMessage));
 
         var usage = TokenUsage.Zero;
+        var cost = (UsageCost?)null;
         var iterations = 0;
         var maxIterations = Math.Max(1, _options.MaxIterations);
 
@@ -93,14 +94,15 @@ public sealed class ReAct
             }
             catch (LlmException ex) when (!ex.IsRetryable)
             {
-                var result = Fail(trajectory, usage, iterations, ex, request.History);
+                var result = Fail(trajectory, usage, cost, iterations, ex, request.History);
                 Emit(new AgentLoopEvent.RunFailed(result.Failure!));
                 return result;
             }
 
             usage = usage.Add(response.Usage);
+            cost = CombineCost(cost, response.Cost);
             trajectory.Add(response.Message);   // decision
-            Emit(new AgentLoopEvent.TurnCompleted(iterations, usage, response.FinishReason));
+            Emit(new AgentLoopEvent.TurnCompleted(iterations, usage, cost, response.FinishReason));
 
             var toolCalls = response.Message.ToolCalls;
             if (toolCalls.Count == 0)
@@ -111,6 +113,7 @@ public sealed class ReAct
                     Trajectory = trajectory,
                     History = request.History,
                     Usage = usage,
+                    Cost = cost,
                     Iterations = iterations,
                     StopReason = AgentStopReason.Answer,
                 };
@@ -127,6 +130,7 @@ public sealed class ReAct
                         Trajectory = trajectory,
                         History = request.History,
                         Usage = usage,
+                        Cost = cost,
                         Iterations = iterations,
                         StopReason = AgentStopReason.FinalOutputTool,
                     };
@@ -150,6 +154,7 @@ public sealed class ReAct
             Trajectory = trajectory,
             History = request.History,
             Usage = usage,
+            Cost = cost,
             Iterations = iterations,
             StopReason = AgentStopReason.MaxIterations,
         };
@@ -221,17 +226,22 @@ public sealed class ReAct
     }
 
     /// <summary>不可重试的模型故障：以干净的 <see cref="AgentStopReason.Error"/> 结果结束，而不是抛异常。</summary>
-    private static AgentResult Fail(IReadOnlyList<ChatMessage> trajectory, TokenUsage usage, int iterations, LlmException ex,
+    private static AgentResult Fail(IReadOnlyList<ChatMessage> trajectory, TokenUsage usage, UsageCost? cost, int iterations, LlmException ex,
         IReadOnlyList<ChatMessage>? history) => new()
     {
         Answer = string.Empty,
         Trajectory = trajectory,
         History = history,
         Usage = usage,
+        Cost = cost,   // 失败回合之前的已发生成本照常上报
         Iterations = iterations,
         StopReason = AgentStopReason.Error,
         Failure = new LlmFailure(ex.Message, ex.Code, ex.Status, ex.ProviderRetryAfter),
     };
+
+    /// <summary>累计成本：null 视为无成本，遇 null 保持原值（目录无费率/适配器未上报时不产生成本段）。</summary>
+    private static UsageCost? CombineCost(UsageCost? acc, UsageCost? next) =>
+        next is null ? acc : acc is null ? next : acc.Add(next);
 
     /// <summary>轨迹中最后一个 assistant 消息的可见文本。</summary>
     private static string LastAssistantText(IReadOnlyList<ChatMessage> trajectory) =>

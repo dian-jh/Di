@@ -58,7 +58,10 @@ public sealed class EventRenderer
                 break;
             case AgentLoopEvent.TurnCompleted t:
                 CloseLine();
-                _output.WriteLine($"  ── 第 {t.Iteration} 轮思考完成  in:{t.Usage.InputTokens} out:{t.Usage.OutputTokens}");
+                _output.Write($"  ── 第 {t.Iteration} 轮思考完成  in:{t.Usage.InputTokens} out:{t.Usage.OutputTokens}");
+                if (t.Cost is { } turnCost)
+                    _output.Write($"  cost:${turnCost.Total:F6}");
+                _output.WriteLine();
                 break;
             case AgentLoopEvent.ToolStarted s:
                 CloseLine();
@@ -87,7 +90,10 @@ public sealed class EventRenderer
             _output.WriteLine(result.Answer);
         }
 
-        _output.WriteLine($"（{result.StopReason} · {result.Iterations} 轮 · tokens: {result.Usage}）");
+        _output.Write($"（{result.StopReason} · {result.Iterations} 轮 · tokens: {result.Usage}");
+        if (result.Cost is { } cost)
+            _output.Write($" · cost:${cost.Total:F6}");
+        _output.WriteLine("）");
     }
 
     /// <summary>若有未换行的流式文本，先补一个换行，避免后续行贴在一起。</summary>

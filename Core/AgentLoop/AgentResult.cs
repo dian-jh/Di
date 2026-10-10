@@ -20,6 +20,9 @@ public sealed class AgentResult
     /// <summary>全部模型调用的累计 token 用量。</summary>
     public TokenUsage Usage { get; init; } = TokenUsage.Zero;
 
+    /// <summary>全部模型调用的累计成本（按模型目录费率折算；目录无费率时为 null）。</summary>
+    public UsageCost? Cost { get; init; }
+
     /// <summary>实际执行的循环轮数。</summary>
     public required int Iterations { get; init; }
 

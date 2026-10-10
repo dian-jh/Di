@@ -345,6 +345,50 @@ public sealed class ReActTests
     }
 
     [Fact]
+    public async Task RunAsync_AccumulatesCostAcrossModelCalls()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => ToolCallResponse(new TokenUsage(10, 5), cost: new UsageCost(1.0, 0.5, 0, 0)));
+        model.Enqueue(_ => ResponseWithUsage("b", new TokenUsage(20, 7), cost: new UsageCost(2.0, 1.0, 0, 0)));
+        var executor = new FakeToolExecutor(call => "x");
+        var loop = new ReAct(model, Options());
+
+        var result = await loop.RunAsync(Request(executor: executor));
+
+        Assert.Equal(2, model.Requests.Count);
+        Assert.Equal(new UsageCost(3.0, 1.5, 0, 0), result.Cost);   // 跨轮累计
+    }
+
+    [Fact]
+    public async Task RunAsync_TurnCompletedEvents_CarryAccumulatedCost()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => ToolCallResponse(new TokenUsage(10, 5), cost: new UsageCost(1.0, 0.5, 0, 0)));
+        model.Enqueue(_ => ResponseWithUsage("b", new TokenUsage(20, 7), cost: new UsageCost(2.0, 1.0, 0, 0)));
+        var executor = new FakeToolExecutor(call => "x");
+        var (loop, observer) = LoopWithObserver(model);
+
+        await loop.RunAsync(Request(executor: executor));
+
+        var turns = observer.Events.OfType<AgentLoopEvent.TurnCompleted>().ToArray();
+        Assert.Equal(2, turns.Length);
+        Assert.Equal(new UsageCost(1.0, 0.5, 0, 0), turns[0].Cost);           // 第一轮：自己的
+        Assert.Equal(new UsageCost(3.0, 1.5, 0, 0), turns[1].Cost);           // 第二轮：累计
+    }
+
+    [Fact]
+    public async Task RunAsync_NoCostReported_ResultCostIsNull()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("ok"));   // 目录无费率/适配器未上报成本
+        var loop = new ReAct(model, Options());
+
+        var result = await loop.RunAsync(Request());
+
+        Assert.Null(result.Cost);
+    }
+
+    [Fact]
     public async Task RunAsync_ValidatorIsInvokedBeforeExecution()
     {
         var model = new FakeChatModel();
@@ -479,7 +523,7 @@ public sealed class ReActTests
     [Fact]
     public void AgentLoopEvent_IsEvent_WithIdAndCreatedAt()
     {
-        var evt = new AgentLoopEvent.TurnCompleted(1, TokenUsage.Zero, new FinishReason.Stop());
+        var evt = new AgentLoopEvent.TurnCompleted(1, TokenUsage.Zero, Cost: null, new FinishReason.Stop());
 
         Assert.IsAssignableFrom<Event>(evt);
         Assert.NotEqual(Guid.Empty, evt.Id);
@@ -559,17 +603,19 @@ public sealed class ReActTests
         return (new ReAct(model, options ?? Options(), bus), observer);
     }
 
-    private static ModelResponse ResponseWithUsage(string text, TokenUsage usage) => new()
+    private static ModelResponse ResponseWithUsage(string text, TokenUsage usage, UsageCost? cost = null) => new()
     {
         Message = ChatMessage.Assistant(text),
         FinishReason = new FinishReason.Stop(),
         Usage = usage,
+        Cost = cost,
     };
 
-    private static ModelResponse ToolCallResponse(TokenUsage usage) => new()
+    private static ModelResponse ToolCallResponse(TokenUsage usage, UsageCost? cost = null) => new()
     {
         Message = ChatMessage.Assistant(null, toolCalls: [new ToolCallBlock("c1", "echo", "{}")]),
         FinishReason = new FinishReason.ToolCalls(),
         Usage = usage,
+        Cost = cost,
     };
 }

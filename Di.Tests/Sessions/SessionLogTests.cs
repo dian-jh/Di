@@ -196,12 +196,58 @@ public sealed class SessionLogTests : IDisposable
     }
 
     [Fact]
+    public void AppendTurn_TaskComplete_IncludesCost()
+    {
+        var log = NewLog();
+        log.StartSession();
+        log.AppendTurn(new AgentResult
+        {
+            Answer = "ok",
+            Trajectory = [ChatMessage.User("你好")],
+            Iterations = 1,
+            StopReason = AgentStopReason.Answer,
+            Cost = new UsageCost(1.5, 2.5, 0.25, 0),
+        }, DateTimeOffset.UtcNow);
+
+        var complete = TaskCompletePayload(ReadRecords(log.LogFilePath));
+        var cost = complete.GetProperty("cost");
+        Assert.Equal(1.5, cost.GetProperty("input").GetDouble());
+        Assert.Equal(2.5, cost.GetProperty("output").GetDouble());
+        Assert.Equal(0.25, cost.GetProperty("cache_read").GetDouble());
+        Assert.Equal(4.25, cost.GetProperty("total").GetDouble());
+    }
+
+    [Fact]
+    public void AppendTurn_NoCost_OmitsCostField()
+    {
+        var log = NewLog();
+        log.StartSession();
+        log.AppendTurn(new AgentResult
+        {
+            Answer = "ok",
+            Trajectory = [ChatMessage.User("你好")],
+            Iterations = 1,
+            StopReason = AgentStopReason.Answer,
+        }, DateTimeOffset.UtcNow);
+
+        var complete = TaskCompletePayload(ReadRecords(log.LogFilePath));
+        Assert.False(complete.TryGetProperty("cost", out _));
+    }
+
+    [Fact]
     public void SessionId_IsUniquePerInstance()
     {
         Assert.NotEqual(NewLog().SessionId, NewLog().SessionId);
     }
 
     private static JsonElement Payload(JsonElement record) => record.GetProperty("payload");
+
+    /// <summary>取最后一个 event_msg 信封中 type=task_complete 的 payload（event_msg 才携带事件类型）。</summary>
+    private static JsonElement TaskCompletePayload(JsonElement[] records) =>
+        records
+            .Where(r => r.GetProperty("type").GetString() == "event_msg")
+            .Select(Payload)
+            .Last(p => p.GetProperty("type").GetString() == "task_complete");
 
     private static JsonElement[] ReadRecords(string path)
     {

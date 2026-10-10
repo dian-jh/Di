@@ -12,8 +12,8 @@ public abstract record AgentLoopEvent : Event
     /// <summary>流式文本增量（模型逐字输出）。UI 据此实时渲染，日志可据此做逐字遥测。</summary>
     public sealed record TextDelta(string Delta) : AgentLoopEvent;
 
-    /// <summary>一次模型调用完成（含累计用量与停止原因）。</summary>
-    public sealed record TurnCompleted(int Iteration, TokenUsage Usage, FinishReason FinishReason) : AgentLoopEvent;
+    /// <summary>一次模型调用完成（含累计用量、累计成本与停止原因）。</summary>
+    public sealed record TurnCompleted(int Iteration, TokenUsage Usage, UsageCost? Cost, FinishReason FinishReason) : AgentLoopEvent;
 
     /// <summary>一次工具调用开始执行。</summary>
     public sealed record ToolStarted(ToolCallBlock Call) : AgentLoopEvent;

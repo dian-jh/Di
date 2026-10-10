@@ -129,6 +129,7 @@ public sealed class SessionLog
                 LastAgentMessage = result.Answer,
                 CompletedAt = now.ToUnixTimeMilliseconds(),
                 DurationMs = (long)Math.Max(0, (now - startedAt).TotalMilliseconds),
+                Cost = result.Cost,   // 无费率时 null → 序列化省略该字段
             });
         }
     }
