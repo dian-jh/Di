@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Core.Llm;
 
@@ -51,7 +52,12 @@ public sealed class PythonTool : ICoreTool
             if (!Directory.Exists(workingDir))
                 return $"error: 工作目录不存在: {workingDirArg}";
 
-            var result = await ProcessRunner.RunAsync(_pythonExecutable, ["-c", code!], workingDir, _timeout, cancellationToken);
+            // python 的输出编码随环境漂移（PYTHONIOENCODING / PYTHONUTF8 / Python 版本都可能让它写 UTF-8
+            // 而不是 ProcessEncoding 假设的 OEM 字节，中文系统实测即乱码）。这里强制两端对齐 UTF-8：
+            // 子进程 stdout/stderr 写 UTF-8，父进程按 UTF-8 解码 —— 与机器 locale 无关，行为确定。
+            var result = await ProcessRunner.RunAsync(_pythonExecutable, ["-c", code!], workingDir, _timeout, cancellationToken,
+                outputEncoding: Encoding.UTF8,
+                environment: new Dictionary<string, string> { ["PYTHONIOENCODING"] = "utf-8" });
             return result.ToObservation();
         }
         catch (JsonException)

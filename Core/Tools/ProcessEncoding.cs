@@ -12,9 +12,13 @@ namespace Core.Tools;
 /// （chcp 65001 只影响控制台、不影响管道，实测无效。）
 ///
 /// 修复：显式固定用 OEM 代码页解码，不再依赖 Console.OutputEncoding 的运行时状态。
-/// - Windows 中文系统：OEM = 936（GBK），cmd/python 写入的正是 GBK 字节 → 正确。
+/// - Windows 中文系统：OEM = 936（GBK），cmd 写入的正是 GBK 字节 → 正确。
 /// - Windows 西文系统：OEM = 437，cmd 写入 cp437 → 正确。
-/// - Unix：OEMCodePage = 65001（UTF-8），/bin/sh、python 写 UTF-8 → 正确。
+/// - Unix：OEMCodePage = 65001（UTF-8），/bin/sh 写 UTF-8 → 正确。
+///
+/// 例外：python 的输出编码随环境漂移（PYTHONIOENCODING / PYTHONUTF8 / Python 版本都可能让它写
+/// UTF-8 而非 OEM，实测中文系统即乱码），不走本类假设 —— <see cref="PythonTool"/> 强制
+/// PYTHONIOENCODING=utf-8 并显式按 UTF-8 解码，两端对齐、与机器 locale 无关。
 /// </summary>
 internal static class ProcessEncoding
 {

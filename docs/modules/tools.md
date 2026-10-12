@@ -43,7 +43,8 @@ Coding Agent 的**八个核心编码工具**（对应 pi 的 `https://github.com
 - `Core/Tools/ShellSession.cs`：持久化 shell 会话——cwd / 环境变量 / 虚拟环境跨调用保持；惰性启动
   （不执行命令不拉起进程）；bash 与 powershell **各自独立会话**（语法 / 编码不同，不能共用）。
 - `Core/Tools/ProcessRunner.cs`：统一进程执行，超时强杀（含进程树）、输出捕获。
-- `Core/Tools/ProcessEncoding.cs`：Windows 输出编码——cmd/python 的 OEM 字节 vs git 的 UTF-8 字节分别解码。
+- `Core/Tools/ProcessEncoding.cs`：Windows 输出编码——cmd 的 OEM 字节 vs git 的 UTF-8 字节分别解码；
+  python 不依赖该假设（强制 UTF-8 两端对齐，见 `PythonTool`）。
 - `Core/Tools/OutputBuffer.cs`：有界输出累积（头尾预算），任意长度输出内存恒定，超长截断头尾。
 - `Core/Tools/ToolHelpers.cs`：JSON Schema 构造、参数解析、路径解析（防越界）。
 

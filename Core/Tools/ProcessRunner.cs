@@ -81,7 +81,8 @@ internal static class ProcessRunner
         TimeSpan timeout,
         CancellationToken cancellationToken,
         string? rawArguments = null,
-        Encoding? outputEncoding = null)
+        Encoding? outputEncoding = null,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -106,6 +107,11 @@ internal static class ProcessRunner
         {
             foreach (var arg in arguments)
                 psi.ArgumentList.Add(arg);
+        }
+        if (environment is not null)
+        {
+            foreach (var (key, value) in environment)
+                psi.Environment[key] = value;
         }
 
         using var process = new Process { StartInfo = psi };
