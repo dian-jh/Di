@@ -37,4 +37,11 @@ public sealed record Skill
     /// 不进广告块、不进自动匹配，只接受显式 <c>/skill</c> 调用。
     /// </summary>
     public bool DisableModelInvocation { get; init; }
+
+    /// <summary>
+    /// skill 所在目录（SKILL.md 的父目录 / 扁平 .md 文件所在目录）。
+    /// 支撑 skill 打包内置文件（scripts/references/assets，对齐 Pi）：模型按此目录
+    /// 解析指令里引用的相对路径。<see cref="SkillRepository.Load"/> 填充。
+    /// </summary>
+    public string Directory { get; init; } = "";
 }

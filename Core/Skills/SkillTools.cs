@@ -39,9 +39,18 @@ public static class SkillTools
         }
 
         return skills.TryGetValue(name, out var skill)
-            ? $"【Skill：{skill.Name}】{skill.Description}\n\n{skill.Instructions}"
+            ? RenderLoadedSkill(skill)
             : $"error: 未找到 skill '{name}'（可用列表见系统上下文）";
     }
+
+    /// <summary>
+    /// 渲染加载出的 skill 全文，并附上 skill 目录（对齐 Pi：内置文件如 references/*.md、
+    /// scripts/*.sh 的相对路径以该目录为基准，模型据此解析）。
+    /// </summary>
+    private static string RenderLoadedSkill(Skill skill)
+        => string.IsNullOrEmpty(skill.Directory)
+            ? $"【Skill：{skill.Name}】{skill.Description}\n\n{skill.Instructions}"
+            : $"【Skill：{skill.Name}】{skill.Description}\n（skill 目录：{skill.Directory}，内置文件的相对路径以此为准）\n\n{skill.Instructions}";
 }
 
 /// <summary>执行器装饰器：拦截 load_skill 调用，其余委托给内层执行器。</summary>
