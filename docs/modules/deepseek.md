@@ -17,6 +17,16 @@ DeepSeek 提供方的**线格式适配器**：HTTP/SSE 传输、chunk 归一化�
 - `TranslateChunk`：usage / reasoning / text / tool-call / finish 的归一化；首个带 id 的 chunk 发
   `ResponseInfo`（响应标识，用于追溯 / 日志）。
 - 错误翻译：非 2xx → 结构化 `LlmException`（429 → RateLimited、401/403 → MissingCredential）。
+- **流式超时策略**（历史 bug：`HttpClient.Timeout` 覆盖整个流式正文读取，60s 总时长硬卡把长响应
+  掐断，报 "The response ended prematurely." 且不可重试）。现在 HttpClient 不设总时长超时
+  （`DeepSeekServiceCollectionExtensions.cs`），改为两层<b>请求内</b>超时：
+  - 响应头等待超时 `DeepSeekAdapterConfig.TimeoutSeconds`（默认 60s，`SendAsync`）——服务器迟迟
+    不开始响应时快速失败为可重试 `Timeout`，而非无限等；
+  - 流式空闲超时 `DeepSeekAdapterConfig.StreamIdleTimeoutSeconds`（默认 60s，`StreamAsync`）——
+    连续两帧之间超过该时长视为流挂起，抛可重试 `Timeout`。长思考 / 长输出<b>不设总时长上限</b>。
+- **流式中断一律可重试**：连接被掐断（`HttpIOException` / `IOException` / `HttpRequestException`）
+  与 EOF 未收到 `[DONE]`（协议截断）都抛可重试 `Connection`，让 `RetryingChatModel` 整体重试，
+  而不是把回合打死（历史 bug 的裸抛路径）。
 
 ### 线格式翻译（`Core/Providers/DeepSeek/DeepSeekTranslator.cs`，厂商怪癖唯一居所）
 
@@ -49,7 +59,7 @@ DeepSeek 提供方的**线格式适配器**：HTTP/SSE 传输、chunk 归一化�
 | `Core/Providers/DeepSeek/DeepSeekTranslator.cs` | Core 词汇 ↔ DeepSeek 线格式（5 条怪癖唯一居所） |
 | `Core/Providers/DeepSeek/DeepSeekChatRequest.cs` / `Core/Providers/DeepSeek/DeepSeekChatResponse.cs` | 线格式 DTO（私有，不对外） |
 | `Core/Providers/DeepSeek/DeepSeekDefaults.cs` | 默认值（baseUrl 等） |
-| `Core/Providers/DeepSeek/DeepSeekAdapterConfig.cs` | 配置段绑定（`ApiKey` / `BaseUrl` / `DefaultReasoningEffort` / `StrictTools`） |
+| `Core/Providers/DeepSeek/DeepSeekAdapterConfig.cs` | 配置段绑定（`ApiKey` / `BaseUrl` / `DefaultReasoningEffort` / `StrictTools` / `TimeoutSeconds` / `StreamIdleTimeoutSeconds`） |
 | `Core/Providers/DeepSeek/DeepSeekServiceCollectionExtensions.cs` | DI 注册扩展（`AddDeepSeek`） |
 
 ## 关键符号
@@ -62,6 +72,7 @@ DeepSeek 提供方的**线格式适配器**：HTTP/SSE 传输、chunk 归一化�
 | 能力 | 落点 | 测试 |
 |---|---|---|
 | HTTP/SSE 传输 + 分帧（坏 chunk 跳过） | `DeepSeekAdapter` | `Di.Tests/Providers/DeepSeekTranslatorTests.cs` 等 |
+| 流式超时与中断兜底（空闲超时 / 截断 / 传输中断 → 可重试 `Timeout` / `Connection`） | `DeepSeekAdapter.StreamAsync` / `SendAsync` | `Di.Tests/Providers/DeepSeekAdapterStreamTests.cs` |
 | 错误翻译（429→RateLimited、401/403→MissingCredential） | `DeepSeekAdapter.SendAsync` | `Di.Tests/Providers/DeepSeekAuthTests.cs` 等 |
 | 线格式翻译（5 条怪癖） | `DeepSeekTranslator` | `Di.Tests/Providers/DeepSeekTranslatorTests.cs` |
 | 前缀缓存优化（请求布局 / 可空集合 / 快照 append-on-change） | `DeepSeekTranslator` + `AgentRunner` | `Di.Tests/Providers/DeepSeekUsageParsingTests.cs` |

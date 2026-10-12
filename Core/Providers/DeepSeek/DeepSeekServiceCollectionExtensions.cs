@@ -21,9 +21,11 @@ public static class DeepSeekServiceCollectionExtensions
     public static IServiceCollection AddDeepSeek(this IServiceCollection services)
     {
         services.AddOptions<DeepSeekAdapterConfig>().BindConfiguration("DeepSeek");
+        // HttpClient 不设总时长超时：HttpClient.Timeout 覆盖整个流式正文读取，60s 硬卡会把长响应掐断
+        // （历史 bug：报 "The response ended prematurely." 且不可重试）。响应头等待 / 流式空闲超时
+        // 由适配器在请求内自行控制（见 DeepSeekAdapter.StreamAsync / SendAsync）。
         services.AddHttpClient(DeepSeekDefaults.ProviderId)
-            .ConfigureHttpClient((sp, client) => client.Timeout =
-                TimeSpan.FromSeconds(sp.GetRequiredService<IOptions<DeepSeekAdapterConfig>>().Value.TimeoutSeconds));
+            .ConfigureHttpClient((_, client) => client.Timeout = Timeout.InfiniteTimeSpan);
 
         // API Key 不再在装配时解析/抛错：缺省读环境变量，由 LlmRuntime 在<b>请求时</b>经凭证存储解析
         // （宿主无密钥也能启动，UI 显示"未配置"）。

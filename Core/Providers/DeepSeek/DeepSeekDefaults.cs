@@ -15,8 +15,13 @@ public static class DeepSeekDefaults
     public const string ProviderId = "deepseek";
     public const string ApiKeyEnvironmentVariable = "DEEPSEEK_API_KEY";
 
-    /// <summary>单次请求超时（秒）。默认 60 —— 网络挂起时快速以 <see cref="LlmErrorCodes.Timeout"/> 失败，而不是让用户无限等待。</summary>
+    /// <summary>响应头等待超时（秒）。默认 60 —— 服务器迟迟不开始响应时快速以 <see cref="LlmErrorCodes.Timeout"/> 失败，而不是让用户无限等待。</summary>
     public const int RequestTimeoutSeconds = 60;
+
+    /// <summary>流式响应空闲超时（秒）。默认 60 —— 连续两个 SSE 数据帧之间超过该时长视为流挂起，
+    /// 以 <see cref="LlmErrorCodes.Timeout"/> 抛<b>可重试</b>异常。注意与总时长超时不同：
+    /// 长思考/长输出不设总时长上限，只盯"多久没来数据"（HttpClient.Timeout 覆盖整个正文读取，不能当流式超时用）。</summary>
+    public const double StreamIdleTimeoutSeconds = 60;
 
     public const int MaxTokensLimit = 393_216;
     public const int StopLimit = 16;

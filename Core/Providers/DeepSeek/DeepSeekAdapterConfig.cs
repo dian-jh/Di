@@ -23,6 +23,10 @@ public sealed class DeepSeekAdapterConfig
     /// <summary>是否启用严格工具模式（需要 beta 端点）。</summary>
     public bool StrictTools { get; set; }
 
-    /// <summary>单次请求超时（秒）。默认 <see cref="DeepSeekDefaults.RequestTimeoutSeconds"/>。</summary>
+    /// <summary>响应头等待超时（秒）。默认 <see cref="DeepSeekDefaults.RequestTimeoutSeconds"/>。</summary>
     public double TimeoutSeconds { get; set; } = DeepSeekDefaults.RequestTimeoutSeconds;
+
+    /// <summary>流式响应空闲超时（秒）。默认 <see cref="DeepSeekDefaults.StreamIdleTimeoutSeconds"/>。
+    /// 连续两帧之间超过该时长视为流挂起，抛可重试 Timeout。</summary>
+    public double StreamIdleTimeoutSeconds { get; set; } = DeepSeekDefaults.StreamIdleTimeoutSeconds;
 }

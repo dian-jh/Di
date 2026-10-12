@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
@@ -109,9 +110,37 @@ internal sealed class DeepSeekAdapter : ChatAdapter
             var sawDone = false;
             var responseIdEmitted = false;
 
+            // 流式超时策略（历史 bug：HttpClient.Timeout 覆盖整个正文读取，60s 总时长硬卡把长响应掐断，
+            // 抛 "The response ended prematurely." 且不可重试，回合直接死掉）。改为：
+            //   - 空闲超时：连续两帧之间超过 StreamIdleTimeoutSeconds 视为挂起 → 可重试 Timeout；
+            //   - 传输层异常（连接被掐断：HttpIOException / IOException / HttpRequestException）→ 可重试 Connection；
+            //   - EOF 未收到 [DONE]（协议截断）→ 可重试 Connection。
+            // 全部抛 <see cref="LlmException"/>，让 RetryingChatModel 整体重试，而不是把回合打死。
+            var idleTimeout = _config.StreamIdleTimeoutSeconds > 0
+                ? TimeSpan.FromSeconds(_config.StreamIdleTimeoutSeconds)
+                : Timeout.InfiniteTimeSpan;
+            using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
             while (true)
             {
-                var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                string? line;
+                try
+                {
+                    if (idleTimeout > TimeSpan.Zero)
+                        readCts.CancelAfter(idleTimeout);   // 每读到一帧就重置空闲计时
+                    line = await reader.ReadLineAsync(readCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw new LlmException(
+                        $"DeepSeek 流式响应空闲超时（{_config.StreamIdleTimeoutSeconds:0.#} 秒未收到数据）。",
+                        LlmErrorCodes.Timeout);
+                }
+                catch (Exception ex) when (ex is HttpIOException or IOException or HttpRequestException)
+                {
+                    throw new LlmException($"DeepSeek 流式响应中断：{ex.Message}", LlmErrorCodes.Connection, inner: ex);
+                }
+
                 if (line is null)
                     break;
 
@@ -152,10 +181,9 @@ internal sealed class DeepSeekAdapter : ChatAdapter
                     yield return evt;
             }
 
-            // 正常用 [DONE] 收尾时，不发多余的错误 finish。
+            // [DONE] 未到达就 EOF：协议层截断（传输故障）→ 抛可重试异常，让重试层兜底。
             if (!sawDone)
-                yield return new StreamChunk.Finish(new FinishReason.Error(new LlmFailure(
-                    "流式响应在没有 [DONE] 标记的情况下结束。", "STREAM_TRUNCATED", Status: 0)));
+                throw new LlmException("DeepSeek 流式响应在没有 [DONE] 标记的情况下结束。", LlmErrorCodes.Connection);
         }
         finally
         {
@@ -213,8 +241,17 @@ internal sealed class DeepSeekAdapter : ChatAdapter
     {
         try
         {
+            // 响应头等待超时：服务器迟迟不开始响应时快速失败（网络挂起不无限等）。
+            // 注意这不是总时长超时 —— 流式正文的读取由 StreamAsync 的空闲超时负责。
+            var headerTimeout = _config.TimeoutSeconds > 0
+                ? TimeSpan.FromSeconds(_config.TimeoutSeconds)
+                : Timeout.InfiniteTimeSpan;
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            if (headerTimeout > TimeSpan.Zero)
+                timeoutCts.CancelAfter(headerTimeout);
+
             var response = await _http
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token)
                 .ConfigureAwait(false);
 
             if (response.IsSuccessStatusCode)
@@ -242,7 +279,7 @@ internal sealed class DeepSeekAdapter : ChatAdapter
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new LlmException($"DeepSeek 请求超时（HttpClient.Timeout={_http.Timeout}）。", LlmErrorCodes.Timeout, inner: ex);
+            throw new LlmException($"DeepSeek 响应头等待超时（{_config.TimeoutSeconds:0.#} 秒）。", LlmErrorCodes.Timeout, inner: ex);
         }
     }
 
