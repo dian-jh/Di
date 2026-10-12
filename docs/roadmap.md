@@ -18,8 +18,8 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 （REPL + 会话 JSONL + 分层配置）。核心思想：**一切厂商怪癖收敛在适配器翻译层、模型是纯数据、
 认证是声明、循环只发事件不渲染**。
 
-> 规模快照（2026-10-12 复核，`dotnet test`）：Core + Common + Di.Cli 约 88 个源文件、
-> 46 个测试文件，**591 个用例全绿**（Di.Tests 481 + Di.Cli.Tests 110；另有 2 个真实 DeepSeek
+> 规模快照（2026-10-12 复核，`dotnet test`）：Core + Common + Di.Cli 约 90 个源文件、
+> 49 个测试文件，**624 个用例全绿**（Di.Tests 505 + Di.Cli.Tests 119；另有 2 个真实 DeepSeek
 > 集成测试 `Di.Tests/Integration/DeepSeekReActIntegrationTests.cs`，`SkippableFact`，无
 > `DEEPSEEK_API_KEY` 时自动跳过）。此统计是**易变快照**，不要当作接口契约。
 
@@ -42,19 +42,20 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 
 ### 3.1 结论
 
-**核心 harness 已达成并超出 MVP**：循环、流式、8 工具、skills、会话、成本、配置、事件总线、
-测试——一个编码 agent 该有的骨架全部在，且工程质量高（协议义务化、错误结构化、模型纯数据、
+**核心 harness 已达成并超出 MVP，§3 的 5 个可用性缺口已全部补齐**：循环、流式、8 工具、
+skills、会话、成本、配置、事件总线、分发、headless、回合级 Ctrl+C、上下文 token 预算、
+README——一个编码 agent 该有的骨架全部在，且工程质量高（协议义务化、错误结构化、模型纯数据、
 成本可核算）。
 
-但作为**能被真实使用的产品**，还有几个"可用性"缺口。它们不涉及架构，是入口、健壮性与
-文档层面的补全：
+MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会动文件的编码 harness，
+**安全与可信（Phase B）是第一道门槛**，其余各阶段都建立在"用户敢让它自己改代码"之上。
 
 | # | 缺口 | 现状 | 为什么算 MVP 缺口 | 建议落点 |
 |---|---|---|---|---|
 | 1 | **全局命令与分发** | ✅ 已实现：`di.exe`（win-x64 自包含单文件）+ `install.cmd` / `install.ps1` 入 PATH，幂等 | 一个不能被"安装并运行"的 harness 不是 MVP | `Di.Cli/Properties/PublishProfiles/di.pubxml` + 仓库根安装脚本 |
 | 2 | **非交互单发模式** | ✅ 已实现：`di "prompt"`、`di --mode json`、stdin 管道、`-m/--provider/--no-session/--no-ansi` | 脚本化、CI、自动化测试都需要 headless | `Di.Cli/CliApp.cs` 分派 + `Di.Cli/modes/PrintMode.cs`；契约见 `cli.md` §4 |
-| 3 | **回合级中断（Ctrl+C）** | ⏳ 无 `Console.CancelKeyPress` 注册；取消 = 整个进程退出，会话无收尾 | 长回合中断应只取消当前回合，保留已写入会话 | `CancellationTokenSource` 挂到 `CancelKeyPress` |
-| 4 | **上下文 token 预算** | ⏳ 仅按"最近 10 个整回合"裁剪；工具输出可让单回合暴涨 | 读大文件 / 跑测试可瞬间超窗，10 轮启发式防不住 | 按模型 context window 比例预算，超限压缩 / 裁剪 / 报错 |
+| 3 | **回合级中断（Ctrl+C）** | ✅ 已实现：`Di.Cli/InterruptCoordinator.cs` + `Program.cs` 注册 `CancelKeyPress`；第一次 Ctrl+C 只取消当前回合（`Repl` 每回合注册取消源，保留已写入会话），第二次才退出 | 长回合中断应只取消当前回合，保留已写入会话 | `InterruptCoordinator`（回合级 CTS，`Repl.RunTurnAsync` 注册 / 注销） |
+| 4 | **上下文 token 预算** | ✅ 已实现：`AgentLoopOptions.HistoryBudgetRatio`（默认 0.5）按当前模型 `ContextWindow` × 比例做跨回合记忆预算，超限丢最旧整回合；未知窗口退回轮数启发式 | 读大文件 / 跑测试可瞬间超窗，10 轮启发式防不住 | `AgentRunner.TrimHistoryByTokens` + `CliHost` 注入的 `contextWindowProvider`（经 `ILlmService.ResolveModelAsync` 取目录窗口） |
 | 5 | **README 与上手文档** | ✅ 已实现：README 安装 / 用法 / 配置 + `docs/cli.md` 契约 | 一个要被用的项目必须有"装什么 / 怎么跑 / 怎么配" | 仓库根 `README.md` + `docs/cli.md` |
 
 > 其余未实现项（`/resume`、命令注册表、MCP、子代理、权限审批流、遥测、多 provider、登录命令）
@@ -71,7 +72,7 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 
 - **全局命令**：自包含 / 单文件发布 + `di` 入 PATH；`di --version`、`di --help`、`di --model <名>`。
 - **headless 模式**：`di "prompt"`、`di -p <file>`、stdin 管道；`--yes` 无交互自动放行。
-- **回合级 Ctrl+C**：取消当前回合（保留已写入会话）、第二次 Ctrl+C 才退出。
+- **回合级 Ctrl+C**：✅ 已实现（§3 缺口 #3）——第一次取消当前回合、第二次才退出。
 - **交互体验**：readline 历史（↑↓）、行编辑、斜杠命令 / 模型名 / skill 名补全。
 - 验收：`di "读一下 README"` 在 CI 管道里能跑通并返回 0；中途 Ctrl+C 后会话文件仍完整。
 
@@ -92,8 +93,8 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 
 把"够用"变成"长会话不崩、跨会话有记忆"。
 
-- **token 预算管理**：按模型 context window 比例设预算，超限自动**压缩**（总结旧回合 /
-  裁剪工具输出 / 丢最旧回合），替代固定 10 轮启发式；会话内输出缓冲计数。
+- **token 预算管理**：✅ 基础版已实现（§3 缺口 #4）——跨回合记忆按窗口比例丢最旧整回合；
+  超限自动**压缩**（总结旧回合）与会话内输出缓冲计数仍属后续。
 - **`/resume` 会话恢复**：`SessionLog` 已可重放，接回 UI（`--resume [session-id]`）。
 - **项目记忆与 AGENTS.md**：`~/.di/memory/<project>.md` 长期事实（跨会话）；项目级
   `AGENTS.md` 作为指令注入（当前是代码内默认 `CoreTools.BuildInstructions` 的输出）。
@@ -129,15 +130,14 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 ## 5. 一张图的演进关系
 
 ```
-MVP（现状，已达成）           工业级
+MVP（已达成，5 个缺口全补齐）    工业级
 ───────────────             ──────────────
-循环/流式/工具/skills/会话   A 分发与 UX（能分发/脚本化/中断友好）
+循环/流式/工具/skills/会话   A 分发与 UX（分发/headless/Ctrl+C ✅，readline 补全等后续）
 成本/目录/认证/元数据        B 安全与可信（权限审批/撤销/注入防御）★
-事件总线/分层配置/591 测试    C 上下文与记忆（token 预算/resume/项目记忆）
+事件总线/分层配置/624 测试    C 上下文与记忆（token 预算基础版 ✅，压缩/resume 后续）
                             D 生态（MCP/子代理/第二 provider/命令注册表）
                             E 可观测与产品化（遥测/评估/运维命令）
 ```
 
-> **建议**：先完成 §3 的 3 个 MVP 缺口（约 1 周量级），再进 Phase B——对一个会动文件的
-> 编码 harness，**安全与可信是工业级的第一道门槛**，其余各阶段都建立在"用户敢让它自己改代码"
-> 之上。
+> **建议**：MVP 已收尾，下一步进 **Phase B**——对一个会动文件的编码 harness，
+> **安全与可信是工业级的第一道门槛**，其余各阶段都建立在"用户敢让它自己改代码"之上。

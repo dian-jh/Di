@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Common.Events;
 using Core.AgentLoop;
@@ -316,6 +317,43 @@ public sealed class ReplTests
     }
 
     [Fact]
+    public async Task ChatTurn_WhenCancelled_ShowsMessage_AndKeepsLoopAlive()
+    {
+        // 回合被取消（OperationCanceledException 冒泡）不应杀死 REPL：显示提示后继续处理下一行。
+        var output = new StringWriter();
+        var bus = new InMemoryEventBus();
+        var runner = new CancellingRunner();
+        var repl = new Repl(runner, bus, new FakeLineReader("你好", "再见", "/exit"), output, new ReplOptions());
+
+        await repl.RunAsync();
+
+        Assert.Equal(["你好", "再见"], runner.Messages);   // 循环存活：取消后下一行仍被处理
+        Assert.Contains("回合已取消", output.ToString());
+    }
+
+    [Fact]
+    public async Task CtrlC_FirstPress_CancelsRunningTurn_ReplStaysAlive()
+    {
+        // 集成：协调器把第一次 Ctrl+C 映射到"取消当前回合"，回合中断后 REPL 继续、会话不丢。
+        var interrupt = new InterruptCoordinator();
+        var output = new StringWriter();
+        var bus = new InMemoryEventBus();
+        var runner = new HangingRunner();
+        var repl = new Repl(runner, bus, new FakeLineReader("你好", "/exit"), output, new ReplOptions(),
+            interrupt: interrupt);
+
+        var runTask = repl.RunAsync();
+        await runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));   // 等回合真正开始
+        var handled = interrupt.RequestInterrupt();                       // 第一次 Ctrl+C
+        await runTask.WaitAsync(TimeSpan.FromSeconds(5));                 // REPL 随后读到 /exit 正常退出
+
+        Assert.True(handled, "第一次 Ctrl+C 应被协调器处理");
+        Assert.Single(runner.Messages);   // 回合被取消，只跑了一次
+        Assert.Contains("回合已取消", output.ToString());
+        Assert.False(interrupt.Lifetime.IsCancellationRequested, "第一次 Ctrl+C 不应取消进程生命周期");
+    }
+
+    [Fact]
     public async Task ChatTurn_WithSessionLog_RecordsTurnToJsonl()
     {
         var root = Directory.CreateTempSubdirectory("di-repl-session-").FullName;
@@ -341,6 +379,36 @@ public sealed class ReplTests
             Assert.Equal("task_complete",
                 complete.RootElement.GetProperty("payload").GetProperty("type").GetString());
             Assert.True(lines.Length >= 5, "一个回合至少写 meta + task_started + turn_context + 消息 + task_complete");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FailedTurn_WithSessionLog_WritesTaskFailedRecord()
+    {
+        // 失败回合也必须落盘：异常路径打印"✗ 运行失败"之外，还要写 task_failed 记录，
+        // 否则会话日志永远"查无此证"（历史 bug）。
+        var root = Directory.CreateTempSubdirectory("di-repl-fail-").FullName;
+        try
+        {
+            var bus = new InMemoryEventBus();
+            var runner = new ThrowingRunner();
+            var sessionLog = new SessionLog(new SessionLogOptions { RootDirectory = root });
+            var repl = new Repl(runner, bus, new FakeLineReader("你好", "/exit"), new StringWriter(),
+                new ReplOptions(), sessionLog);
+
+            await repl.RunAsync();
+
+            Assert.True(File.Exists(sessionLog.LogFilePath));
+            var lines = File.ReadAllLines(sessionLog.LogFilePath).Where(l => !string.IsNullOrWhiteSpace(l)).ToArray();
+
+            using var failed = JsonDocument.Parse(lines[^1]);
+            var payload = failed.RootElement.GetProperty("payload");
+            Assert.Equal("task_failed", payload.GetProperty("type").GetString());
+            Assert.Equal("boom", payload.GetProperty("error").GetString());
         }
         finally
         {
@@ -413,5 +481,46 @@ public sealed class ReplTests
             => throw new InvalidOperationException("boom");
 
         public void ResetHistory() { }
+    }
+
+    /// <summary>每次 RunAsync 立即抛 OperationCanceledException（模拟回合被取消 / Ctrl+C）。</summary>
+    private sealed class CancellingRunner : IAgentRunner
+    {
+        public string CurrentModel { get; set; } = "deepseek-flash";
+
+        public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
+
+        public List<string> Messages { get; } = [];
+
+        public void ResetHistory() { }
+
+        public Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
+        {
+            Messages.Add(userMessage);
+            return Task.FromException<AgentResult>(new OperationCanceledException(cancellationToken));
+        }
+    }
+
+    /// <summary>RunAsync 挂起直到取消（模拟真实回合进行中被 Ctrl+C 打断）。</summary>
+    private sealed class HangingRunner : IAgentRunner
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public string CurrentModel { get; set; } = "deepseek-flash";
+
+        public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
+
+        public List<string> Messages { get; } = [];
+
+        public void ResetHistory() { }
+
+        public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
+        {
+            Messages.Add(userMessage);
+            Started.TrySetResult();
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Delay(Timeout.Infinite, cancellationToken);   // 挂到取消
+            throw new UnreachableException();
+        }
     }
 }

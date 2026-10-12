@@ -16,7 +16,8 @@ public sealed class CliApp
 
     /// <summary>运行一次 CLI 调用，返回进程退出码（0 = 成功，1 = 用法/运行错误）。</summary>
     public async Task<int> RunAsync(string[] args, TextReader stdin, TextWriter stdout, TextWriter stderr,
-        bool stdinTty, bool stdoutTty, CancellationToken cancellationToken = default)
+        bool stdinTty, bool stdoutTty, CancellationToken cancellationToken = default,
+        InterruptCoordinator? interrupt = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(stdin);
@@ -57,7 +58,7 @@ public sealed class CliApp
                     return mode switch
                     {
                         AppMode.ListModels => await ListModelsAsync(host, cliArgs.ListModels, stdout, cancellationToken),
-                        AppMode.Interactive => await InteractiveAsync(host, stdin, stdout, cancellationToken),
+                        AppMode.Interactive => await InteractiveAsync(host, stdin, stdout, interrupt, cancellationToken),
                         _ => await PrintMode.RunAsync(host, cliArgs, stdin, stdout, stderr, cancellationToken),
                     };
                 }
@@ -66,10 +67,10 @@ public sealed class CliApp
 
     /// <summary>交互 REPL：stdin 经流式行读取器喂给 Repl，stdout 渲染。</summary>
     private static async Task<int> InteractiveAsync(CliHost host, TextReader stdin, TextWriter stdout,
-        CancellationToken cancellationToken)
+        InterruptCoordinator? interrupt, CancellationToken cancellationToken)
     {
         var repl = new Repl(host.Runner, host.Bus, new StreamLineReader(stdin), stdout,
-            host.ReplOptions, host.SessionLog, host.Skills);
+            host.ReplOptions, host.SessionLog, host.Skills, interrupt: interrupt);
         await repl.RunAsync(cancellationToken);
         return 0;
     }

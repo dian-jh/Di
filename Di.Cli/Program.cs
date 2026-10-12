@@ -9,10 +9,18 @@ Console.InputEncoding = Encoding.UTF8;
 // 极薄的桥接：把真实控制台流 + TTY 探测交给 CliApp（CliApp 不碰 Console，因此可测、可移植）。
 // 组合根（配置 / DI / runner / 会话装配）在 CliHost；TTY 探测在此 —— 输出重定向（管道/文件）
 // 时禁 ANSI，避免控制序列污染捕获输出。
+//
+// 回合级 Ctrl+C（roadmap §3 缺口 #3）：第一次取消当前回合（Repl 每回合向协调器注册自己的取消源，
+// 协调器只取消该回合、抑制进程终止），第二次放行默认行为退出进程。headless / 空闲时直接退出。
+var interrupt = new InterruptCoordinator();
+Console.CancelKeyPress += (_, e) => e.Cancel = interrupt.RequestInterrupt();
+
 return await new CliApp().RunAsync(
     args,
     Console.In,
     Console.Out,
     Console.Error,
     !Console.IsInputRedirected,
-    !Console.IsOutputRedirected);
+    !Console.IsOutputRedirected,
+    interrupt.Lifetime,
+    interrupt);

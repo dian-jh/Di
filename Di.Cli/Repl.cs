@@ -21,12 +21,14 @@ public sealed class Repl
     private readonly SessionLog? _sessionLog;
     private readonly IReadOnlyList<Skill> _skills;
     private readonly ISkillMatcher _matcher;
+    private readonly InterruptCoordinator? _interrupt;
 
     /// <summary>固定激活的 skills（/skill 手动设置，跨回合保持）。自动匹配的结果是每回合临时算的，不存这里。</summary>
     private readonly List<Skill> _pinned = [];
 
     public Repl(IAgentRunner runner, IEventBus bus, ILineReader reader, TextWriter output, ReplOptions options,
-        SessionLog? sessionLog = null, IReadOnlyList<Skill>? skills = null, ISkillMatcher? matcher = null)
+        SessionLog? sessionLog = null, IReadOnlyList<Skill>? skills = null, ISkillMatcher? matcher = null,
+        InterruptCoordinator? interrupt = null)
     {
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
@@ -37,6 +39,7 @@ public sealed class Repl
         _sessionLog = sessionLog;
         _skills = skills ?? [];
         _matcher = matcher ?? new LexicalSkillMatcher();
+        _interrupt = interrupt;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
@@ -78,59 +81,87 @@ public sealed class Repl
     /// <summary>
     /// 一次聊天回合：先建消费者，启动并发渲染任务（实时消费事件流），
     /// 运行结束后取消渲染任务并兜底排空残余事件，最后打印脚注。
+    /// 回合级中断（roadmap §3 缺口 #3）：本回合的取消源注册到 <see cref="InterruptCoordinator"/>，
+    /// 第一次 Ctrl+C 只取消当前回合（保留已写入会话），第二次才退出进程。
     /// </summary>
     private async Task RunTurnAsync(string userMessage, CancellationToken cancellationToken)
     {
-        using var consumer = _bus.CreateConsumer<AgentLoopEvent>();
-        using var renderCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-        var renderTask = RenderAsync(consumer, renderCts.Token);
-
-        // 自动匹配：按本条消息与 skill 描述的语义相关度加载未固定的 skill。
-        // 固定集（/skill 手动激活）不受影响，二者可叠加；匹配结果每回合重算，不累积。
-        var autoMatched = _matcher.Match(userMessage, _skills)
-            .Where(m => !_pinned.Contains(m.Skill))
-            .ToList();
-        _runner.ActiveSkills = [.. _pinned, .. autoMatched.Select(m => m.Skill)];
-        if (autoMatched.Count > 0)
-            _output.WriteLine("⟦ 自动加载 skill：" + string.Join("、", autoMatched.Select(m => m.Skill.Name)) + "⟧");
-
-        // 模型首个输出可能延迟数秒（网络/思考），先给出可见反馈，首个事件到达时被擦除。
-        _renderer.ShowStatus(_options.WorkingStatusText);
-
-        var startedAt = DateTimeOffset.UtcNow;   // 记录到会话日志，用于计算 duration_ms
-
-        AgentResult result;
+        // 回合级取消源：链接外层（生命周期）token；Ctrl+C 第一次只取消它，不取消整个进程。
+        using var turnCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _interrupt?.BeginTurn(turnCts);
         try
         {
-            result = await _runner.RunAsync(userMessage, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _renderer.ClearStatus();
-            _output.WriteLine($"  ✗ 运行失败: {ex.Message}");
-            renderCts.Cancel();
+            using var consumer = _bus.CreateConsumer<AgentLoopEvent>();
+            var renderTask = RenderAsync(consumer, turnCts.Token);
+
+            // 自动匹配：按本条消息与 skill 描述的语义相关度加载未固定的 skill。
+            // 固定集（/skill 手动激活）不受影响，二者可叠加；匹配结果每回合重算，不累积。
+            var autoMatched = _matcher.Match(userMessage, _skills)
+                .Where(m => !_pinned.Contains(m.Skill))
+                .ToList();
+            _runner.ActiveSkills = [.. _pinned, .. autoMatched.Select(m => m.Skill)];
+            if (autoMatched.Count > 0)
+                _output.WriteLine("⟦ 自动加载 skill：" + string.Join("、", autoMatched.Select(m => m.Skill.Name)) + "⟧");
+
+            // 模型首个输出可能延迟数秒（网络/思考），先给出可见反馈，首个事件到达时被擦除。
+            _renderer.ShowStatus(_options.WorkingStatusText);
+
+            var startedAt = DateTimeOffset.UtcNow;   // 记录到会话日志，用于计算 duration_ms
+
+            AgentResult result;
+            try
+            {
+                result = await _runner.RunAsync(userMessage, turnCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // 回合被取消（Ctrl+C）：清指示器、停渲染，提示后回到外层循环；不追加会话（回合未完成）。
+                _renderer.ClearStatus();
+                _output.WriteLine("  ⏹ 回合已取消");
+                turnCts.Cancel();
+                await StopRendererAsync(renderTask);
+                return;
+            }
+            catch (Exception ex)
+            {
+                _renderer.ClearStatus();
+                _output.WriteLine($"  ✗ 运行失败: {ex.Message}");
+                turnCts.Cancel();
+                await StopRendererAsync(renderTask);
+                // 失败回合也落盘（尽力而为）：否则异常回合在会话文件里"查无此证"，无法复盘。
+                try
+                {
+                    _sessionLog?.AppendFailure(userMessage, ex.Message, startedAt);
+                }
+                catch (Exception logEx)
+                {
+                    _output.WriteLine($"  ⚠ 会话日志写入失败: {logEx.Message}");
+                }
+                return;
+            }
+
+            turnCts.Cancel();
             await StopRendererAsync(renderTask);
-            return;
+
+            // 兜底：取消瞬间渲染任务未消费的残余事件（发布同步入队，不会丢失）。
+            while (consumer.TryRead() is { } evt)
+                _renderer.Render(evt);
+
+            _renderer.RenderResult(result);
+
+            // 回合结束即落盘（尽力而为，磁盘错误不打断聊天）。
+            try
+            {
+                _sessionLog?.AppendTurn(result, startedAt);
+            }
+            catch (Exception ex)
+            {
+                _output.WriteLine($"  ⚠ 会话日志写入失败: {ex.Message}");
+            }
         }
-
-        renderCts.Cancel();
-        await StopRendererAsync(renderTask);
-
-        // 兜底：取消瞬间渲染任务未消费的残余事件（发布同步入队，不会丢失）。
-        while (consumer.TryRead() is { } evt)
-            _renderer.Render(evt);
-
-        _renderer.RenderResult(result);
-
-        // 回合结束即落盘（尽力而为，磁盘错误不打断聊天）。
-        try
+        finally
         {
-            _sessionLog?.AppendTurn(result, startedAt);
-        }
-        catch (Exception ex)
-        {
-            _output.WriteLine($"  ⚠ 会话日志写入失败: {ex.Message}");
+            _interrupt?.EndTurn(turnCts);   // 回合结束：注销当前回合的取消源
         }
     }
 
