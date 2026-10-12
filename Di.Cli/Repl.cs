@@ -66,7 +66,7 @@ public sealed class Repl
 
             if (line.StartsWith('/'))
             {
-                if (RunCommand(line))
+                if (await RunCommandAsync(line, cancellationToken))
                     break;   // /exit
                 continue;
             }
@@ -163,8 +163,8 @@ public sealed class Repl
         }
     }
 
-    /// <summary>斜杠命令；返回 true 表示退出。</summary>
-    private bool RunCommand(string command)
+    /// <summary>斜杠命令；返回 true 表示退出。/skill 带参数时可能运行一个聊天回合，故为异步。</summary>
+    private async Task<bool> RunCommandAsync(string command, CancellationToken cancellationToken)
     {
         var (name, args) = SplitCommand(command);
         switch (name)
@@ -190,7 +190,7 @@ public sealed class Repl
                 ListSkills();
                 break;
             case "/skill":
-                ActivateSkill(args);
+                await ActivateSkillAsync(args, cancellationToken);
                 break;
             default:
                 _output.WriteLine($"未知命令: {name}（输入 /help 查看帮助）");
@@ -220,14 +220,36 @@ public sealed class Repl
         }
     }
 
+    /// <summary>
+    /// /skill：无参数显示用法；<c>/skill &lt;名称&gt;</c> 切换固定激活；<c>/skill &lt;名称&gt; &lt;参数&gt;</c>
+    /// 一次性执行——完整指令 + 参数作为用户请求运行一个回合（对齐 Pi 的 /skill:name args），不固定。
+    /// </summary>
+    private async Task ActivateSkillAsync(string args, CancellationToken cancellationToken)
+    {
+        var (name, skillArgs) = SplitCommand(args);
+        if (skillArgs.Length > 0)
+        {
+            var skill = _skills.FirstOrDefault(s => s.Name == name);
+            if (skill is null)
+            {
+                _output.WriteLine($"未找到 skill：{name}（/skills 查看可用列表）");
+                return;
+            }
+            var message = $"【Skill：{skill.Name}】{skill.Description}\n\n{skill.Instructions}\n\n{skillArgs}";
+            await RunTurnAsync(message, cancellationToken);
+            return;
+        }
+        ActivateSkill(name);
+    }
+
     /// <summary>/skill：带名称切换固定激活，off/none 清空固定集，无参数显示当前与用法。</summary>
     private void ActivateSkill(string name)
     {
         if (name.Length == 0)
         {
             _output.WriteLine(_pinned.Count == 0
-                ? "当前未固定任何 skill。用法: /skill <名称> 激活（再输一次停用，/skill off 全部停用）。匹配到的 skill 也会自动加载。"
-                : $"当前已固定：{string.Join("、", _pinned.Select(s => s.Name))}。用法: /skill <名称> 切换。");
+                ? "当前未固定任何 skill。用法: /skill <名称> 固定（再输一次停用，/skill off 全部停用）；/skill <名称> <参数> 一次性执行（指令+参数）。匹配到的 skill 也会自动加载。"
+                : $"当前已固定：{string.Join("、", _pinned.Select(s => s.Name))}。用法: /skill <名称> 切换；/skill <名称> <参数> 一次性执行。");
             return;
         }
         if (name is "off" or "none")
