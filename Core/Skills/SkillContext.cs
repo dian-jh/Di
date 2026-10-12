@@ -7,9 +7,14 @@ namespace Core.Skills;
 /// </summary>
 public static class SkillContext
 {
-    /// <summary>广告块：每个 skill 一行，让模型知道有哪些 skill 可用（load_skill 的候选清单）。</summary>
+    /// <summary>
+    /// 广告块：每个 skill 一行，让模型知道有哪些 skill 可用（load_skill 的候选清单）。
+    /// disable-model-invocation 的 skill 不进广告（只接受显式 /skill 调用）。
+    /// </summary>
     public static string BuildAdvertisement(IEnumerable<Skill> skills)
-        => string.Join("\n", skills.Select(s => $"- {s.Name}：{s.Description}"));
+        => string.Join("\n", skills
+            .Where(s => !s.DisableModelInvocation)
+            .Select(s => $"- {s.Name}：{s.Description}"));
 
     /// <summary>
     /// 估算一个回合因 skill 增加的 token：广告块（未激活的 skill，与 <c>AgentRunner</c> 的实际注入一致）

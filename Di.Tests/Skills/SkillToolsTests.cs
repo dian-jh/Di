@@ -59,6 +59,22 @@ public sealed class SkillToolsTests
     }
 
     [Fact]
+    public void BuildAdvertisement_ExcludesDisabledSkills()
+    {
+        // disable-model-invocation: true 的 skill 不进广告块（模型不感知，只能显式 /skill 调用）。
+        var skills = new[]
+        {
+            Skill("a", "广告 A", "指令 A"),
+            Skill("b", "广告 B", "指令 B") with { DisableModelInvocation = true },
+        };
+
+        var ad = SkillContext.BuildAdvertisement(skills);
+
+        Assert.Contains("a", ad);
+        Assert.DoesNotContain("b", ad);
+    }
+
+    [Fact]
     public async Task SkillAwareExecutor_InterceptsLoadSkill_WithoutTouchingInner()
     {
         var inner = new RecordingExecutor();

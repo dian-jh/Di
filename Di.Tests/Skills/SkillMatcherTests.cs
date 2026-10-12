@@ -51,6 +51,18 @@ public sealed class SkillMatcherTests
     }
 
     [Fact]
+    public void Match_DisabledSkill_NotAutoActivated()
+    {
+        // disable-model-invocation: true 的 skill 只接受显式 /skill 调用，不进自动匹配。
+        var skill = Skill("backend-tests", "运行并修复后端测试") with { DisableModelInvocation = true };
+        var matcher = new LexicalSkillMatcher();
+
+        var matches = matcher.Match("运行测试", [skill]);
+
+        Assert.Empty(matches);
+    }
+
+    [Fact]
     public void Match_RespectsMinRelevance()
     {
         var skill = Skill("backend-tests", "运行并修复后端测试");
@@ -59,6 +71,19 @@ public sealed class SkillMatcherTests
         var matches = matcher.Match("运行测试", [skill]);
 
         Assert.Empty(matches);
+    }
+
+    [Fact]
+    public void Match_VerboseMessageWithFiller_StillMatches()
+    {
+        // 覆盖率按完整查询长度做分母：16 个二元组里只有 3 个重叠 → 0.19 < 0.30 漏匹配。
+        // 重叠系数用 min(|Q|,|S|) 做分母 → 3/8 = 0.375，口语化长消息不再稀释掉相关 skill。
+        var skill = Skill("backend-tests", "运行并修复后端测试");
+        var matcher = new LexicalSkillMatcher();
+
+        var matches = matcher.Match("今天能不能帮我运行一下后端的测试用例", [skill]);
+
+        Assert.Single(matches);
     }
 
     [Fact]

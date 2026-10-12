@@ -83,6 +83,22 @@ public sealed class SkillMarkdownTests
     }
 
     [Fact]
+    public void Parse_DisableModelInvocation_TrueAndFalse()
+    {
+        // 对齐 Pi 的 disableModelInvocation：字段为 true → 只接受显式 /skill 调用，不进广告/自动匹配。
+        var on = SkillMarkdown.Parse(
+            "---\nname: x\ndescription: y\ndisable-model-invocation: true\n---\nbody");
+        Assert.True(on.DisableModelInvocation);
+
+        var off = SkillMarkdown.Parse("---\nname: x\ndescription: y\n---\nbody");
+        Assert.False(off.DisableModelInvocation);
+
+        var explicitOff = SkillMarkdown.Parse(
+            "---\nname: x\ndescription: y\ndisable-model-invocation: false\n---\nbody");
+        Assert.False(explicitOff.DisableModelInvocation);
+    }
+
+    [Fact]
     public void Parse_UnknownTopLevelFields_AreIgnored()
     {
         var md = "---\nname: x\ndescription: y\nunknown-field: whatever\n---\nbody";

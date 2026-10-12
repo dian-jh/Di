@@ -31,4 +31,10 @@ public sealed record Skill
     /// 当前仅解析存储；语义（执行前按此过滤）留给权限层实现。
     /// </summary>
     public IReadOnlyList<string> AllowedTools { get; init; } = [];
+
+    /// <summary>
+    /// disable-model-invocation（对齐 Pi 的 disableModelInvocation）：true 时该 skill
+    /// 不进广告块、不进自动匹配，只接受显式 <c>/skill</c> 调用。
+    /// </summary>
+    public bool DisableModelInvocation { get; init; }
 }

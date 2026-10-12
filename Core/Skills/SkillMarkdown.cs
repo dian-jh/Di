@@ -49,6 +49,7 @@ public static class SkillMarkdown
         string? description = null;
         var metadata = new Dictionary<string, string>();
         List<string>? allowedTools = null;
+        var disableModelInvocation = false;
         var seen = new HashSet<string>(StringComparer.Ordinal);   // 受识别字段出现集合 → 重复即拒绝
         var inMetadata = false;
 
@@ -85,7 +86,8 @@ public static class SkillMarkdown
             var key = trimmed[..colon].Trim();
             var value = trimmed[(colon + 1)..].Trim().Trim('"', '\'');
 
-            if (key is "name" or "description" or "license" or "compatibility" or "metadata" or "allowed-tools")
+            if (key is "name" or "description" or "license" or "compatibility" or "metadata" or "allowed-tools"
+                or "disable-model-invocation")
             {
                 if (!seen.Add(key))
                     throw new SkillFormatException($"frontmatter 字段 '{key}' 重复出现。");
@@ -104,6 +106,9 @@ public static class SkillMarkdown
                     break;
                 case "allowed-tools":
                     allowedTools = value.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+                    break;
+                case "disable-model-invocation":
+                    disableModelInvocation = value.Equals("true", StringComparison.OrdinalIgnoreCase);
                     break;
                 // license / compatibility / 未知字段：忽略（向前兼容）
             }
@@ -132,6 +137,7 @@ public static class SkillMarkdown
             Instructions = instructions,
             Metadata = metadata,
             AllowedTools = allowedTools ?? [],
+            DisableModelInvocation = disableModelInvocation,
         };
     }
 

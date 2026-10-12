@@ -18,10 +18,10 @@ public interface ISkillMatcher
 
 /// <summary>
 /// 词法匹配器：把用户消息与每个 skill 的 name+description 分词（ASCII 单词 + 中文二元组），
-/// 用<b>查询覆盖率</b>（查询 token 里有多大比例出现在 skill 中）算相关度——
-/// 长描述不会被稀释（Dice 对称系数的已知弱点），低于 <see cref="MinRelevance"/> 的过滤、
-/// 超过 <see cref="MaxMatches"/> 的截断。轻量、离线；中英混杂的转述匹配能力弱于 embedding
-/// 方案（那是升级路径，见 <see cref="ISkillMatcher"/>）。
+/// 用<b>重叠系数</b>（重叠 token ÷ 较短一方的 token 数）算相关度——长查询与长描述都不会被稀释
+/// （查询覆盖率的分母是完整查询长度，口语化长消息的填充词会把它稀释到阈值以下导致漏匹配）。
+/// 低于 <see cref="MinRelevance"/> 的过滤、超过 <see cref="MaxMatches"/> 的截断。轻量、离线、
+/// 确定性、可测试；中英混杂的转述匹配能力弱于 embedding 方案（那是升级路径，见 <see cref="ISkillMatcher"/>）。
 /// </summary>
 public sealed class LexicalSkillMatcher : ISkillMatcher
 {
@@ -49,8 +49,10 @@ public sealed class LexicalSkillMatcher : ISkillMatcher
         var matches = new List<SkillMatch>();
         foreach (var skill in skills)
         {
+            if (skill.DisableModelInvocation)
+                continue;   // 只接受显式 /skill 调用，不进自动匹配
             var skillTokens = Tokenize($"{skill.Name} {skill.Description}");
-            var relevance = Coverage(msgTokens, skillTokens);
+            var relevance = OverlapCoefficient(msgTokens, skillTokens);
             if (relevance >= MinRelevance)
                 matches.Add(new SkillMatch(skill, relevance));
         }
@@ -95,15 +97,20 @@ public sealed class LexicalSkillMatcher : ISkillMatcher
         }
     }
 
-    /// <summary>查询覆盖率 = |查询 ∩ skill| / |查询|：衡量查询里多大比例被 skill 覆盖，长描述不稀释。</summary>
-    private static double Coverage(HashSet<string> query, HashSet<string> skill)
+    /// <summary>
+    /// 重叠系数 = |查询 ∩ skill| / min(|查询|, |skill|)：两端都不稀释。
+    /// 查询覆盖率的弱点是以完整查询长度为分母——口语化长消息里的填充词把得分稀释到阈值以下，
+    /// 该命中的 skill 会漏掉（"今天能不能帮我运行一下后端的测试用例" 只重叠 3/16）。
+    /// 用较短一方做分母后，长查询与长描述都不再稀释，且确定性/可测试性保持不变。
+    /// </summary>
+    private static double OverlapCoefficient(HashSet<string> query, HashSet<string> skill)
     {
-        if (query.Count == 0)
+        if (query.Count == 0 || skill.Count == 0)
             return 0;
         var overlap = 0;
         foreach (var token in query)
             if (skill.Contains(token))
                 overlap++;
-        return (double)overlap / query.Count;
+        return (double)overlap / Math.Min(query.Count, skill.Count);
     }
 }
