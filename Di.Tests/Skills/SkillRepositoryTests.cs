@@ -112,4 +112,65 @@ public sealed class SkillRepositoryTests : IDisposable
         var warning = Assert.Single(warnings);
         Assert.Contains("foo", warning);
     }
+
+    private void WriteFlatSkill(string root, string name, string description, string? frontmatterName = null)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, $"{name}.md"),
+            $"---\nname: {frontmatterName ?? name}\ndescription: {description}\n---\nbody of {name}");
+    }
+
+    [Fact]
+    public void Load_LoadsFlatMarkdownFiles_AsSkills()
+    {
+        // 扁平 <name>.md（对齐 Pi 的 .pi/skills/*.md 惯例）：单文件 skill 无需建目录。
+        WriteFlatSkill(UserDir, "release", "发布检查清单");
+
+        var skills = SkillRepository.Load(UserDir, ProjectDir);
+
+        var release = Assert.Single(skills);
+        Assert.Equal("release", release.Name);
+        Assert.Equal("发布检查清单", release.Description);
+    }
+
+    [Fact]
+    public void Load_FlatFile_NameMismatch_SkipsAndWarns()
+    {
+        // 扁平文件 name 必须匹配文件基名（与目录式同一严格性）。
+        Directory.CreateDirectory(UserDir);
+        File.WriteAllText(Path.Combine(UserDir, "foo.md"),
+            "---\nname: bar\ndescription: y\n---\nbody");
+
+        var warnings = new List<string>();
+        var skills = SkillRepository.Load(UserDir, ProjectDir, warn: warnings.Add);
+
+        Assert.Empty(skills);
+        var warning = Assert.Single(warnings);
+        Assert.Contains("foo.md", warning);
+    }
+
+    [Fact]
+    public void Load_ProjectFlatOverridesUserFlat()
+    {
+        WriteFlatSkill(UserDir, "release", "用户版本");
+        WriteFlatSkill(ProjectDir, "release", "项目版本");
+
+        var skills = SkillRepository.Load(UserDir, ProjectDir);
+
+        var release = Assert.Single(skills);
+        Assert.Equal("项目版本", release.Description);
+    }
+
+    [Fact]
+    public void Load_FlatFileAndDirectory_SameName_FlatWins()
+    {
+        // 同一来源内目录式与扁平式同名：目录先加载、扁平后加载 → 扁平覆盖（确定性）。
+        WriteSkill(UserDir, "deploy", "目录版本");
+        WriteFlatSkill(UserDir, "deploy", "扁平版本");
+
+        var skills = SkillRepository.Load(UserDir, ProjectDir);
+
+        var deploy = Assert.Single(skills);
+        Assert.Equal("扁平版本", deploy.Description);
+    }
 }

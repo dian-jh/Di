@@ -29,7 +29,8 @@
 │   └── YYYY/MM/DD/
 │       └── session-*.jsonl
 ├── skills/                # 用户 skills（已实现；解析/匹配/披露见 docs/modules/skills.md）
-│   └── <name>/SKILL.md
+│   ├── <name>/SKILL.md    # 目录式（MS 规范）
+│   └── <name>.md          # 扁平式（对齐 Pi 的 .pi/skills/*.md，二选一）
 ├── commands/              # 用户斜杠命令（将来）
 │   └── <name>.md
 ├── agents/                # 子代理定义（将来）
@@ -49,7 +50,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 |---|---|---|---|
 | `config.json` | 用户 | 程序（分层配置源 #2） | ✅ 已实现（用户级） |
 | `sessions/YYYY/MM/DD/*.jsonl` | 程序（SessionLog） | 用户/重放工具 | ✅ 已实现 |
-| `skills/<name>/SKILL.md` | 用户 | SkillRepository（`/skill` 激活） | ✅ MVP |
+| `skills/<name>/SKILL.md` 或 `skills/<name>.md` | 用户 | SkillRepository（`/skill` 激活） | ✅ MVP |
 | `commands/<name>.md` | 用户 | 将来命令注册表 | 🔜 格式已预留 |
 | `agents/<name>.md` | 用户 | 将来子代理加载器 | 🔜 格式已预留 |
 | `mcp.json` | 用户 | 将来 MCP 桥 | 🔜 格式已预留 |

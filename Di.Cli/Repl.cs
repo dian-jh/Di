@@ -210,7 +210,7 @@ public sealed class Repl
     {
         if (_skills.Count == 0)
         {
-            _output.WriteLine("没有可用 skill。把 SKILL.md 放在 ~/.di/skills/<名称>/ 或 <工作区>/.di/skills/<名称>/ 下。");
+            _output.WriteLine("没有可用 skill。把 <名称>/SKILL.md 或 <名称>.md 放在 ~/.di/skills/ 或 <工作区>/.di/skills/ 下。");
             return;
         }
         foreach (var skill in _skills)
