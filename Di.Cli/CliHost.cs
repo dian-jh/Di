@@ -79,10 +79,17 @@ public sealed class CliHost : IDisposable
 
         var executor = CoreTools.CreateExecutor(workspace);
 
-        // Skills：两级发现（用户 ~/.di/skills + 项目 .di/skills，项目覆盖同名用户级）；无效文件只告警。
+        // Skills：标准位置发现（对齐 Agent Skills 规范 / Pi）。源按优先级排列，后面的覆盖前面同名的：
+        // 用户 ~/.agents/skills → ~/.di/skills → 项目 .agents/skills 祖先目录（近→远，到 git 根）
+        // → <workspace>/.di/skills（项目最高优先）。无效文件只告警，绝不让启动失败。
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var skills = SkillRepository.Load(
-            diHome.SkillsDirectory,
-            Path.Combine(DiHome.ProjectDirectory(workspace), "skills"),
+            [
+                SkillLocations.UserAgentsSkillsDirectory(homeDir),
+                diHome.SkillsDirectory,
+                .. SkillLocations.AncestorAgentsSkillDirectories(workspace),
+                Path.Combine(DiHome.ProjectDirectory(workspace), "skills"),
+            ],
             warn: msg => stderr.WriteLine($"⚠ {msg}"));
 
         // 默认提示词 = 内置工具说明 + 简洁助手人格；配置里显式写了 AgentLoop:SystemPrompt 则整体覆盖。
