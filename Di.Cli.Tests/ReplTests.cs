@@ -191,6 +191,21 @@ public sealed class ReplTests
     }
 
     [Fact]
+    public async Task SkillCommand_WithArgs_RunsOneShotTurnWithInstructionsAndArgs()
+    {
+        // 对齐 Pi 的 /skill:name args：参数追加到指令后作为用户请求，一次性执行，不固定。
+        var skill = new Skill { Name = "pdf-tools", Description = "提取 PDF", Instructions = "转换前先读 references/formats.md" };
+        var (repl, _, runner) = SetupWithSkills([skill], "/skill pdf-tools 提取 report.pdf", "今天天气如何", "/exit");
+
+        await repl.RunAsync();
+
+        Assert.Equal(2, runner.Messages.Count);
+        Assert.Contains("转换前先读 references/formats.md", runner.Messages[0]);   // 完整指令
+        Assert.Contains("提取 report.pdf", runner.Messages[0]);                     // 参数作为用户请求追加
+        Assert.Empty(runner.ActiveSkills);   // 一次性执行不固定：下一回合（无关消息）不残留
+    }
+
+    [Fact]
     public async Task SkillCommand_NoArgument_ShowsCurrentOrUsage()
     {
         var (repl, output, runner) = Setup("/skill", "/exit");
