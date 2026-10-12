@@ -31,6 +31,13 @@ public sealed class EditFileTool : ICoreTool
             ("old_string", "string", "要替换的原文（必须在文件中出现且只出现一次）"),
             ("new_string", "string", "替换后的新文本")));
 
+    public string PromptSnippet => "精准替换：把文件中唯一出现的 old_string 替换为 new_string";
+
+    public IReadOnlyList<string> PromptGuidelines =>
+    [
+        "修改文件优先 edit_file（old_string 必须唯一，报错时提供更多上下文使其唯一），整体重写才用 write_file",
+    ];
+
     public Task<string> ExecuteAsync(string argumentsJson, CancellationToken cancellationToken = default)
     {
         try

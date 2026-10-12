@@ -37,6 +37,10 @@ public sealed class GlobTool : ICoreTool
         }
     }
 
+    public string PromptSnippet => "按文件名模式（* ? **）搜索文件，返回相对路径";
+
+    public IReadOnlyList<string> PromptGuidelines => [];
+
     public Task<string> ExecuteAsync(string argumentsJson, CancellationToken cancellationToken = default)
     {
         try

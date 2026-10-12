@@ -51,6 +51,13 @@ public sealed class GrepTool : ICoreTool
         }
     }
 
+    public string PromptSnippet => "按模式搜索文件内容，返回 file:行号: 内容";
+
+    public IReadOnlyList<string> PromptGuidelines =>
+    [
+        "定位代码逻辑用 grep 先搜再读，不要编造文件内容",
+    ];
+
     public Task<string> ExecuteAsync(string argumentsJson, CancellationToken cancellationToken = default)
     {
         try

@@ -25,6 +25,13 @@ public sealed class WriteFileTool : ICoreTool
             ("path", "string", "要写入的文件路径（相对工作区根目录）"),
             ("content", "string", "完整文件内容，会覆盖原有内容")));
 
+    public string PromptSnippet => "整体覆盖写入文件";
+
+    public IReadOnlyList<string> PromptGuidelines =>
+    [
+        "write_file 是覆盖不是追加；覆盖前若不确定文件现状，先用 read_file/glob 确认",
+    ];
+
     public Task<string> ExecuteAsync(string argumentsJson, CancellationToken cancellationToken = default)
     {
         try

@@ -245,7 +245,7 @@ public sealed class CoreToolsTests : IDisposable
     [Fact]
     public void Instructions_MentionsAllToolNames()
     {
-        var text = CoreTools.Instructions;
+        var text = CoreTools.BuildInstructions(_base);
 
         Assert.Contains("read_file", text);
         Assert.Contains("write_file", text);
@@ -261,7 +261,58 @@ public sealed class CoreToolsTests : IDisposable
     public void Instructions_StatesEditFileUniquenessRule()
     {
         // 第五章：edit_file 要求 old_string 唯一匹配，否则报错——说明文本应提醒模型。
-        Assert.Contains("唯一", CoreTools.Instructions);
+        Assert.Contains("唯一", CoreTools.BuildInstructions(_base));
+    }
+
+    [Fact]
+    public void BuildInstructions_ContainsToolListAndRulesSections()
+    {
+        var text = CoreTools.BuildInstructions(_base);
+
+        Assert.Contains("工具：", text);
+        Assert.Contains("规则：", text);
+    }
+
+    [Fact]
+    public void BuildInstructions_ToolListFollowsCanonicalOrder()
+    {
+        var text = CoreTools.BuildInstructions(_base);
+
+        var order = new[] { "read_file", "write_file", "edit_file", "glob", "grep", "bash", "powershell", "python" };
+        var positions = order.Select(name => text.IndexOf(name, StringComparison.Ordinal)).ToArray();
+        for (var i = 1; i < positions.Length; i++)
+            Assert.True(positions[i - 1] < positions[i], $"工具清单顺序错乱：{order[i - 1]} 应排在 {order[i]} 之前");
+    }
+
+    [Fact]
+    public void BuildInstructions_AggregatesGlobalAndPerToolRules()
+    {
+        var text = CoreTools.BuildInstructions(_base);
+
+        // 全局规则（跨工具约定）
+        Assert.Contains("观察结果以", text);
+        Assert.Contains("exit: N", text);
+        Assert.Contains("回答要简洁", text);
+
+        // 各工具贡献的规则（与 schema 同源，co-locate 在工具定义文件里）
+        Assert.Contains("先读再动", text);                                  // read_file
+        Assert.Contains("old_string 必须唯一", text);                       // edit_file
+        Assert.Contains("不要编造文件内容", text);                           // grep
+        Assert.Contains("切换目录用 cd 而不是 working_dir", text);           // bash
+        Assert.Contains("切换目录用 cd（Set-Location）", text);              // powershell
+    }
+
+    [Fact]
+    public void EveryTool_ProvidesPromptSnippetAndGuidelines()
+    {
+        var tools = CoreTools.CreateTools(_base);
+
+        Assert.All(tools, tool =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(tool.PromptSnippet), $"{tool.Name} 缺少 PromptSnippet");
+            Assert.NotNull(tool.PromptGuidelines);
+            Assert.All(tool.PromptGuidelines, g => Assert.False(string.IsNullOrWhiteSpace(g)));
+        });
     }
 
     private static ToolCallBlock Call(string name, string arguments) => new("test-1", name, arguments);

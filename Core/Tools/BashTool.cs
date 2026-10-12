@@ -45,6 +45,14 @@ public sealed class BashTool : ICoreTool
                 ("timeout", "integer", $"可选：超时秒数（默认 {DefaultTimeoutSeconds}，最大 {MaxTimeoutSeconds}）"),
                 ("working_dir", "string", "可选：工作目录（默认工作区根目录）")));
 
+    public string PromptSnippet => "在共享持久化终端会话中执行命令";
+
+    public IReadOnlyList<string> PromptGuidelines =>
+    [
+        "bash 是共享持久化会话：cd、环境变量、激活的虚拟环境等状态跨调用保持，切换目录用 cd 而不是 working_dir",
+        "超时（默认 30 秒，可 timeout 覆盖）会终止命令并返回 error，会话自动重建",
+    ];
+
     public async Task<string> ExecuteAsync(string argumentsJson, CancellationToken cancellationToken = default)
     {
         try

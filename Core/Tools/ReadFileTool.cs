@@ -46,6 +46,14 @@ public sealed class ReadFileTool : ICoreTool
         }
     }
 
+    public string PromptSnippet => "读取文件内容，带行号，可用 start_line/end_line 读行范围";
+
+    public IReadOnlyList<string> PromptGuidelines =>
+    [
+        "不确定内容时先读再动，不要凭猜",
+        "read_file 提示\"用 start_line=N 继续读取\"时照做，直到读完为止",
+    ];
+
     public Task<string> ExecuteAsync(string argumentsJson, CancellationToken cancellationToken = default)
     {
         try

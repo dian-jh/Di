@@ -87,7 +87,7 @@ public sealed class CliHost : IDisposable
 
         // 默认提示词 = 内置工具说明 + 简洁助手人格；配置里显式写了 AgentLoop:SystemPrompt 则整体覆盖。
         var systemPrompt = string.IsNullOrWhiteSpace(agentLoop.SystemPrompt)
-            ? CoreTools.Instructions + "\n\n" +
+            ? CoreTools.BuildInstructions(workspace) + "\n\n" +
               "你是一个简洁的 ReAct 助手。需要事实信息时调用工具，不要编造。回答用中文。"
             : agentLoop.SystemPrompt;
 

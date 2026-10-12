@@ -126,7 +126,7 @@ export Model__DefaultModel=deepseek-flash
 - **MCP**：`mcp.json` 声明服务器（stdio 命令 + 环境），通过 `ICoreTool`/`IToolProvider` 桥接，
   ReAct 循环无感。
 - **项目级指令**：将来支持 `<workspace>/AGENTS.md` 作为项目指令注入（当前
-  `CoreTools.Instructions` 是代码内默认，可被 `AgentLoop:SystemPrompt` 覆盖）。
+  `CoreTools.BuildInstructions` 的输出是代码内默认，可被 `AgentLoop:SystemPrompt` 覆盖）。
 
 ## 7. Skill 测试与指标
 

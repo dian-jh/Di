@@ -1,3 +1,4 @@
+using System.Text;
 using Core.AgentLoop;
 using Core.Llm;
 
@@ -201,39 +202,72 @@ public static class CoreTools
     }
 
     /// <summary>
-    /// 工具使用说明：作为 stable_prefix 的一部分注入系统提示，让模型知道有哪八个工具、
-    /// 观察结果长什么样、以及各类工具的使用惯例。
+    /// 全局规则（跨工具的操作约定），与各工具自带的 <see cref="ICoreTool.PromptGuidelines"/> 一起
+    /// 由 <see cref="BuildInstructions"/> 聚合进系统提示词的规则区。
     /// </summary>
-    public static string Instructions { get; } =
-        """
-        你是 Di 编程助手，可以在工作区中读取、编写、修改文件，并运行命令与代码。
+    private static readonly string[] GlobalPromptGuidelines =
+    [
+        "观察结果以 \"exit: N\"（退出码）或 \"error: ...\"（出错）开头；error 表示修正参数后重试",
+        "长输出会被截断（保留头尾）；必要时缩小搜索范围或分批读取",
+        "回答要简洁",
+    ];
 
-        内置工具：
-        1. read_file —— 读取文件，输出带行号。可用 start_line/end_line 只读某一段；不确定内容时先读再动，不要凭猜。
-           输出超 2000 行/64KB 会被截断并提示"用 start_line=N 继续读取"——照提示续读，直到读完为止。
-        2. write_file —— 整体覆盖写入一个文件（是覆盖，不是追加）。覆盖前若不确定文件现状，先用 read_file/glob 确认。
-        3. edit_file —— 精准编辑：给出 old_string 与 new_string，把文件中唯一出现的 old_string 替换为 new_string。
-           old_string 必须在文件中只出现一次（唯一），否则返回错误；报错时请提供更多上下文使其唯一。
-           这是修改文件的推荐方式，比整体重写更安全。
-        4. glob —— 按文件名模式（支持 * ? **）搜索文件，返回匹配的相对路径列表。结果超过上限时提示"用 limit=N 查看更多"。
-        5. grep —— 按模式搜索文件内容，返回 file:行号: 内容（如 src/api.py:42: # TODO: ...）。
-           可用 ignore_case 忽略大小写、literal 按普通文本匹配、context 显示上下文行、limit 调整结果上限；
-           达上限时提示"用 limit=2N 查看更多"。定位代码逻辑用 grep，先搜再读，不要编造文件内容。
-        6. bash —— 在共享的持久化终端会话中执行命令，返回退出码与合并输出（stdout+stderr）。
-           cd、环境变量、激活的虚拟环境等状态在多次调用之间保持——切换目录用 cd 而不是 working_dir。
-           适合跑测试、处理特殊格式文件、装依赖。超时默认 30 秒（可用 timeout 参数覆盖，单位秒），
-           超时返回 error（会话自动重建），长输出自动截断头尾。
-        7. powershell —— 在共享的持久化 PowerShell 会话中执行命令，返回退出码与合并输出（stdout+stderr）。
-           cd、变量、环境变量等状态在多次调用之间保持——切换目录用 cd（Set-Location）而不是 working_dir。
-           适合在 Windows 上跑 PowerShell 脚本（.ps1）、调用 .NET 对象/命令行工具。超时默认 30 秒
-           （可用 timeout 参数覆盖，单位秒），超时返回 error（会话自动重建），长输出自动截断头尾。
-        8. python —— 在沙盒临时目录中执行一段 Python 代码，适合计算、数据处理、生成图表。超时返回 error，长输出截断。
+    /// <summary>
+    /// 构建工具使用说明：作为 stable_prefix 的一部分注入系统提示（对齐 pi 的 system prompt 写法）。
+    /// <list type="bullet">
+    /// <item>工具清单：一行一个工具，snippet 来自各工具的 <see cref="ICoreTool.PromptSnippet"/>——
+    ///     只写做什么，参数细节已在 <see cref="ChatTool.Definition"/> 的 schema 里，不重复。</item>
+    /// <item>规则：全局 <see cref="GlobalPromptGuidelines"/> + 各工具贡献的
+    ///     <see cref="ICoreTool.PromptGuidelines"/>（去重、命令式短句）——schema 表达不了的操作知识。</item>
+    /// </list>
+    /// 说明文本由工具自身贡献，与 schema 同源、不再手写同步；人格（简洁 ReAct 助手、中文回答）
+    /// 由宿主在 `Di.Cli/CliHost.cs` 追加，不在此重复。
+    /// </summary>
+    public static string BuildInstructions(string baseDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseDirectory);
 
-        使用惯例：
-        - 观察结果以 "exit: N"（N 为退出码）或 "error: ..."（本次调用出错）开头。error 表示需要修正参数后重试。
-        - 长输出会被截断（保留头尾）；必要时缩小搜索范围或分批读取。
-        - 修改文件优先 edit_file（唯一性校验），整体重写才用 write_file。
-        """;
+        // bash/powershell 挂上临时会话 → 工具处于"共享持久化会话"形态（与 CreateExecutor 一致），
+        // 提示词里对会话状态的描述才成立；会话是惰性的，不执行命令不会拉起进程。
+        using var session = new ShellSession(baseDirectory);
+        using var powerShellSession = new ShellSession(baseDirectory, ShellCommand.PowerShellSession);
+        var tools = CreateTools(baseDirectory, session: session, powerShellSession: powerShellSession);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("你是 Di 编程助手，可以在工作区中读取、编写、修改文件，并运行命令与代码。");
+        sb.AppendLine();
+        sb.AppendLine("工具：");
+        foreach (var tool in tools)
+            sb.AppendLine($"- {tool.Name} —— {tool.PromptSnippet}");
+        sb.AppendLine();
+        sb.AppendLine("规则：");
+        foreach (var rule in BuildRules(tools))
+            sb.AppendLine($"- {rule}");
+        return sb.ToString();
+    }
+
+    /// <summary>聚合全局规则 + 各工具规则，去重（保留首次出现顺序）。</summary>
+    private static IReadOnlyList<string> BuildRules(IEnumerable<ICoreTool> tools)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var rules = new List<string>();
+        void Add(string rule)
+        {
+            var normalized = rule.Trim();
+            if (normalized.Length == 0 || !seen.Add(normalized))
+                return;
+            rules.Add(normalized);
+        }
+
+        foreach (var rule in GlobalPromptGuidelines)
+            Add(rule);
+        foreach (var tool in tools)
+        {
+            foreach (var rule in tool.PromptGuidelines)
+                Add(rule);
+        }
+        return rules;
+    }
 
     /// <summary>把 ToolCallBlock 按工具名分发给对应工具，未知工具返回错误观察。</summary>
     public sealed class Executor : IToolExecutor, IDisposable

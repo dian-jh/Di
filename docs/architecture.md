@@ -10,8 +10,8 @@
 ## 1. 一句话定位
 
 Di 是一个 **C# / .NET 10 的本地编程 agent harness**：终端 REPL 接收用户输入，
-驱动 **ReAct 循环** 调用大模型（当前为 DeepSeek），模型通过 **内置编码工具**
-（读/写/编辑文件、glob、grep、bash、python）在工作区内完成任务，
+驱动 **ReAct 循环** 调用大模型（当前为 DeepSeek），模型通过 **八个内置编码工具**
+（读/写/编辑文件、glob、grep、bash、powershell、python）在工作区内完成任务，
 整个过程经 **事件总线** 流式渲染，回合落盘为 **JSONL 会话日志**，
 并支持 **skills**（按需加载的指令工作流）。
 
@@ -21,7 +21,7 @@ Di 是一个 **C# / .NET 10 的本地编程 agent harness**：终端 REPL 接收
    ▼
 AgentRunner ──► ReAct 循环 ◄── IChatModel（ChatModelClient → RetryingChatModel → LlmRuntime）
    │              │  ▲                │
-   │              │  └── 工具调用 ── CoreTools.Executor（7 个内置工具）
+   │              │  └── 工具调用 ── CoreTools.Executor（8 个内置工具）
    │              ▼
    │        AgentLoopEvent（事件总线）
    ▼
@@ -41,7 +41,7 @@ E:\Agent\Di\
 │   ├── Llm/           # 模型层：路由、适配器抽象、消息词汇、流式装配、重试、用量计量
 │   ├── Providers/
 │   │   └── DeepSeek/  # DeepSeek 适配器（线格式翻译 + HTTP/SSE + 缓存优化）
-│   ├── Tools/         # 七个内置编码工具 + 进程/会话执行器
+│   ├── Tools/         # 八个内置编码工具 + 注册表/进程/会话执行器
 │   ├── Skills/        # SKILL.md 解析、发现合并、词法自动匹配、load_skill 工具、评估
 │   ├── Sessions/      # 会话 JSONL 落盘（SessionLog）
 │   └── Configuration/ # 家目录（~/.di）单一来源
@@ -139,16 +139,93 @@ E:\Agent\Di\
   - **环境快照 append-on-change 进历史**：只在内容变化时追加，稳定时留在缓存前缀零重复支付；
     被历史裁剪裁掉后自动重置重新注入（长期会话不丢环境上下文）。
 
-### 3.5 Core.Tools —— 七个内置编码工具
+### 3.5 Core.Tools —— 八个内置编码工具
 
-- 统一形态 `ICoreTool`：一个 `ChatTool` 定义（JSON Schema）+ 一个执行实现。
-- **read_file / write_file / edit_file / glob / grep / bash / python**：
-  - 相对路径都以工作区为根；参数缺失/文件不存在返回 `error:` 开头的观察文本（模型自行纠正）。
-  - bash 支持一次性进程模式与**共享持久化 ShellSession**（cwd/环境变量跨调用保持）；
-    Windows 下手工构造 `cmd /d /s /c` 参数；超时强杀（默认 30 秒，可用 timeout 参数覆盖）；
-    输出经 **OutputBuffer 有界累积**（头尾预算，任意长度输出内存恒定），长输出截断头尾。
-  - `ProcessRunner`：统一进程执行（超时/编码）；`ProcessEncoding` 处理 Windows 输出编码。
-- `CoreTools`：聚合入口（工具实例、Schema 定义、执行器分发、放进稳定前缀的使用说明）。
+**统一形态**（`Core/Tools/ICoreTool.cs`）：每个工具 = 一个 `ChatTool` 定义（给模型的 JSON Schema：
+name / description / parameters）+ 一个执行实现 `ExecuteAsync`。参数是模型生成的原始 JSON 字符串；
+相对路径都以工作区为根；参数缺失/文件不存在等可预期失败返回 `error:` 开头的**观察文本**（作为普通
+工具结果进入上下文，由模型下一轮自行纠正，不是崩溃——见 §6.7）。
+
+**工具清单**（每个工具一个文件，均在 `Core/Tools/`）：
+
+| 工具 | 代码（相对仓库根） | 说明 |
+|---|---|---|
+| read_file | `Core/Tools/ReadFileTool.cs` | 行号前缀读取；start/end_line 行范围、1MiB 上限；超 2000 行/64KB 截断并给出"用 start_line=N 续读"协议 |
+| write_file | `Core/Tools/WriteFileTool.cs` | 整体覆盖写入（非追加），自动建父目录 |
+| edit_file | `Core/Tools/EditFileTool.cs` | old_string 唯一性校验的精准替换（比整体重写更安全的推荐方式） |
+| glob | `Core/Tools/GlobTool.cs` + `Core/Tools/GlobMatcher.cs` | 文件名模式搜索（`* ? **`），返回相对路径；匹配器独立成文件可单测 |
+| grep | `Core/Tools/GrepTool.cs` | 正则内容搜索，`file:行号: 内容` 输出；limit/ignore_case/literal/context |
+| bash | `Core/Tools/BashTool.cs` | 一次性独立进程（带 working_dir）或**共享持久化会话**两种模式；超时强杀（默认 30 秒，可 timeout 覆盖）；Windows 手工构造 `cmd /d /s /c` 参数 |
+| powershell | `Core/Tools/PowerShellTool.cs` | 独立 PowerShell 持久化会话（语法/编码与 cmd 不同，不能与 bash 共用会话） |
+| python | `Core/Tools/PythonTool.cs` | 沙盒临时目录执行代码（计算/数据处理/图表） |
+
+**共享基础设施**（均在 `Core/Tools/`）：
+
+- `ShellSession.cs` —— 持久化 shell 会话：cwd/环境变量/虚拟环境跨调用保持；惰性启动（不执行命令不拉起进程）。
+- `ProcessRunner.cs` —— 统一进程执行：超时强杀（含进程树）、输出捕获。
+- `ProcessEncoding.cs` —— Windows 输出编码：cmd/python 的 OEM 字节 vs git 的 UTF-8 字节分别解码。
+- `OutputBuffer.cs` —— 有界输出累积：头尾预算，任意长度输出内存恒定，长输出截断头尾。
+- `ToolHelpers.cs` —— JSON Schema 构造、参数解析（string/int/optional）、路径解析（防越界）。
+
+**注册表与工具集组合**（`Core/Tools/CoreTools.cs`，镜像 pi 的 `core/tools/index.ts` 约定）：
+
+- `ToolNames` —— 8 个工具名常量（`read_file`/`write_file`/`edit_file`/`glob`/`grep`/`bash`/`powershell`/`python`）。
+- **三个工具集**：`AllToolNames`（8 个）、`CodingToolNames`（read/write/edit/bash，可写文件编辑集）、
+  `ReadOnlyToolNames`（read/glob/grep，只读搜索集）。
+  **当前生产代码只用全量**（`Di.Cli/CliHost.cs` 调 `CoreTools.Definitions(workspace)`）；coding/read-only
+  是**预留的扩展缝**（注释："可给不同场景暴露不同工具子集"）。pi 自身同样只在 loop 里用全量
+  （`createAllToolDefinitions`，pi 的 `packages/coding-agent/src/core/agent-session.ts`），子集经 SDK
+  导出供外部消费者——所以留子集不是死代码，是组合能力。未来消费场景：只读/规划模式、
+  权限层降级（用户拒绝写操作时切只读集，见 `docs/harness.md` Phase B）、headless/CI 安全模式、
+  上下文 token 预算（小工具集 = 更小 schema = 更少 token）。注意 powershell/python 只属于全量集，
+  不在 coding/read-only 中（pi 的原始定义，忠实镜像）。
+- **组合链路**：`CreateTool`（单工具路由，未知名抛 `InvalidOperationException`）→ `CreateTools`
+  （按 `CanonicalOrder` + 工具集过滤组合，顺序与 schema/执行器一致）→ `CreateCodingTools` /
+  `CreateReadOnlyTools`（子集便捷工厂）。
+- **schema 与实现同源**：`Definitions()`（给模型的 `ChatTool` 列表）与 `CreateExecutor()`（运行时
+  `IToolExecutor`）共用同一注册表，定义与执行器**永不失配**；bash/powershell 的定义始终按共享
+  持久化会话模式生成（schema 里不含 working_dir，与 `CreateExecutor` 一致）。
+
+**使用说明 `BuildInstructions(workspace)`**（`CoreTools.cs`，输出注入稳定前缀）：
+
+`tools` 参数（走 `ModelRequest.Tools` → 请求体 `tools` 字段）是**机器可读的调用契约**——能调什么、
+参数怎么填；工具使用说明补充 schema 表达不了的**操作知识**，两者互补而非冗余。
+写法对齐 pi 的 system prompt：**每个工具一行 snippet + 命令式规则 bullet**。说明文本**由工具自身
+贡献、动态聚合**，与 schema 同源、不再手写同步（人格"简洁 ReAct 助手、中文回答"由 `Di.Cli/CliHost.cs`
+追加，不在此重复）。
+
+- **工具清单**：一行一个工具，snippet 来自各工具的 `PromptSnippet`（`ICoreTool.cs`）——
+  只写做什么（`- read_file —— 读取文件内容，带行号...`），参数细节已在 schema 里。
+- **规则**：全局 `GlobalPromptGuidelines`（跨工具观察约定/截断/简洁）+ 各工具贡献的
+  `PromptGuidelines`，去重聚合（`BuildRules`）。每个工具把行为偏好、协议、观察约定
+  co-locate 在自己的定义文件里（如 `ReadFileTool.cs` 的 `PromptGuidelines`），对应 pi 的
+  `promptSnippet` / `promptGuidelines`。
+- **构建方式**：`BuildInstructions(baseDirectory)` 以共享持久化会话形态创建全量工具集
+  （与 `CreateExecutor` 一致），从实例聚合——工具集/顺序/说明三者天然一致。
+
+`BuildInstructions` 的输出作为**第一条 system 消息**落在字节稳定前缀里（见 §3.2），逐字节稳定 →
+跨回合/迭代命中 DeepSeek 前缀缓存。可被配置 `AgentLoop:SystemPrompt` 整体覆盖（`Di.Cli/CliHost.cs`）。
+
+**工具流动路径**（声明到执行）：
+
+```
+Di.Cli/CliHost.cs
+  ├─ CoreTools.Definitions(workspace)         ← 生成 8 个工具 schema
+  └─ CoreTools.CreateExecutor(workspace)      ← 生成运行时执行器（含 bash/powershell 持久化会话）
+        ↓
+Core/AgentLoop/AgentRunner.cs
+  ├─ 构造：_tools = [..definitions]（有 skills 时追加 SkillTools.LoadSkillTool，见 §3.6）
+  └─ RunAsync：每回合把 _tools 塞进 AgentRequest.Tools
+        ↓
+Core/AgentLoop/ReAct.cs                        ← 每次迭代都带上完整 tools（内层循环）
+        ↓
+Core/Llm/ChatModelClient.cs                    ← ModelRequest.Tools → GenerateOptions.Tools
+        ↓
+Core/Providers/DeepSeek/DeepSeekTranslator.cs  ← ToWireTool 序列化为请求体 tools（name/description/parameters/strict）
+```
+
+执行侧：ReAct 只认 `IToolExecutor`（`Core/AgentLoop/IToolExecutor.cs`），由 `AgentRunner` 注入
+`CoreTools.Executor`（按工具名分发，未知名返回错误观察）；ReAct 不识别具体工具。
 
 ### 3.6 Core.Skills —— Skills（渐进式披露）
 
@@ -243,7 +320,10 @@ Repl.RunTurnAsync
 | 工具 | read_file / write_file / edit_file | ✅ |
 | 工具 | glob / grep | ✅ |
 | 工具 | bash（一次性 + 共享持久化会话，Windows cmd 参数处理） | ✅ |
+| 工具 | powershell（独立持久化会话） | ✅ |
 | 工具 | python（沙盒临时目录） | ✅ |
+| 工具 | 注册表与工具集（all/coding/read-only 组合，schema 与执行器同源） | ✅ |
+| 工具 | 使用说明由工具自身贡献聚合注入稳定前缀（`CoreTools.BuildInstructions`，可被系统提示词覆盖） | ✅ |
 | Skills | SKILL.md 解析（严格 frontmatter 校验） | ✅ |
 | Skills | 两级发现合并（用户 + 项目，项目覆盖） | ✅ |
 | Skills | 词法自动匹配（中英，查询覆盖率，阈值/上限） | ✅ |
@@ -286,3 +366,10 @@ Repl.RunTurnAsync
 9. **模型是纯数据、鉴权是声明**：模型目录（Catalog）与认证声明（Auth）都是适配器上的数据，
    凭据存储（ILlmCredentialStore）由宿主注入、请求时才解析——加模型/换凭据来源零引擎改动，
    DI 注册与启动不碰任何密钥。
+10. **工具设计（schema 与说明互补、说明与 schema 同源、子集预留）**：`tools` 参数（`ModelRequest.Tools`）
+    是机器可读的调用契约（能调什么、参数怎么填），工具使用说明（`CoreTools.BuildInstructions`）是
+    注入稳定前缀的操作手册（观察约定、行为偏好、协议）——两者互补而非冗余。说明文本由每个工具
+    自己的 `PromptSnippet` / `PromptGuidelines` 贡献聚合（`ICoreTool.cs`），与 schema co-locate、
+    永不失配（对齐 pi 的 `promptSnippet` / `promptGuidelines`）。工具集按 all/coding/read-only
+    组合预留扩展缝（当前只用全量，镜像 pi 的 `core/tools/index.ts`），未来按场景暴露子集
+    （只读模式/权限降级等）；`Definitions` 与 `CreateExecutor` 共用同一注册表，schema 与实现永不失配。

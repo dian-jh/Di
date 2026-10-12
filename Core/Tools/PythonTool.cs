@@ -31,6 +31,13 @@ public sealed class PythonTool : ICoreTool
             ("code", "string", "要执行的 Python 代码"),
             ("working_dir", "string", "可选：工作目录（默认沙盒临时目录）")));
 
+    public string PromptSnippet => "在沙盒临时目录中执行一段 Python 代码";
+
+    public IReadOnlyList<string> PromptGuidelines =>
+    [
+        "超时返回 error，长输出自动截断",
+    ];
+
     public async Task<string> ExecuteAsync(string argumentsJson, CancellationToken cancellationToken = default)
     {
         try

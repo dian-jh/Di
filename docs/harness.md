@@ -82,7 +82,7 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 | Windows 编码处理 | `ProcessEncoding` | cmd/python 的 OEM 字节 vs git 的 UTF-8 字节分别解码 |
 | 精准编辑 | `EditFileTool` | old_string 唯一性校验，避免错误覆盖 |
 | schema 与实现同源 | `CoreTools.Definitions` / `CreateExecutor` | 共用同一注册表，定义与执行器永不失配 |
-| 工具使用说明注入稳定前缀 | `CoreTools.Instructions` | 模型知道工具约定（error 前缀、长输出截断等） |
+| 工具使用说明由工具自身贡献聚合、注入稳定前缀 | `CoreTools.BuildInstructions` | 每工具 `PromptSnippet`/`PromptGuidelines` co-locate（对齐 pi），与 schema 同源；模型知道工具约定（error 前缀、长输出截断等） |
 
 ### 2.5 Skills —— Core.Skills（44 测试）
 
@@ -203,7 +203,7 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
   裁剪工具输出 / 丢最旧回合），替代固定 10 轮启发式；会话内输出缓冲计数。
 - **`/resume` 会话恢复**：`SessionLog` 已可重放，接回 UI（`--resume [session-id]`）。
 - **项目记忆与 AGENTS.md**：`~/.di/memory/<project>.md` 长期事实（跨会话）；项目级
-  `AGENTS.md` 作为指令注入（当前是代码内默认 `CoreTools.Instructions`）。
+  `AGENTS.md` 作为指令注入（当前是代码内默认 `CoreTools.BuildInstructions` 的输出）。
 - **缓存友好深化**：前缀缓存命中率指标（DeepSeek 已给 cache_read/cache_write token，
   `CostCalculator` 已按缓存价计费）——命中率可观测，优化有依据。
 - 验收：连续 50 回合的会话 token 不超窗；`/resume` 后模型记得上一会话关键结论。
