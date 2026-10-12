@@ -171,7 +171,7 @@ stdout 只输出**一个** JSON 文档（snake_case，可空键省略）：
 |---|---|---|
 | REPL 外层循环 | `Di.Cli/Repl.cs` | 读行 → 斜杠命令 → 回合；回合事件实时渲染 + 兜底排空 |
 | 流式渲染 | `Di.Cli/EventRenderer.cs` | 逐字输出；工具调用 / 思考轮 / 用量+成本脚注；ANSI 状态行（重定向自动禁用） |
-| 斜杠命令 | `Di.Cli/Repl.cs`（`RunCommand`） | `/help` `/clear` `/model` `/skills` `/skill` `/exit` |
+| 斜杠命令 | `Di.Cli/Repl.cs`（`RunCommandAsync`） | `/help` `/clear` `/model` `/skills` `/skill` `/skill <名> <参数>` `/exit` |
 | 纯参数解析（语言无关契约） | `Di.Cli/cli/CliArgs.cs` | `string[] → CliArgs` 纯数据 + 诊断；`--` 截断、未知 / 缺值 / 非法模式报错 |
 | 纯模式解析 | `Di.Cli/cli/CliMode.cs` | `Resolve(args, stdinTty, stdoutTty)`；短路径优先（version/help 直接输出不建 DI；list-models 仍建宿主） |
 | 分派壳 | `Di.Cli/CliApp.cs` | 解析 → 校验 → 模式 → 建宿主 → 分派；不碰 Console（流与 TTY 由调用方注入） |

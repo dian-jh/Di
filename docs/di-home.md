@@ -38,6 +38,11 @@
 └── mcp.json               # MCP 服务器配置（将来，JSON 数组）
 ```
 
+> **skills 多源发现（Agent Skills 规范位置）**：除 `~/.di/skills` 外，还发现
+> `~/.agents/skills`（用户标准）与祖先 `.agents/skills`（项目标准，从工作目录沿父目录向上
+> 到 git 根，近者优先），加上 `<workspace>/.di/skills` 项目级。合并优先级与发现规则唯一定义在
+> `docs/modules/skills.md`（§多源发现合并）。
+
 根目录可被环境变量 `DI_HOME` 覆盖（测试隔离、多环境共存）：
 
 ```bash
@@ -50,7 +55,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 |---|---|---|---|
 | `config.json` | 用户 | 程序（分层配置源 #2） | ✅ 已实现（用户级） |
 | `sessions/YYYY/MM/DD/*.jsonl` | 程序（SessionLog） | 用户/重放工具 | ✅ 已实现 |
-| `skills/<name>/SKILL.md` 或 `skills/<name>.md` | 用户 | SkillRepository（`/skill` 激活） | ✅ MVP |
+| `skills/<name>/SKILL.md` 或 `skills/<name>.md` | 用户 | SkillRepository（多源合并 + `/skill` 激活） | ✅ MVP |
 | `commands/<name>.md` | 用户 | 将来命令注册表 | 🔜 格式已预留 |
 | `agents/<name>.md` | 用户 | 将来子代理加载器 | 🔜 格式已预留 |
 | `mcp.json` | 用户 | 将来 MCP 桥 | 🔜 格式已预留 |
@@ -120,7 +125,7 @@ export Model__DefaultModel=deepseek-flash
 | 配置段绑定 | `Di.Cli/DiServiceCollectionExtensions.cs` | ✅ |
 | SessionLog 不再写 `config.json` | `Core/Sessions/SessionLog.cs` | ✅ |
 | 组合根决策入配置（prompt/迭代上限/默认模型/UI） | `Di.Cli/Program.cs` | ✅ |
-| Skills：MS 规范解析 + 两级发现 + 激活注入 | `Core/Skills/` + `Di.Cli/Repl.cs` | ✅ |
+| Skills：MS 规范解析 + 多源发现（`.di` + `.agents` 标准位置）+ 激活注入 | `Core/Skills/` + `Di.Cli/Repl.cs` | ✅ |
 | Skills：渐进式披露（广告块 + `load_skill` 工具） | `Core/Skills/SkillTools.cs` + `AgentRunner` | ✅ |
 | Skills：匹配器质量与上下文成本指标 | `Core/Skills/SkillEvaluator.cs` | ✅ |
 
