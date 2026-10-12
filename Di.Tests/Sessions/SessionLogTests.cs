@@ -129,6 +129,34 @@ public sealed class SessionLogTests : IDisposable
     }
 
     [Fact]
+    public void AppendFailure_WritesTaskFailedRecord()
+    {
+        // 失败回合也必须落盘（曾几何时 Repl 只在成功时 AppendTurn，报错"查无此证"）。
+        var log = NewLog();
+        log.StartSession();
+        log.AppendFailure("你好", "The response ended prematurely.", DateTimeOffset.UtcNow.AddSeconds(-1));
+
+        var records = ReadRecords(log.LogFilePath);
+        var types = records.Select(r => r.GetProperty("type").GetString()!).ToArray();
+        Assert.Equal(
+        [
+            "session_meta", "event_msg", "turn_context", "response_item", "event_msg",
+        ], types);
+
+        Assert.Equal("task_started", Payload(records[1]).GetProperty("type").GetString());
+
+        var user = Payload(records[3]);
+        Assert.Equal("message", user.GetProperty("type").GetString());
+        Assert.Equal("user", user.GetProperty("role").GetString());
+        Assert.Equal("你好", user.GetProperty("content")[0].GetProperty("text").GetString());
+
+        var failed = Payload(records[4]);
+        Assert.Equal("task_failed", failed.GetProperty("type").GetString());
+        Assert.Equal("The response ended prematurely.", failed.GetProperty("error").GetString());
+        Assert.True(failed.GetProperty("duration_ms").GetInt64() >= 0);
+    }
+
+    [Fact]
     public void AppendTurn_WithHistory_RecordsOnlyNewMessages()
     {
         var log = NewLog();

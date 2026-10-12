@@ -32,7 +32,8 @@ public sealed class SessionLogOptions
 /// <summary>
 /// 会话持久化：把一次 CLI 运行的每个回合追加写入一个 JSONL 文件。
 /// 目录模式为 ~/.di/sessions/YYYY/MM/DD/，文件名 session-{时间戳}-{会话短id}.jsonl；
-/// 首行是 session_meta，之后每回合由 task_started / turn_context / 各 response_item / task_complete 组成。
+/// 首行是 session_meta，之后每回合由 task_started / turn_context / 各 response_item / task_complete 组成
+/// （失败回合以 task_failed 收尾，见 <see cref="AppendFailure"/>）。
 /// 每条记录是 {timestamp, ordinal, type, payload} 信封，payload 用 snake_case（参考 codex rollout 格式）。
 ///
 /// 追加写入按行 flush，进程随时中断也不会损坏已写记录；重放 = 按行读回。
@@ -131,6 +132,45 @@ public sealed class SessionLog
                 CompletedAt = now.ToUnixTimeMilliseconds(),
                 DurationMs = (long)Math.Max(0, (now - startedAt).TotalMilliseconds),
                 Cost = result.Cost,   // 无费率时 null → 序列化省略该字段
+            });
+        }
+    }
+
+    /// <summary>
+    /// 记录一个<b>失败</b>回合（模型调用抛异常，Repl 打印"✗ 运行失败"后没有产生 <see cref="AgentResult"/>）。
+    /// 回合未完成、无轨迹，只写用户请求 + 失败原因，以 event_msg type=task_failed 收尾——
+    /// 否则异常回合在会话文件里"查无此证"，无法复盘（历史 bug）。
+    /// </summary>
+    public void AppendFailure(string userMessage, string errorMessage, DateTimeOffset startedAt)
+    {
+        ArgumentNullException.ThrowIfNull(userMessage);
+        lock (_lock)
+        {
+            StartSession();
+
+            var turnId = Guid.NewGuid().ToString("N");
+            var now = DateTimeOffset.UtcNow;
+
+            Append("event_msg", new
+            {
+                Type = "task_started",
+                TurnId = turnId,
+                StartedAt = startedAt.ToUnixTimeMilliseconds(),
+            });
+            Append("turn_context", new { TurnId = turnId, Cwd = _cwd });
+            Append("response_item", new
+            {
+                Type = "message",
+                Role = "user",
+                Content = new[] { new { Type = "input_text", Text = userMessage } },
+            });
+            Append("event_msg", new
+            {
+                Type = "task_failed",
+                TurnId = turnId,
+                Error = errorMessage,
+                CompletedAt = now.ToUnixTimeMilliseconds(),
+                DurationMs = (long)Math.Max(0, (now - startedAt).TotalMilliseconds),
             });
         }
     }
