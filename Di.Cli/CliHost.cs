@@ -104,6 +104,20 @@ public sealed class CliHost : IDisposable
         Func<string, IChatModel> modelFactory = name =>
             new RetryingChatModel(new ChatModelClient(llm, effectiveProvider, name), retry);
 
+        // 跨回合记忆的上下文 token 预算（roadmap §3 缺口 #4）：按模型目录的 context window 比例。
+        // 目录解析在内存中（DeepSeek 为纯查询），失败 / 模型不在目录 → null → 退回轮数启发式。
+        Func<string, int?> contextWindowProvider = name =>
+        {
+            try
+            {
+                return llm.ResolveModelAsync(effectiveProvider, name).GetAwaiter().GetResult()?.Context?.ContextWindow;
+            }
+            catch
+            {
+                return null;
+            }
+        };
+
         var runner = new AgentRunner(
             modelFactory,
             executor,
@@ -111,11 +125,13 @@ public sealed class CliHost : IDisposable
             {
                 SystemPrompt = systemPrompt,
                 MaxIterations = agentLoop.MaxIterations,
+                HistoryBudgetRatio = agentLoop.HistoryBudgetRatio,
                 ReasoningEffort = !string.IsNullOrWhiteSpace(args.Thinking) ? args.Thinking : agentLoop.ReasoningEffort,
             },
             provider.GetRequiredService<IEventBus>(),
             CoreTools.Definitions(workspace),
             workingDirectory: workspace,
+            contextWindowProvider: contextWindowProvider,
             skills: skills)
         {
             // --model 覆盖配置默认模型（启动后交互模式仍可 /model 切换）。

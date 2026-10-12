@@ -79,7 +79,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 
 | 段 | 绑定到 | 主要键 |
 |---|---|---|
-| `AgentLoop` | `AgentLoopOptions` | `SystemPrompt`、`MaxIterations` |
+| `AgentLoop` | `AgentLoopOptions` | `SystemPrompt`、`MaxIterations`、`HistoryBudgetRatio` |
 | `Model` | `ModelOptions` | `Provider`、`DefaultModel` |
 | `Repl` | `ReplOptions` | `Prompt`、`HelpText`、`WorkingStatusText`、`UseAnsi` |
 | `Retry` | `RetryPolicyOptions` | `MaxAttempts`、`InitialBackoff` 等 |
@@ -98,7 +98,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 
 ```json
 {
-  "AgentLoop": { "MaxIterations": 12 },
+  "AgentLoop": { "MaxIterations": 12, "HistoryBudgetRatio": 0.4 },
   "DeepSeek": { "DefaultReasoningEffort": "max" }
 }
 ```

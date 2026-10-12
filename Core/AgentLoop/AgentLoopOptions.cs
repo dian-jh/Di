@@ -19,6 +19,14 @@ public sealed class AgentLoopOptions
     public int MaxIterations { get; set; } = 24;
 
     /// <summary>
+    /// 跨回合记忆占模型上下文窗口的比例上限（0~1，roadmap §3 缺口 #4）。
+    /// 每回合结束按当前模型 <see cref="ModelSpec.ContextWindow"/> × 该比例估算 token 预算，
+    /// 超限丢最旧整回合，替代/兜底固定轮数启发式；未知上下文窗口时退回轮数裁剪。
+    /// 可由配置覆盖：AgentLoop:HistoryBudgetRatio（~/.di/config.json）。
+    /// </summary>
+    public double HistoryBudgetRatio { get; set; } = 0.5;
+
+    /// <summary>
     /// 最终输出工具名：模型调用它表示任务完成，其参数作为最终答案返回
     /// （<see cref="AgentStopReason.FinalOutputTool"/>）。null = 不启用该退出条件。
     /// </summary>

@@ -93,6 +93,74 @@ public sealed class AgentRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_TrimsHistoryByTokenBudget_WhenContextWindowKnown()
+    {
+        // 上下文预算优先于固定轮数：轮数上限放开（99），token 预算 40 决定保留多少。
+        // 每回合 = 用户 58 字符(≈15 token) + 回答 "hi"(≈1 token) = 16 token：
+        // 3 回合 = 48 > 40 → 丢最旧；2 回合 = 32 ≤ 40 → 保留。
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys", HistoryBudgetRatio = 1.0 },
+            new InMemoryEventBus(),
+            maxHistoryTurns: 99,
+            contextWindowProvider: _ => 40);   // 预算 = 40 token
+
+        for (var i = 1; i <= 5; i++)
+            await runner.RunAsync($"问{i}{new string('x', 57)}");
+
+        // 第 5 回合请求 = 记忆(最近 2 轮：问3、问4) + 当前问5；问1、问2 已被 token 预算裁掉。
+        var last = model.Requests[^1];
+        var userTexts = last.Messages.OfType<UserMessage>().Select(ChatMessageExtensions.GetText).ToArray();
+        Assert.Equal(["问3" + new string('x', 57), "问4" + new string('x', 57), "问5" + new string('x', 57)], userTexts);
+    }
+
+    [Fact]
+    public async Task RunAsync_TinyBudget_KeepsAtLeastMostRecentHistoryTurn()
+    {
+        // 单回合(16 token)已超预算(8 token)：至少保留最近 1 轮历史 + 当前回合，不能全丢。
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys", HistoryBudgetRatio = 1.0 },
+            new InMemoryEventBus(),
+            maxHistoryTurns: 99,
+            contextWindowProvider: _ => 8);
+
+        for (var i = 1; i <= 3; i++)
+            await runner.RunAsync($"问{i}{new string('x', 57)}");
+
+        // 第 3 回合请求 = 记忆(最近 1 轮：问2) + 当前问3；问1 被裁掉。
+        var last = model.Requests[^1];
+        var userTexts = last.Messages.OfType<UserMessage>().Select(ChatMessageExtensions.GetText).ToArray();
+        Assert.Equal(["问2" + new string('x', 57), "问3" + new string('x', 57)], userTexts);
+    }
+
+    [Fact]
+    public async Task RunAsync_UnknownContextWindow_FallsBackToTurnHeuristic()
+    {
+        // contextWindowProvider 返回 null（模型不在目录 / 解析失败）：退回固定轮数裁剪，
+        // 与未提供 provider 时行为一致。
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model,
+            new FakeToolExecutor(),
+            new AgentLoopOptions { SystemPrompt = "sys", HistoryBudgetRatio = 1.0 },
+            new InMemoryEventBus(),
+            maxHistoryTurns: 2,
+            contextWindowProvider: _ => null);
+
+        for (var i = 1; i <= 5; i++)
+            await runner.RunAsync($"问{i}");
+
+        var last = model.Requests[^1];
+        var userTexts = last.Messages.OfType<UserMessage>().Select(ChatMessageExtensions.GetText).ToArray();
+        Assert.Equal(["问3", "问4", "问5"], userTexts);   // 与 RunAsync_TrimsHistoryToMaxTurns 一致
+    }
+
+    [Fact]
     public async Task ResetHistory_ClearsAccumulatedMemory()
     {
         var model = new FakeChatModel();

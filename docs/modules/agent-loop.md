@@ -32,7 +32,11 @@ harness 的核心执行引擎：
 - 按当前模型名经工厂解析 `IChatModel`（`CurrentModel` 可运行中切换）。
 - **环境快照 append-on-change 进持久历史**（`_lastSnapshotText` 去重）：只在内容变化时追加，
   稳定时留在缓存前缀零重复支付；被历史裁剪裁掉后自动重置重新注入。
-- **历史按整回合裁剪**到最近 N 轮（默认 10，`maxHistoryTurns`）；`ResetHistory()` 同时重置快照标记。
+- **跨回合记忆裁剪（轮数 + token 预算）**：先按当前模型的上下文 token 预算
+  （`ContextWindow × AgentLoopOptions.HistoryBudgetRatio`，默认 0.5）丢最旧整回合
+  （`TrimHistoryByTokens`，估算见 `TokenEstimator`，至少保留最近 1 轮），再按最大轮数兜底
+  （默认 10，`maxHistoryTurns`）；未知上下文窗口（`contextWindowProvider` 返回 null）时
+  退回纯轮数启发式（roadmap §3 缺口 #4）。`ResetHistory()` 同时重置快照标记。
 - **Skills 注入**：有 skill 时追加 `load_skill` 工具、执行器包一层 `SkillAwareExecutor`；
   `ActiveSkills`（固定 `/skill` + 每回合自动匹配）逐回合构建 SystemContext（见 `docs/modules/skills.md`）。
 
@@ -41,7 +45,7 @@ harness 的核心执行引擎：
 | 文件（相对仓库根） | 职责 |
 |---|---|
 | `Core/AgentLoop/ReAct.cs` | ReAct 主循环（`RunStreamingAsync` / 私有 `RunCoreAsync` / `ExecuteToolAsync` / `CombineCost`） |
-| `Core/AgentLoop/AgentRunner.cs` | 跨回合宿主（模型路由 / 历史裁剪 / 快照 / skills） |
+| `Core/AgentLoop/AgentRunner.cs` | 跨回合宿主（模型路由 / 历史裁剪（轮数 + token 预算）/ 快照 / skills） |
 | `Core/AgentLoop/IAgentRunner.cs` | 宿主抽象——CLI 唯一依赖的会话契约（见 `docs/cli.md` §2.1） |
 | `Core/AgentLoop/AgentRequest.cs` | 一次运行输入（UserMessage / History / Tools / ToolExecutor / Validator / SystemContext） |
 | `Core/AgentLoop/AgentResult.cs` | 一次运行结局（Answer / Trajectory / Usage / Cost / StopReason / Failure） |
@@ -54,7 +58,8 @@ harness 的核心执行引擎：
 
 - `ReAct`、`AgentRunner`、`IAgentRunner`
 - `AgentRequest`、`AgentResult`、`AgentStopReason`（`Answer` / `FinalOutputTool` / `MaxIterations` / `Error`）
-- `AgentLoopOptions`、`EnvironmentSnapshot`
+- `AgentLoopOptions`（含 `HistoryBudgetRatio`）、`EnvironmentSnapshot`
+- `AgentRunner.TrimHistoryByTokens`（token 预算裁剪）、`Core.Llm.TokenEstimator`（估算口径 ~4 字符/token）
 - `IToolExecutor`、`IToolValidator`
 
 ## 调用关系
@@ -79,7 +84,7 @@ Di.Cli/Repl.cs ── IAgentRunner.RunAsync ──► AgentRunner
 | 迭代预算（防无限循环） | `AgentLoopOptions.MaxIterations` | `Di.Tests/AgentLoop/ReActTests.cs` |
 | 工具失败 = 观察，不是崩溃 | `ReAct.ExecuteToolAsync` | `Di.Tests/AgentLoop/ReActTests.cs` |
 | 不可重试模型错误 → 干净结局 | `ReAct.RunCoreAsync` | `Di.Tests/AgentLoop/ReActTests.cs` |
-| 跨回合记忆 + 整回合裁剪 | `AgentRunner` | `Di.Tests/AgentLoop/AgentRunnerTests.cs` |
+| 跨回合记忆 + 整回合裁剪（轮数 + token 预算） | `AgentRunner` | `Di.Tests/AgentLoop/AgentRunnerTests.cs` |
 | 环境快照 append-on-change | `Core/AgentLoop/EnvironmentSnapshot.cs` | `Di.Tests/AgentLoop/EnvironmentSnapshotTests.cs` |
 | 最终输出工具 | `AgentLoopOptions.FinalOutputTool` | `Di.Tests/AgentLoop/ReActTests.cs` |
 | 工具校验缝 | `IToolValidator`（MVP 传 null） | —（预留） |

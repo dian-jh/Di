@@ -25,6 +25,7 @@ public sealed class AgentRunner : IAgentRunner
     private readonly IReadOnlyList<Skill> _skills;
     private readonly string? _workingDirectory;
     private readonly int _maxHistoryTurns;
+    private readonly Func<string, int?>? _contextWindowProvider;
     private IReadOnlyList<ChatMessage> _history = [];
 
     /// <summary>最近一次追加进历史的快照文本。快照只在内容变化时追加（见 <see cref="RunAsync"/>），
@@ -39,6 +40,7 @@ public sealed class AgentRunner : IAgentRunner
         IReadOnlyList<ChatTool>? tools = null,
         string? workingDirectory = null,
         int maxHistoryTurns = DefaultMaxHistoryTurns,
+        Func<string, int?>? contextWindowProvider = null,
         IReadOnlyList<Skill>? skills = null)
     {
         _modelFactory = modelFactory ?? throw new ArgumentNullException(nameof(modelFactory));
@@ -55,6 +57,7 @@ public sealed class AgentRunner : IAgentRunner
             : toolExecutor ?? throw new ArgumentNullException(nameof(toolExecutor));
         _workingDirectory = workingDirectory;
         _maxHistoryTurns = Math.Max(0, maxHistoryTurns);
+        _contextWindowProvider = contextWindowProvider;
     }
 
     public string CurrentModel { get; set; } = "deepseek-flash";
@@ -119,9 +122,22 @@ public sealed class AgentRunner : IAgentRunner
             SystemContext = systemContext,
         }, cancellationToken).ConfigureAwait(false);
 
-        // 累加本回合轨迹作为下一回合的记忆，并裁剪到最近 N 轮（按整回合在 user 消息处切）。
-        // 再对尾部做工具良构化：封顶/最终输出工具回合会留下"未执行的 tool_calls"，必须剔除。
-        _history = SanitizeHistory(TrimHistory(result.Trajectory, _maxHistoryTurns));
+        // 累加本回合轨迹作为下一回合的记忆，按整回合（user 消息为界）裁剪：
+        // 先按当前模型的上下文 token 预算丢最旧（roadmap §3 缺口 #4），再按最大轮数兜底。
+        // 未知上下文窗口（provider 返回 null）时 token 预算裁剪自动退化为纯轮数启发式。
+        // 最后对尾部做工具良构化：封顶/最终输出工具回合会留下"未执行的 tool_calls"，必须剔除。
+        int? tokenBudget = null;
+        try
+        {
+            tokenBudget = _contextWindowProvider?.Invoke(CurrentModel) is { } window
+                ? (int?)Math.Max(1, window * _options.HistoryBudgetRatio)
+                : null;
+        }
+        catch
+        {
+            // 目录/窗口解析失败（第三方 provider 异常等）：退回轮数启发式，绝不让预算查询拖垮回合。
+        }
+        _history = SanitizeHistory(TrimHistoryByTokens(TrimHistory(result.Trajectory, _maxHistoryTurns), tokenBudget));
         // 裁剪可能把最早注入的快照裁出历史：重置标记，让下一回合重新注入（否则长期会话会失去环境上下文）。
         if (_lastSnapshotText is not null && !_history.OfType<SystemMessage>().Any(m => m.Text == _lastSnapshotText))
             _lastSnapshotText = null;
@@ -146,6 +162,54 @@ public sealed class AgentRunner : IAgentRunner
                 return trajectory.Skip(i).ToArray();
         }
         return trajectory;
+    }
+
+    /// <summary>
+    /// 按 token 预算丢弃最旧整回合，直到估算量回到预算内；至少保留最近 1 轮（当前回合不能被全丢，
+    /// 否则下一回合连上下文都没有）。预算 null / 非正数时原样返回（由调用方退回轮数启发式）。
+    /// </summary>
+    private static IReadOnlyList<ChatMessage> TrimHistoryByTokens(
+        IReadOnlyList<ChatMessage> trajectory, int? tokenBudget)
+    {
+        if (tokenBudget is null or <= 0)
+            return trajectory;
+        var userCount = trajectory.Count(m => m is UserMessage);
+        if (userCount <= 1 || EstimateTokens(trajectory) <= tokenBudget)
+            return trajectory;
+
+        // 从最旧开始逐轮丢弃，直到估算回到预算内或只剩最近 1 轮。
+        for (var toDrop = 1; toDrop < userCount; toDrop++)
+        {
+            var remaining = DropOldestTurns(trajectory, toDrop);
+            if (EstimateTokens(remaining) <= tokenBudget)
+                return remaining;
+        }
+        return DropOldestTurns(trajectory, userCount - 1);
+    }
+
+    /// <summary>丢弃最旧的 <paramref name="toDrop"/> 个整回合，返回剩余（含剩余 user 消息及其后全部）。</summary>
+    private static IReadOnlyList<ChatMessage> DropOldestTurns(IReadOnlyList<ChatMessage> trajectory, int toDrop)
+    {
+        var seen = 0;
+        for (var i = 0; i < trajectory.Count; i++)
+        {
+            if (trajectory[i] is UserMessage && seen++ == toDrop)
+                return trajectory.Skip(i).ToArray();
+        }
+        return trajectory;
+    }
+
+    /// <summary>估算历史 token 数：每条消息可见文本（+ assistant 推理链）按 ~4 字符/token。</summary>
+    private static int EstimateTokens(IReadOnlyList<ChatMessage> messages)
+    {
+        var total = 0;
+        foreach (var message in messages)
+        {
+            total += TokenEstimator.Estimate(ChatMessageExtensions.GetText(message));
+            if (message is AssistantMessage { Reasoning: { } reasoning })
+                total += TokenEstimator.Estimate(reasoning);
+        }
+        return total;
     }
 
     /// <summary>
