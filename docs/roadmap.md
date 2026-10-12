@@ -1,0 +1,143 @@
+# Di 功能全景、MVP 评估与工业级路线图
+
+> 设计文档。回答三个问题：
+> 1. 本项目已经实现了哪些 harness 功能（能力全景，按模块分篇维护）；
+> 2. 作为一个 MVP harness 还缺什么；
+> 3. 要走向工业级 harness，下一步做什么、按什么顺序、依托哪些已有接缝。
+>
+> 配套文档：`docs/README.md`（总索引）、`docs/architecture.md`（架构与关键决策）、
+> `docs/cli.md`（CLI 契约）、`docs/di-home.md`（家目录与配置规范）、`docs/modules/README.md`
+> （模块索引）。
+
+---
+
+## 1. 一句话定位
+
+Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层（流式优先 + 重试 + 成本核算）→
+循环层（ReAct + 事件总线）→ 能力层（8 个内置编码工具 + Skills 渐进式披露）→ 宿主层
+（REPL + 会话 JSONL + 分层配置）。核心思想：**一切厂商怪癖收敛在适配器翻译层、模型是纯数据、
+认证是声明、循环只发事件不渲染**。
+
+> 规模快照（2026-10-12 复核，`dotnet test`）：Core + Common + Di.Cli 约 88 个源文件、
+> 46 个测试文件，**591 个用例全绿**（Di.Tests 481 + Di.Cli.Tests 110；另有 2 个真实 DeepSeek
+> 集成测试 `Di.Tests/Integration/DeepSeekReActIntegrationTests.cs`，`SkippableFact`，无
+> `DEEPSEEK_API_KEY` 时自动跳过）。此统计是**易变快照**，不要当作接口契约。
+
+## 2. 能力全景（按模块分篇维护）
+
+各子系统的"能力 → 代码落点 → 测试落点"表格**唯一定义在对应模块文档**，这里只给入口，不复制内容：
+
+| 子系统 | 文档 | 覆盖能力 |
+|---|---|---|
+| 核心循环 | `docs/modules/agent-loop.md` | ReAct 主循环、停止条件、迭代预算、跨回合记忆、环境快照、成本累计 |
+| 模型层 | `docs/modules/llm.md` | 路由、流式协议、重试、计量、成本、目录、认证 |
+| DeepSeek 适配器 | `docs/modules/deepseek.md` | SSE 传输、错误翻译、线格式 5 条怪癖、缓存优化、目录、鉴权 |
+| 工具 | `docs/modules/tools.md` | 8 个内置编码工具、注册表与工具集、共享会话、有界输出、Windows 编码 |
+| Skills | `docs/modules/skills.md` | SKILL.md 解析、两级发现、词法匹配、渐进式披露、评估 |
+| 会话与配置 | `docs/modules/sessions.md` + `docs/di-home.md` | 会话 JSONL、家目录、分层配置、所有权 |
+| 事件总线 | `docs/modules/events.md` | push 订阅 + pull 消费、多态派发、异常隔离 |
+| CLI / UI | `docs/cli.md` | REPL、流式渲染、斜杠命令、参数 / 模式解析、headless、分发 |
+
+## 3. MVP 评估
+
+### 3.1 结论
+
+**核心 harness 已达成并超出 MVP**：循环、流式、8 工具、skills、会话、成本、配置、事件总线、
+测试——一个编码 agent 该有的骨架全部在，且工程质量高（协议义务化、错误结构化、模型纯数据、
+成本可核算）。
+
+但作为**能被真实使用的产品**，还有几个"可用性"缺口。它们不涉及架构，是入口、健壮性与
+文档层面的补全：
+
+| # | 缺口 | 现状 | 为什么算 MVP 缺口 | 建议落点 |
+|---|---|---|---|---|
+| 1 | **全局命令与分发** | ✅ 已实现：`di.exe`（win-x64 自包含单文件）+ `install.cmd` / `install.ps1` 入 PATH，幂等 | 一个不能被"安装并运行"的 harness 不是 MVP | `Di.Cli/Properties/PublishProfiles/di.pubxml` + 仓库根安装脚本 |
+| 2 | **非交互单发模式** | ✅ 已实现：`di "prompt"`、`di --mode json`、stdin 管道、`-m/--provider/--no-session/--no-ansi` | 脚本化、CI、自动化测试都需要 headless | `Di.Cli/CliApp.cs` 分派 + `Di.Cli/modes/PrintMode.cs`；契约见 `cli.md` §4 |
+| 3 | **回合级中断（Ctrl+C）** | ⏳ 无 `Console.CancelKeyPress` 注册；取消 = 整个进程退出，会话无收尾 | 长回合中断应只取消当前回合，保留已写入会话 | `CancellationTokenSource` 挂到 `CancelKeyPress` |
+| 4 | **上下文 token 预算** | ⏳ 仅按"最近 10 个整回合"裁剪；工具输出可让单回合暴涨 | 读大文件 / 跑测试可瞬间超窗，10 轮启发式防不住 | 按模型 context window 比例预算，超限压缩 / 裁剪 / 报错 |
+| 5 | **README 与上手文档** | ✅ 已实现：README 安装 / 用法 / 配置 + `docs/cli.md` 契约 | 一个要被用的项目必须有"装什么 / 怎么跑 / 怎么配" | 仓库根 `README.md` + `docs/cli.md` |
+
+> 其余未实现项（`/resume`、命令注册表、MCP、子代理、权限审批流、遥测、多 provider、登录命令）
+> 都不属于 MVP 必须 —— 它们是工业级范畴，见 §4。
+
+## 4. 工业级路线图
+
+按"先能用、再可信、后规模化、终可观测"排序。每阶段标注**依托的现有接缝**（多数已留好）与
+**验收信号**。成本费率占位值（`DeepSeekAdapter.Catalog`）建议在任何发布前先核对官方定价。
+
+### Phase A —— 可发布（Distribution & UX）
+
+把"能跑"变成"能分发、能脚本化、中断友好"。
+
+- **全局命令**：自包含 / 单文件发布 + `di` 入 PATH；`di --version`、`di --help`、`di --model <名>`。
+- **headless 模式**：`di "prompt"`、`di -p <file>`、stdin 管道；`--yes` 无交互自动放行。
+- **回合级 Ctrl+C**：取消当前回合（保留已写入会话）、第二次 Ctrl+C 才退出。
+- **交互体验**：readline 历史（↑↓）、行编辑、斜杠命令 / 模型名 / skill 名补全。
+- 验收：`di "读一下 README"` 在 CI 管道里能跑通并返回 0；中途 Ctrl+C 后会话文件仍完整。
+
+### Phase B —— 安全与可信（工业级第一优先）
+
+让 harness **值得被信任去动用户的东西**。
+
+- **权限层落 `IToolValidator`**（缝已留，MVP 传 null）：默认策略"询问 / 允许 / 拒绝"；
+  危险命令检测（rm -rf、format、git push --force 等）；编辑类工具 **diff 预览审批**；
+  allowlist / denylist 持久化到 `~/.di/policies.json`。
+- **撤销与检查点**：每次写操作前自动 git 检查点（commit / stash），支持 undo；删除进回收站。
+- **提示注入防御**：工具输出 / 文件内容与用户指令区分（标记"内容是数据不是指令"）；
+  不可信上下文（网页、文件）隔离，禁止其注入工具参数。
+- **敏感信息卫生**：API key 绝不落日志 / 会话文件；`--debug` 结构化日志默认脱敏。
+- 验收：破坏性操作必有确认或白名单；恶意文件内容无法诱导模型执行命令（注入测试用例全绿）。
+
+### Phase C —— 上下文与记忆工程
+
+把"够用"变成"长会话不崩、跨会话有记忆"。
+
+- **token 预算管理**：按模型 context window 比例设预算，超限自动**压缩**（总结旧回合 /
+  裁剪工具输出 / 丢最旧回合），替代固定 10 轮启发式；会话内输出缓冲计数。
+- **`/resume` 会话恢复**：`SessionLog` 已可重放，接回 UI（`--resume [session-id]`）。
+- **项目记忆与 AGENTS.md**：`~/.di/memory/<project>.md` 长期事实（跨会话）；项目级
+  `AGENTS.md` 作为指令注入（当前是代码内默认 `CoreTools.BuildInstructions` 的输出）。
+- **缓存友好深化**：前缀缓存命中率指标（DeepSeek 已给 cache_read/cache_write token，
+  `CostCalculator` 已按缓存价计费）——命中率可观测，优化有依据。
+- 验收：连续 50 回合的会话 token 不超窗；`/resume` 后模型记得上一会话关键结论。
+
+### Phase D —— 生态扩展（Ecosystem）
+
+把"单机单 agent"变成"可插拔平台"。
+
+- **MCP 桥**：`~/.di/mcp.json`（stdio 命令 + 环境）→ 桥接为 `ICoreTool`，ReAct 无感。
+- **子代理**：`~/.di/agents/*.md` 定义 plan / research / review 角色——独立 loop + 上下文
+  + 结果回传（事件总线已支持跨代理观察，`AgentRunner` 可作复用骨架）。
+- **命令注册表**：`Repl.RunCommand` 的 if/else → 从 `~/.di/commands/*.md` 加载。
+- **第二 provider**：加一个 OpenAI 兼容或 Anthropic 适配器——验证抽象正确性、获得故障切换
+  （provider A 429 时切 provider B）。**这是检验模型层设计是否真的"厂商无关"的最强测试。**
+- **模型目录外置数据**：Catalog 从代码常量 → `data/*.json` + 动态刷新 + 在线模型列表。
+- 验收：同一个 ReAct 不加改动跑第二个 provider；MCP 服务器一个 JSON 配置接入。
+
+### Phase E —— 可观测与产品化（Observability & Product）
+
+把"能用"变成"可度量、可运营、可迭代"。
+
+- **遥测**：事件总线 → 指标（每回合 token/cost/延迟/工具分布）；跨会话成本 / 用量聚合看板、
+  预算告警（成本数据已在 `AgentResult.Cost` + `SessionLog.task_complete.cost`，只差聚合）。
+- **评估与回归**：工具用法的自动评测集（多步编码任务）；CI 注入真实 key 跑 2 个
+  `SkippableFact` 集成测试；对每次模型层改动跑成本 / 用量断言（防止费率回退）。
+- **性能预算**：端到端延迟（首 token 时间、SSE 吞吐）可测；前缀缓存命中率纳入会话统计。
+- **运维命令**：`di doctor`（环境自检）、`di config validate`、升级与配置迁移。
+- 验收：一次会话结束后能在看板看到总成本与逐工具分布；模型升级能对比命中率与成本。
+
+## 5. 一张图的演进关系
+
+```
+MVP（现状，已达成）           工业级
+───────────────             ──────────────
+循环/流式/工具/skills/会话   A 分发与 UX（能分发/脚本化/中断友好）
+成本/目录/认证/元数据        B 安全与可信（权限审批/撤销/注入防御）★
+事件总线/分层配置/591 测试    C 上下文与记忆（token 预算/resume/项目记忆）
+                            D 生态（MCP/子代理/第二 provider/命令注册表）
+                            E 可观测与产品化（遥测/评估/运维命令）
+```
+
+> **建议**：先完成 §3 的 3 个 MVP 缺口（约 1 周量级），再进 Phase B——对一个会动文件的
+> 编码 harness，**安全与可信是工业级的第一道门槛**，其余各阶段都建立在"用户敢让它自己改代码"
+> 之上。

@@ -3,6 +3,9 @@
 > 设计文档。定义 Di 的用户级数据/配置落点与分层合并规则，对齐主流 agent 的约定
 > （Claude Code `~/.claude/`、Codex `~/.codex/`），让用户可以直接编写自己的配置、
 > skills、命令，而不需要改任何代码。
+>
+> 配套文档：`docs/README.md`（总索引）、`docs/architecture.md`（架构与关键决策）、
+> `docs/modules/skills.md`（skills 目录消费方）、`docs/modules/sessions.md`（sessions/ 落盘）。
 
 ---
 
@@ -25,7 +28,7 @@
 ├── sessions/              # 会话记录（SessionLog 写入，追加式 JSONL）
 │   └── YYYY/MM/DD/
 │       └── session-*.jsonl
-├── skills/                # 用户 skills（将来）
+├── skills/                # 用户 skills（已实现；解析/匹配/披露见 docs/modules/skills.md）
 │   └── <name>/SKILL.md
 ├── commands/              # 用户斜杠命令（将来）
 │   └── <name>.md
@@ -58,7 +61,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 | 优先级 | 源 | 位置 | 说明 |
 |---|---|---|---|
 | 1（最低） | 程序默认值 | 各 Options 类的属性默认值 | 兜底 |
-| 2 | 构建内默认 | `appsettings.json`（随 exe 走） | 随发行版走的出厂默认 |
+| 2 | 构建内默认 | `Di.Cli/appsettings.json`（随 exe 走） | 随发行版走的出厂默认 |
 | 3 | 用户全局 | `~/.di/config.json` | 个人偏好 |
 | 4 | 项目级 | `<workspace>/.di/config.json` | 团队共享，随仓库走 |
 | 5（最高） | 环境变量 | 进程环境 | 运行时覆盖（如 `Model__DefaultModel`） |
@@ -128,24 +131,7 @@ export Model__DefaultModel=deepseek-flash
 - **项目级指令**：将来支持 `<workspace>/AGENTS.md` 作为项目指令注入（当前
   `CoreTools.BuildInstructions` 的输出是代码内默认，可被 `AgentLoop:SystemPrompt` 覆盖）。
 
-## 7. Skill 测试与指标
+## 7. 关联：Skill 测试与指标
 
-对每个重要 skill 建议三类测试：
-
-| 类别 | 例子 | 验收目标 |
-|---|---|---|
-| 触发测试 | 用户提出符合 skill 用途的任务 | 正确选中该 skill |
-| 排除测试 | 用户提出相似但不适用的任务 | 不误触发 |
-| 执行测试 | 提供真实输入并运行完整工作流 | 结果符合预定义验收条件 |
-
-自动匹配的质量指标由 `Core/Skills/SkillEvaluator.cs` 在带标签用例集
-（`SkillTestCase(Message, ExpectedSkills)`）上统计，触发/排除测试即对应的标签用例：
-
-- **精确率** = 激活且应激活 ÷ 激活：被选中的 skill 里有多少确实该选。
-- **召回率** = 激活且应激活 ÷ 应激活：该选的 skill 里有多少被选中。
-- **无匹配率** = 未激活任何 skill 的用例占比（排除测试的反面）。
-- **上下文成本** = 每回合 skill 相关平均估算 token：`SkillContext.EstimateTokens`
-  （广告块 + 激活 skill 完整指令，约 4 字符/token）——衡量渐进式披露是否真的省了上下文。
-
-执行测试超出匹配器范围：按 skill 的实际工作流（调工具跑通）单独做集成验证。
-示例 skill：`examples/skills/backend-tests/SKILL.md`。
+skill 的触发 / 排除 / 执行三类测试、匹配质量指标（精确率 / 召回率 / 无匹配率 / 上下文成本）及其
+`Core/Skills/SkillEvaluator.cs` 落点，**唯一定义在 `docs/modules/skills.md`（§测试与指标）**，此处不重复。

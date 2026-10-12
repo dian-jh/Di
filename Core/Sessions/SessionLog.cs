@@ -9,7 +9,8 @@ using Core.Llm;
 
 namespace Core.Sessions;
 
-/// <summary>会话持久化的根配置。默认写入 ~/.di/sessions/YYYY/MM/DD/*.jsonl（根目录经 <see cref="DiHome"/> 解析）。</summary>
+/// <summary>会话持久化的根配置。默认写入 ~/.di/sessions/YYYY/MM/DD/*.jsonl（根目录经 <see cref="DiHome"/> 解析）。
+/// 设计文档见 docs/modules/sessions.md。</summary>
 public sealed class SessionLogOptions
 {
     /// <summary>会话根目录。</summary>

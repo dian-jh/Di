@@ -38,6 +38,8 @@ namespace Core.AgentLoop;
 /// <item>模型调用抛出的不可重试 <see cref="LlmException"/> → 以 <see cref="AgentStopReason.Error"/> 干净结束。</item>
 /// <item>可重试异常（限流/超时等）向上传播，交给调用方 / 未来的重试策略。</item>
 /// </list>
+///
+/// 设计文档见 docs/modules/agent-loop.md。
 /// </summary>
 public sealed class ReAct
 {

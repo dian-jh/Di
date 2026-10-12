@@ -5,6 +5,7 @@ namespace Core.Llm;
 ///
 /// <b>只有 <see cref="StreamAsync"/> 是抽象的</b>，其余全是有默认实现的虚方法。
 /// 适配器通过 <see cref="ILlmService.RegisterAdapter"/> 注册到宿主。
+/// 设计文档见 docs/modules/llm.md。
 /// </summary>
 public abstract class ChatAdapter
 {

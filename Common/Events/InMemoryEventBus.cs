@@ -11,6 +11,7 @@ namespace Common.Events;
 /// 因此"消费基类一条流、按序收全部事件"成立。向上派发以发布时的静态类型为天花板。
 /// 发布时在锁内取快照，锁外并发派发，避免长时间持锁。
 /// 事件要么走 push（订阅者回调），要么走 pull（消费者通道），两者独立共存。
+/// 设计文档见 docs/modules/events.md。
 /// </summary>
 public sealed class InMemoryEventBus : IEventBus
 {

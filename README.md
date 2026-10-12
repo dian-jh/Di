@@ -28,6 +28,8 @@ di --version
 
 ## 用法
 
+> headless / JSON 契约与退出码语义见 `docs/cli.md` §4；本处为面向用户的示例。
+
 ```bat
 di "读一下 README"                :: headless 单发（文本，跑一个回合即退出）
 di --mode json "分析这个函数"       :: headless 单发（JSON 单文档，脚本友好）
@@ -41,6 +43,8 @@ di --no-session --no-ansi "x"      :: 脚本友好：不写会话日志、无 AN
 退出码：`0` 成功；`1` 用法错误 / 运行错误（模型不可用等）。
 
 ## 配置
+
+> 分层配置与 `~/.di` 家目录的规范定义见 `docs/di-home.md`；本处为面向用户的摘录。
 
 分层 JSON 配置，后加载覆盖先加载：
 

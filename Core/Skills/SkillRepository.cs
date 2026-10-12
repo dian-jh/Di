@@ -4,6 +4,7 @@ namespace Core.Skills;
 /// Skill 仓库：发现 + 合并。两级来源——用户级（~/.di/skills）与项目级（&lt;workspace&gt;/.di/skills），
 /// 项目级覆盖同名用户级（与配置分层同一心智：具体环境优先）。
 /// 无效 skill（解析失败 / 读盘失败）跳过并回调告警，绝不让启动失败。
+/// 设计文档见 docs/modules/skills.md。
 /// </summary>
 public static class SkillRepository
 {

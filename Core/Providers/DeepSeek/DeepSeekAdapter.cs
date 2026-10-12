@@ -17,6 +17,7 @@ namespace Core.Providers.DeepSeek;
 /// <item>把传输/协议故障抛成 <see cref="LlmException"/>；提供方带内故障以 Finish(Error/Aborted) 结束流。</item>
 /// </list>
 /// 鉴权头与 baseUrl 都放在<b>请求级</b>，不写进 HttpClient 的全局头 —— 多个 provider 可安全共享一个 HttpClient。
+/// 设计文档见 docs/modules/deepseek.md。
 /// </summary>
 internal sealed class DeepSeekAdapter : ChatAdapter
 {

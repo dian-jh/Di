@@ -14,6 +14,7 @@ namespace Core.Tools;
 /// </list>
 /// Definitions（给模型的 ChatTool 列表）与 CreateExecutor（运行时执行器）共用同一注册表，
 /// 保证 schema 与实现一致（bash/powershell 均为持久化会话模式）。
+/// 设计文档见 docs/modules/tools.md。
 /// </summary>
 public static class CoreTools
 {

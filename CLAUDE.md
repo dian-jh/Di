@@ -12,6 +12,18 @@
 - Tests express the business requirement; the code conforms to the tests, the tests conform to the requirement.
 - Keep the red/green discipline per unit of work: write the test, watch it fail (red), implement, watch it pass (green).
 
+## Documentation
+
+- Treat `docs/` as part of the codebase. When changing code, check the documentation impact and update
+  affected docs in the same task. Never leave docs inconsistent with the implementation.
+- For project-code questions, follow **index → relevant doc → necessary source**. Start at
+  `docs/README.md`; read only what is needed. Generic programming questions are exempt.
+- Implementation-related docs must reference valid repository-relative source paths and key symbols.
+  Source code is authoritative; verify before documenting.
+- After code changes, verify affected docs and links before finishing. Avoid duplicate sources of truth.
+- Detailed documentation conventions live in `docs/standards/documentation.md`; consult them when
+  creating, reorganizing, or reviewing docs.
+
 ## Commit Conventions
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):

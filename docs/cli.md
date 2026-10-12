@@ -2,9 +2,11 @@
 
 > 设计文档。回答"CLI 层为什么这么分层、哪部分可以换语言重写、重写时保留什么"。
 > 核心主张：**会话驱动 API 在 harness 层（`Core.AgentLoop`），CLI 只是"参数 + 模式 + 渲染"的薄壳**。
-> 参考实现：Pi 的 `main.ts → resolveAppMode → 模式执行器` 结构（`pi/packages/coding-agent`）。
+> 参考实现：Pi 的 `main.ts → resolveAppMode → 模式执行器` 结构
+> （外部参考：兄弟仓库 `https://github.com/earendil-works/pi/tree/main/packages/coding-agent`）。
 >
-> 配套文档：`docs/architecture.md`（架构）、`docs/harness.md`（能力全景）。
+> 配套文档：`docs/README.md`（总索引）、`docs/architecture.md`（架构与关键决策）、
+> `docs/roadmap.md`（能力全景与路线图）。
 
 ---
 
@@ -43,12 +45,9 @@ CLI 不感知 ReAct 内部，只消费事件流与最终结果。
 
 运行中的事件经 `IEventBus`（`Common.Events`）发布，UI 从同一总线消费。事件是**拉式**（channel）或**推式**（订阅）均可；headless 文本模式用拉式流式渲染，json 模式根本不消费。
 
-| 事件 | 负载 | 含义 |
-|---|---|---|
-| `TextDelta` | `Delta` | 模型流式增量文本（逐字） |
-| `ToolStarted` / `ToolCompleted` | 调用 / 观察（含 `IsError`） | 工具生命周期 |
-| `TurnCompleted` | 迭代号、`TokenUsage`、`UsageCost?`、`FinishReason` | 一次模型调用结束 |
-| `RunFailed` | `LlmFailure` | 循环层失败（不可重试） |
+> 事件类型 / 负载 / 含义的**唯一权威表**见 `docs/modules/events.md` §关键符号，此处不复述。
+> 换语言契约视角：CLI 依赖的事件流只有「流式文本增量」「工具生命周期」「回合结束（用量 / 成本 /
+> 停止原因）」「循环失败」四类，字段细节以 `docs/modules/events.md` 为准。
 
 ### 2.3 结果 —— `AgentResult`（`Core/AgentLoop/AgentResult.cs`）
 
@@ -91,7 +90,8 @@ string[] args
 
 | 条件 | 模式 |
 |---|---|
-| `--version` / `--help` / `--list-models` | 对应短路径（优先，不建 DI） |
+| `--version` / `--help` | 对应短路径（优先，直接输出退出，不建 DI） |
+| `--list-models` | ListModels（仍建宿主，列出模型目录） |
 | `--mode json` | Json |
 | `--mode print` | Print |
 | `--mode interactive` | Interactive |
@@ -102,16 +102,16 @@ string[] args
 
 ### 3.3 组合根 —— `CliHost`
 
-配置分层（`appsettings.json → ~/.di/config.json → <workspace>/.di/config.json → 环境变量`）→
+配置分层（`Di.Cli/appsettings.json → ~/.di/config.json → <workspace>/.di/config.json → 环境变量`）→
 `AddDi()` 装配模型层与事件总线 → 工具执行器、skills、`SessionLog`、`AgentRunner`。
 CLI 参数里的覆盖项在此生效：`--provider` 换适配器路由、`--model` 换默认模型、`--thinking` 透传。
 API Key 不在启动时要求 —— 凭据由模型层在**请求时**解析，未配置时仅请求路径报错。
 
 ### 3.4 渲染与进程边界
 
-- `CliApp` **不碰 `Console`**：输入输出流与 TTY 探测全部由 `Program.cs` 传入
+- `CliApp` **不碰 `Console`**：输入输出流与 TTY 探测全部由 `Di.Cli/Program.cs` 传入
   （`Console.In/Out/Error`、`!Console.IsInputRedirected/IsOutputRedirected`），因此可测、可嵌入任意宿主。
-- `Program.cs` 固定 `Console.OutputEncoding/InputEncoding = UTF-8`：控制台代码页可能是 GBK(936)，
+- `Di.Cli/Program.cs` 固定 `Console.OutputEncoding/InputEncoding = UTF-8`：控制台代码页可能是 GBK(936)，
   不显式设置时中文按代码页编码，在管道/脚本/UTF-8 终端里乱码。
 - 退出码：`0` = 成功；`1` = 用法错误 / 运行错误（模型不可用等）。脚本以退出码判成败。
 
@@ -161,3 +161,23 @@ stdout 只输出**一个** JSON 文档（snake_case，可空键省略）：
 | 分派壳 | `Di.Cli.Tests/cli/CliAppTests.cs` | 短路径不建 DI；list-models / 交互经 fake 宿主 |
 | headless | `Di.Cli.Tests/modes/PrintModeTests.cs` | 文本/JSON、stdin、会话日志、全部失败路径 |
 | 会话驱动（harness） | `Di.Tests/AgentLoop/AgentRunnerTests.cs` | 模型路由、历史裁剪、快照、skills |
+
+## 7. 实现现状（Di.Cli 落点）
+
+> 各能力的"能力 → 落点 → 测试"完整对应见模块文档 `docs/modules/agent-loop.md`（循环侧）与
+> `docs/modules/events.md`（事件侧）。下表是 Di.Cli 自身的实现落点（相对仓库根）。
+
+| 能力 | 代码（相对仓库根） | 说明 |
+|---|---|---|
+| REPL 外层循环 | `Di.Cli/Repl.cs` | 读行 → 斜杠命令 → 回合；回合事件实时渲染 + 兜底排空 |
+| 流式渲染 | `Di.Cli/EventRenderer.cs` | 逐字输出；工具调用 / 思考轮 / 用量+成本脚注；ANSI 状态行（重定向自动禁用） |
+| 斜杠命令 | `Di.Cli/Repl.cs`（`RunCommand`） | `/help` `/clear` `/model` `/skills` `/skill` `/exit` |
+| 纯参数解析（语言无关契约） | `Di.Cli/cli/CliArgs.cs` | `string[] → CliArgs` 纯数据 + 诊断；`--` 截断、未知 / 缺值 / 非法模式报错 |
+| 纯模式解析 | `Di.Cli/cli/CliMode.cs` | `Resolve(args, stdinTty, stdoutTty)`；短路径优先（version/help 直接输出不建 DI；list-models 仍建宿主） |
+| 分派壳 | `Di.Cli/CliApp.cs` | 解析 → 校验 → 模式 → 建宿主 → 分派；不碰 Console（流与 TTY 由调用方注入） |
+| 组合根 | `Di.Cli/CliHost.cs` | 配置 → AddDi() → 工具 / skills / runner / 会话；`--provider/--model/--thinking` 覆盖在此生效 |
+| headless 单发 | `Di.Cli/modes/PrintMode.cs` | 文本流式渲染 / JSON 单文档；stdin 读提示词；错误 exit 1；会话日志（`--no-session` 关闭） |
+| 全局命令分发 | `Di.Cli/Properties/PublishProfiles/di.pubxml` + `install.cmd` / `install.ps1` | win-x64 自包含单文件 di.exe → `~/.di/bin` → PATH 幂等 |
+| 模型切换 | `AgentRunner.CurrentModel`（`Core/AgentLoop/AgentRunner.cs`） | 运行中切换，按名经工厂解析 |
+| 模型工厂 | `Di.Cli/DiServiceCollectionExtensions.cs` | `RetryingChatModel(ChatModelClient(llm, provider, name))` 组合 |
+| UTF-8 输出 | `Di.Cli/Program.cs` | 显式 `Console.OutputEncoding=UTF8`：GBK 代码页下中文不乱码（管道 / 脚本安全） |
