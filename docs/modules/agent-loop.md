@@ -17,15 +17,20 @@ harness 的核心执行引擎：
 
 - **轨迹** = 历史 + 用户消息；循环内：模型决策 → 追加 → 有工具调用则执行并回填观察 → 再决策。
 - **停止条件**（`AgentStopReason`，`Core/AgentLoop/AgentResult.cs`）：无工具调用的回答 / 最终输出工具 /
-  达到 `MaxIterations`（`AgentLoopOptions`，默认 24）/ 不可重试模型错误。
+  达到 `MaxIterations`（`AgentLoopOptions`，默认 24）/ 不可重试模型错误 / 软停止 `Interrupted`。
+- **软停止（相位边界）**：可选构造参数 `IInterruptSignal? interrupt`（`Core/AgentLoop/IInterruptSignal.cs`）。
+  循环在**两个相位边界**轮询 `IsStopRequested`：进入模型相位前（不发起模型调用）、执行工具前（不执行任何工具），
+  命中则经 `StopInterrupted` **正常返回** `AgentStopReason.Interrupted`（携带已有轨迹 / 文本 / usage / cost），
+  并发布 `AgentLoopEvent.Interrupted`。已开始的相位不打断、未开始的不启动；与硬取消（`CancellationToken`
+  异常路径）正交。完整语义与状态机见 `docs/interrupt.md`。
 - **工具失败 = 观察结果**（`ExecuteToolAsync`）：异常 → `error: ...` 观察文本回填模型，模型可据此纠正，
   不是崩溃。
 - **成本跨轮累计**（`CombineCost`）：`ModelResponse.Cost` 累加 → `AgentResult.Cost` / `TurnCompleted.Cost`。
 - **消息布局（缓存关键）**：`[稳定 system prompt] + [完整轨迹] + [易变 SystemContext 于请求末尾]`。
   稳定前缀逐字节不变、跨回合单调增长 → 命中 DeepSeek 前缀缓存；易变上下文（skill 指令）只在末尾，
   不进入持久历史。
-- 发布 `AgentLoopEvent`（`TextDelta` / `TurnCompleted` / `ToolStarted` / `ToolCompleted` / `RunFailed`），
-  自身不渲染（见 `docs/modules/events.md`）。
+- 发布 `AgentLoopEvent`（`TextDelta` / `TurnCompleted` / `ToolStarted` / `ToolCompleted` / `RunFailed` /
+  `Interrupted`），自身不渲染（见 `docs/modules/events.md`）。
 
 ### AgentRunner（`Core/AgentLoop/AgentRunner.cs`）
 
@@ -46,7 +51,8 @@ harness 的核心执行引擎：
 |---|---|
 | `Core/AgentLoop/ReAct.cs` | ReAct 主循环（`RunStreamingAsync` / 私有 `RunCoreAsync` / `ExecuteToolAsync` / `CombineCost`） |
 | `Core/AgentLoop/AgentRunner.cs` | 跨回合宿主（模型路由 / 历史裁剪（轮数 + token 预算）/ 快照 / skills） |
-| `Core/AgentLoop/IAgentRunner.cs` | 宿主抽象——CLI 唯一依赖的会话契约（见 `docs/cli.md` §2.1） |
+| `Core/AgentLoop/IAgentRunner.cs` | 宿主抽象——CLI 唯一依赖的会话契约（见 `docs/cli.md` §2.1）；含 `InterruptSignal` 会话级软停止属性 |
+| `Core/AgentLoop/IInterruptSignal.cs` | 软停止信号抽象——循环依赖它读取意图，不认识前端实现（见 `docs/interrupt.md`） |
 | `Core/AgentLoop/AgentRequest.cs` | 一次运行输入（UserMessage / History / Tools / ToolExecutor / Validator / SystemContext） |
 | `Core/AgentLoop/AgentResult.cs` | 一次运行结局（Answer / Trajectory / Usage / Cost / StopReason / Failure） |
 | `Core/AgentLoop/AgentLoopEvent.cs` | 领域事件（见 `docs/modules/events.md`） |
@@ -57,7 +63,8 @@ harness 的核心执行引擎：
 ## 关键符号
 
 - `ReAct`、`AgentRunner`、`IAgentRunner`
-- `AgentRequest`、`AgentResult`、`AgentStopReason`（`Answer` / `FinalOutputTool` / `MaxIterations` / `Error`）
+- `AgentRequest`、`AgentResult`、`AgentStopReason`（`Answer` / `FinalOutputTool` / `MaxIterations` / `Error` / `Interrupted`）
+- `IInterruptSignal`（`IsStopRequested`）、`ReAct.StopInterrupted`、`IAgentRunner.InterruptSignal`
 - `AgentLoopOptions`（含 `HistoryBudgetRatio`）、`EnvironmentSnapshot`
 - `AgentRunner.TrimHistoryByTokens`（token 预算裁剪）、`Core.Llm.TokenEstimator`（估算口径 ~4 字符/token）
 - `IToolExecutor`、`IToolValidator`
@@ -80,7 +87,8 @@ Di.Cli/Repl.cs ── IAgentRunner.RunAsync ──► AgentRunner
 | 能力 | 落点 | 测试 |
 |---|---|---|
 | ReAct 主循环（流式 / 非流式双路径） | `Core/AgentLoop/ReAct.cs` | `Di.Tests/AgentLoop/ReActTests.cs` |
-| 四种停止条件 | `Core/AgentLoop/AgentResult.cs` | `Di.Tests/AgentLoop/ReActTests.cs` |
+| 五种停止条件 | `Core/AgentLoop/AgentResult.cs` | `Di.Tests/AgentLoop/ReActTests.cs` |
+| 软停止：相位边界收敛（B0/B2 不发起模型调用、B1 不执行工具、携带已有用量） | `ReAct.RunCoreAsync` / `StopInterrupted` | `Di.Tests/AgentLoop/ReActInterruptTests.cs` |
 | 迭代预算（防无限循环） | `AgentLoopOptions.MaxIterations` | `Di.Tests/AgentLoop/ReActTests.cs` |
 | 工具失败 = 观察，不是崩溃 | `ReAct.ExecuteToolAsync` | `Di.Tests/AgentLoop/ReActTests.cs` |
 | 不可重试模型错误 → 干净结局 | `ReAct.RunCoreAsync` | `Di.Tests/AgentLoop/ReActTests.cs` |
@@ -93,6 +101,7 @@ Di.Cli/Repl.cs ── IAgentRunner.RunAsync ──► AgentRunner
 
 ## 关联文档
 
+- `docs/interrupt.md` —— 中断（软停止 / 硬取消 / 退出）的语义、相位边界状态机与前端接线
 - `docs/cli.md` —— `IAgentRunner` / `AgentResult` / 事件流的 CLI 契约视角（换语言重写时保留什么）
 - `docs/modules/llm.md` —— 模型层（`IChatModel` / 重试 / 成本）
 - `docs/modules/tools.md` / `docs/modules/skills.md` —— 工具与 skill 的注入 / 执行

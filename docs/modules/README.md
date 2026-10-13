@@ -30,7 +30,8 @@
 ## 顶层跨切面文档
 
 `docs/` 根直接放置跨模块设计文档（`docs/architecture.md` / `docs/cli.md` / `docs/di-home.md` /
-`docs/roadmap.md`），详见 `docs/README.md` 顶层一览表。
+`docs/interrupt.md` / `docs/tui.md` / `docs/tui-rpc.md` / `docs/roadmap.md`），
+详见 `docs/README.md` 顶层一览表。
 
 ## 索引的渐进式扩展
 

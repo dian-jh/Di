@@ -53,6 +53,7 @@ Di.Cli --mode rpc（C# 后端，复用既有 CliHost 组合根与 AgentRunner）
 3. **回合语义上移到 TUI**：turn 边界（消费者创建 / 排空、interrupt 首退回合 / 再退退出）目前
    在 `Di.Cli/Repl.cs`。RPC 模式下这些语义由 TS TUI 拥有；后端无状态、串行处理请求，
    Ctrl+C 由 TUI 捕获并翻译成 `interrupt` 请求（后端取消当前回合 → `stop_reason: "cancelled"`）。
+   递进式软停止（先退回合 / 再退退出）的完整语义见 `docs/interrupt.md`；TUI 侧接线见其 §7。
 4. **MVP 用主屏（inline）**：先落 `TuiMainScreen`（常规模式，随终端滚动），不依赖 alt-screen
    布局引擎；聊天视口（transcript ScrollView + dock）留到 M2 全屏化。MVP 聚焦端到端跑通：
    流式文本、工具生命周期、输入、中断。
@@ -97,7 +98,8 @@ tui/
 
 - `dotnet test Di.Tests Di.Cli.Tests` 全绿（含新增 RpcMode 测试）。
 - 管道喂入 `di --mode rpc` 一条 `prompt` 请求 → stdout 依次出现 `ready`、事件流、`result`，
-  `stop_reason` / usage / cost 与 `--mode json` 一致；`interrupt` 取消回合 → `cancelled`。
+  `stop_reason` / usage / cost 与 `--mode json` 一致；`interrupt` 取消回合 → `cancelled`
+  （软停止 → `interrupted`，见 `docs/interrupt.md`）。
 - `npm test`（tui/）全绿；`npm start` 能起 TUI，输入提示词后流式渲染、Ctrl+C 取消回合、再次退出。
 
 ## 关联文档

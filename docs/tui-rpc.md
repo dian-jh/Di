@@ -44,6 +44,7 @@
 | `tool_completed` | `call: {id,name,arguments}`, `observation: string`, `is_error: bool` | `ToolCompleted` |
 | `turn_completed` | `iteration: int`, `usage: TokenUsage`, `cost?: number`, `finish_reason: string` | `TurnCompleted` |
 | `run_failed` | `failure: {code,message,status?,provider_retry_after?}` | `RunFailed` |
+| `interrupted` | 无 | `Interrupted`（软停止：回合将在相位边界收敛，见 `docs/interrupt.md`） |
 
 `TokenUsage`（snake_case，null 键省略）：
 `{input_tokens, output_tokens, total_tokens?, cache_read_tokens?, cache_write_tokens?, reasoning_tokens?}`。
@@ -53,7 +54,7 @@
 ```json
 {"type":"result","seq":<int>,"result":{
   "answer": string,
-  "stop_reason": "answer"|"final_output_tool"|"max_iterations"|"error"|"cancelled",
+  "stop_reason": "answer"|"final_output_tool"|"max_iterations"|"error"|"cancelled"|"interrupted",
   "iterations": int,
   "usage": { ...TokenUsage },
   "cost"?: number,
@@ -65,6 +66,8 @@
 - 位于 `prompt` 与 `result` 之间的全部 `event` 属于该回合。
 - 中断取消 → `stop_reason: "cancelled"`（C# 侧由 RpcMode 捕获 `OperationCanceledException` 合成；
   `AgentStopReason` 无此值，故由宿主层映射，不落 Core）。
+- 软停止 → `stop_reason: "interrupted"`（`AgentStopReason.Interrupted` 直接映射，Core 原生；
+  回合在相位边界收敛，先发一个 `interrupted` 事件再发 `result`）。见 `docs/interrupt.md`。
 
 ### 2.4 `error`
 
@@ -111,7 +114,7 @@
 | method | params | 语义 |
 |---|---|---|
 | `prompt` | `{message: string}` | 运行一回合（等价 `IAgentRunner.RunAsync`）；事件流 + `result` |
-| `interrupt` | `{}` | 取消当前回合 → 对应 `result.stop_reason:"cancelled"` |
+| `interrupt` | `{}` | **硬取消**当前回合 → 对应 `result.stop_reason:"cancelled"`（软停止尚未接线到本协议，见 `docs/interrupt.md` §7） |
 | `set_model` | `{model: string}` | `AgentRunner.CurrentModel` |
 | `set_skills` | `{names: string[]}` | `AgentRunner.ActiveSkills` |
 | `clear_history` | `{}` | `AgentRunner.ResetHistory()` |

@@ -73,9 +73,12 @@ Di.Cli（docs/cli.md）
   │     ├─ Core.Skills（docs/modules/skills.md）     ← ActiveSkills / load_skill
   │     └─ Common.Events（docs/modules/events.md）   ← AgentLoopEvent 事件流
   └─ Core.Sessions（docs/modules/sessions.md）       ← SessionLog 落盘
+       · 中断信号 IInterruptSignal 的实现（docs/interrupt.md）← 依赖倒置：Core.AgentLoop 只读信号，
+         Di.Cli 提供实现（递进式软停止 / 硬取消 / 退出）
 ```
 
 - 适配器只依赖 Core 抽象，宿主不认识任何具体厂商。
+- 中断同理：`Core.AgentLoop` 依赖 `IInterruptSignal` 抽象，具体实现（`InterruptCoordinator`）在前端。
 - 各模块的源码 / 测试目录见 `docs/modules/README.md`；一次回合的**运行时数据流时序**见下节 §4。
 
 ## 4. 一次回合的数据流（时序）

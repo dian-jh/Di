@@ -6,8 +6,8 @@
 > 3. 要走向工业级 harness，下一步做什么、按什么顺序、依托哪些已有接缝。
 >
 > 配套文档：`docs/README.md`（总索引）、`docs/architecture.md`（架构与关键决策）、
-> `docs/cli.md`（CLI 契约）、`docs/di-home.md`（家目录与配置规范）、`docs/modules/README.md`
-> （模块索引）。
+> `docs/cli.md`（CLI 契约）、`docs/di-home.md`（家目录与配置规范）、`docs/interrupt.md`
+> （中断语义）、`docs/modules/README.md`（模块索引）。
 
 ---
 
@@ -18,10 +18,9 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 （REPL + 会话 JSONL + 分层配置）。核心思想：**一切厂商怪癖收敛在适配器翻译层、模型是纯数据、
 认证是声明、循环只发事件不渲染**。
 
-> 规模快照（2026-10-12 复核，`dotnet test`）：Core + Common + Di.Cli 约 90 个源文件、
-> 49 个测试文件，**624 个用例全绿**（Di.Tests 505 + Di.Cli.Tests 119；另有 2 个真实 DeepSeek
-> 集成测试 `Di.Tests/Integration/DeepSeekReActIntegrationTests.cs`，`SkippableFact`，无
-> `DEEPSEEK_API_KEY` 时自动跳过）。此统计是**易变快照**，不要当作接口契约。
+> 规模快照（2026-10-13 复核，`dotnet test`）：**779 个用例全绿**（Di.Tests 563 + Di.Cli.Tests 216；
+> 另有 2 个真实 DeepSeek 集成测试 `Di.Tests/Integration/DeepSeekReActIntegrationTests.cs`，
+> `SkippableFact`，无 `DEEPSEEK_API_KEY` 时自动跳过）。此统计是**易变快照**，不要当作接口契约。
 
 ## 2. 能力全景（按模块分篇维护）
 
@@ -37,15 +36,16 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 | 会话与配置 | `docs/modules/sessions.md` + `docs/di-home.md` | 会话 JSONL、家目录、分层配置、所有权 |
 | 事件总线 | `docs/modules/events.md` | push 订阅 + pull 消费、多态派发、异常隔离 |
 | CLI / UI | `docs/cli.md` | REPL、流式渲染、斜杠命令、参数 / 模式解析、headless、分发 |
+| 中断 | `docs/interrupt.md` | 软停止 / 硬取消 / 退出的递进语义、相位边界状态机、停止契约、各前端接线 |
 
 ## 3. MVP 评估
 
 ### 3.1 结论
 
 **核心 harness 已达成并超出 MVP，§3 的 5 个可用性缺口已全部补齐**：循环、流式、8 工具、
-skills、会话、成本、配置、事件总线、分发、headless、回合级 Ctrl+C、上下文 token 预算、
-README——一个编码 agent 该有的骨架全部在，且工程质量高（协议义务化、错误结构化、模型纯数据、
-成本可核算）。
+skills、会话、成本、配置、事件总线、分发、headless、递进式 Ctrl+C（软停止 / 硬取消）、
+上下文 token 预算、README——一个编码 agent 该有的骨架全部在，且工程质量高（协议义务化、
+错误结构化、模型纯数据、成本可核算）。
 
 MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会动文件的编码 harness，
 **安全与可信（Phase B）是第一道门槛**，其余各阶段都建立在"用户敢让它自己改代码"之上。
@@ -54,7 +54,7 @@ MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会�
 |---|---|---|---|---|
 | 1 | **全局命令与分发** | ✅ 已实现：`di.exe`（win-x64 自包含单文件）+ `install.cmd` / `install.ps1` 入 PATH，幂等 | 一个不能被"安装并运行"的 harness 不是 MVP | `Di.Cli/Properties/PublishProfiles/di.pubxml` + 仓库根安装脚本 |
 | 2 | **非交互单发模式** | ✅ 已实现：`di "prompt"`、`di --mode json`、stdin 管道、`-m/--provider/--no-session/--no-ansi` | 脚本化、CI、自动化测试都需要 headless | `Di.Cli/CliApp.cs` 分派 + `Di.Cli/modes/PrintMode.cs`；契约见 `cli.md` §4 |
-| 3 | **回合级中断（Ctrl+C）** | ✅ 已实现：`Di.Cli/InterruptCoordinator.cs` + `Program.cs` 注册 `CancelKeyPress`；第一次 Ctrl+C 只取消当前回合（`Repl` 每回合注册取消源，保留已写入会话），第二次才退出 | 长回合中断应只取消当前回合，保留已写入会话 | `InterruptCoordinator`（回合级 CTS，`Repl.RunTurnAsync` 注册 / 注销） |
+| 3 | **回合级中断（Ctrl+C）** | ✅ 已实现：`Di.Cli/InterruptCoordinator.cs` + `Program.cs` 注册 `CancelKeyPress`；**递进式**——第一次 Ctrl+C **软停止**（在相位边界优雅收敛，正常返回 `StopReason.Interrupted`，保留已写入会话），第二次才硬取消当前回合（杀在途模型流 / 子进程），无回合时退出进程 | 长回合中断应只取消当前回合，保留已写入会话 | `InterruptCoordinator`（实现 `Core.AgentLoop.IInterruptSignal`）+ `ReAct` 的两处相位边界检查；语义见 `docs/interrupt.md` |
 | 4 | **上下文 token 预算** | ✅ 已实现：`AgentLoopOptions.HistoryBudgetRatio`（默认 0.5）按当前模型 `ContextWindow` × 比例做跨回合记忆预算，超限丢最旧整回合；未知窗口退回轮数启发式 | 读大文件 / 跑测试可瞬间超窗，10 轮启发式防不住 | `AgentRunner.TrimHistoryByTokens` + `CliHost` 注入的 `contextWindowProvider`（经 `ILlmService.ResolveModelAsync` 取目录窗口） |
 | 5 | **README 与上手文档** | ✅ 已实现：README 安装 / 用法 / 配置 + `docs/cli.md` 契约 | 一个要被用的项目必须有"装什么 / 怎么跑 / 怎么配" | 仓库根 `README.md` + `docs/cli.md` |
 
@@ -74,7 +74,8 @@ MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会�
 
 - **全局命令**：自包含 / 单文件发布 + `di` 入 PATH；`di --version`、`di --help`、`di --model <名>`。
 - **headless 模式**：`di "prompt"`、`di -p <file>`、stdin 管道；`--yes` 无交互自动放行。
-- **回合级 Ctrl+C**：✅ 已实现（§3 缺口 #3）——第一次取消当前回合、第二次才退出。
+- **回合级 Ctrl+C**：✅ 已实现（§3 缺口 #3）——**递进式**：第一次软停止（相位边界收敛，保留会话）、
+  第二次硬取消在途工作、无回合时退出进程。语义与状态机见 `docs/interrupt.md`。
 - **交互体验**：readline 历史（↑↓）、行编辑、斜杠命令 / 模型名 / skill 名补全。
 - **TS TUI（M1 ✅；M4 默认交互前端 ✅）**：`tui/` 复用 `@earendil-works/pi-tui`，驱动 `di --mode rpc`，
   端到端（流式文本 / 工具 / 输入 / 中断）已跑通（M1）；本变更完成 M4 安装整合 —— `install.*`
@@ -145,7 +146,7 @@ MVP（已达成，5 个缺口全补齐）    工业级
 ───────────────             ──────────────
 循环/流式/工具/skills/会话   A 分发与 UX（分发/headless/Ctrl+C ✅，TS TUI M1 ✅ + 默认交互前端 M4 ✅，readline 补全等后续）
 成本/目录/认证/元数据        B 安全与可信（权限审批/撤销/注入防御）★
-事件总线/分层配置/624 测试    C 上下文与记忆（token 预算基础版 ✅，压缩/resume 后续）
+事件总线/分层配置/779 测试    C 上下文与记忆（token 预算基础版 ✅，压缩/resume 后续）
                             D 生态（MCP/子代理/第二 provider/命令注册表）
                             E 可观测与产品化（遥测/评估/运维命令）
 ```

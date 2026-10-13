@@ -49,6 +49,7 @@ ReAct 只**发布**事件、不渲染；CLI 从总线**消费**并流式渲染�
 | `ToolStarted` / `ToolCompleted` | 调用 / 观察（含 `IsError`） | 工具生命周期 |
 | `TurnCompleted` | 迭代号、`TokenUsage`、`UsageCost?`、`FinishReason` | 一次模型调用结束 |
 | `RunFailed` | `LlmFailure` | 循环层失败（不可重试） |
+| `Interrupted` | 无 | 软停止已生效：回合将在相位边界收敛（见 `docs/interrupt.md`） |
 
 ## 调用关系（数据流）
 

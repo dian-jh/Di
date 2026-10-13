@@ -33,6 +33,7 @@ public interface IAgentRunner
 {
     string CurrentModel { get; set; }              // /model 切换、-m 覆盖
     IReadOnlyList<Skill> ActiveSkills { get; set; } // 固定 + 自动匹配，可叠加
+    IInterruptSignal? InterruptSignal { get; set; } // 软停止信号（前端注入，可空）；见 docs/interrupt.md
     Task<AgentResult> RunAsync(string userMessage, CancellationToken ct = default);
     void ResetHistory();                            // /clear：清空跨回合记忆
 }
@@ -47,8 +48,9 @@ CLI 不感知 ReAct 内部，只消费事件流与最终结果。
 
 > 事件类型 / 负载 / 含义的**唯一权威表**见 `docs/modules/events.md` §关键符号，此处不复述。
 > 换语言契约视角：CLI 依赖的事件流有「流式文本增量」「推理增量」「工具调用增量」「工具生命周期」
-> 「回合结束（用量 / 成本 / 停止原因）」「循环失败」六类，字段细节以 `docs/modules/events.md` 为准
-> （推理 / 工具调用增量为 M1 新增，供 TUI 展示思考与实时工具参数）。
+> 「回合结束（用量 / 成本 / 停止原因）」「循环失败」「回合中断（软停止）」七类，
+> 字段细节以 `docs/modules/events.md` 为准（推理 / 工具调用增量为 M1 新增，供 TUI 展示思考与实时工具参数；
+> `Interrupted` 见 `docs/interrupt.md`）。
 
 ### 2.3 结果 —— `AgentResult`（`Core/AgentLoop/AgentResult.cs`）
 
@@ -60,7 +62,7 @@ class AgentResult
     TokenUsage Usage;                           // 累计 tokens
     UsageCost? Cost;                            // 累计成本（无费率时 null）
     int Iterations;                             // 实际轮数
-    AgentStopReason StopReason;                 // Answer / FinalOutputTool / MaxIterations / Error
+    AgentStopReason StopReason;                 // Answer / FinalOutputTool / MaxIterations / Error / Interrupted
     LlmFailure? Failure;                        // StopReason==Error 时的故障事实
 }
 ```
@@ -119,9 +121,11 @@ API Key 不在启动时要求 —— 凭据由模型层在**请求时**解析，
   （`Console.In/Out/Error`、`!Console.IsInputRedirected/IsOutputRedirected`），因此可测、可嵌入任意宿主。
 - `Di.Cli/Program.cs` 固定 `Console.OutputEncoding/InputEncoding = UTF-8`：控制台代码页可能是 GBK(936)，
   不显式设置时中文按代码页编码，在管道/脚本/UTF-8 终端里乱码。
-- **回合级 Ctrl+C**（`Di.Cli/InterruptCoordinator.cs`，`Program.cs` 注册 `Console.CancelKeyPress`）：
-  交互 REPL 中**第一次** Ctrl+C 只取消当前回合（`Repl` 每回合注册/注销回合级取消源，保留已写入会话，
-  提示"回合已取消"后继续），**第二次** Ctrl+C 才退出进程；headless / 空闲时 Ctrl+C 直接退出。
+- **回合级 Ctrl+C（递进式）**（`Di.Cli/InterruptCoordinator.cs`，`Program.cs` 注册 `Console.CancelKeyPress`）：
+  交互 REPL 中**第一次** Ctrl+C = **软停止**（置位 `IInterruptSignal`，回合在下一个相位边界优雅收敛，
+  以 `StopReason.Interrupted` 正常返回、保留已写入会话，提示后继续），**第二次** = **硬取消**当前回合
+  （杀在途模型流 / 子进程），**空闲时** Ctrl+C 退出进程；headless 下 Ctrl+C 仍直接退出。
+  完整语义与状态机见 `docs/interrupt.md`。
 - **交互前端：TS TUI 为默认（M4）**：交互模式（双 TTY）默认把控制台交给 TS TUI ——
   `node <entry>` 子进程，**继承 stdio（不重定向，TUI 拥有控制台）**，等待退出并把其退出码原样返回。
   判定与逃生门实现在 `Di.Cli/TuiLauncher.cs`：
@@ -148,6 +152,9 @@ API Key 不在启动时要求 —— 凭据由模型层在**请求时**解析，
 **预算耗尽兜底**：`StopReason == MaxIterations` 时（`EventRenderer.RenderResult`）在脚注前补打印
 "已达迭代上限，任务可能未完成"与模型最后一段输出（`AgentResult.Answer`），避免"跑完没结果"；
 JSON 模式 `stop_reason` 字段本身即 `maxiterations`，脚本据此判断。
+**软停止兜底**：`StopReason == Interrupted` 时（`EventRenderer.RenderResult`）打印一行"已中断：未开始的工作不再执行"
+（模型已流出的文本不重复回显）；JSON 模式 `stop_reason` 即 `interrupted`，**退出码 0**（软停止是正常收敛，
+非失败）。见 `docs/interrupt.md`。
 与 REPL 同一共享计算（`Core/Skills/SkillActivation`，见 `docs/modules/skills.md`）做 skill 自动匹配：
 提示词命中 skill 描述时完整指令注入系统上下文，未命中的只广告（headless 输出不额外打印激活信息，
 保持脚本友好）。
