@@ -69,9 +69,8 @@ public sealed record ProcessResult(int ExitCode, string Output, string? Error)
 /// </summary>
 internal static class ProcessRunner
 {
-    /// <summary>进程退出后，等待异步读事件把残留输出派发完的最长时间（毫秒）。
-    /// 不带超时的 WaitForExit() 可能被继承了 stdout/stderr 管道的后台子进程挂住，
-    /// 所以这里必须有界。</summary>
+    /// <summary>进程退出后，等待 stdout/stderr 两个字节排干任务收尾的最长时间（毫秒）。
+    /// 不带超时等 EOF 可能被继承了管道的后台子进程挂住，所以这里必须有界。</summary>
     private const int DrainTimeoutMs = 1000;
 
     public static async Task<ProcessResult> RunAsync(
@@ -92,10 +91,11 @@ internal static class ProcessRunner
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
-            // 默认显式用 OEM 代码页解码，避免按 Console.OutputEncoding（真实 CLI 里是 UTF-8）解出乱码。
-            // 个别原生写 UTF-8 的工具（如 git）可传 outputEncoding 覆盖。
-            StandardOutputEncoding = outputEncoding ?? ProcessEncoding.ChildOutput,
-            StandardErrorEncoding = outputEncoding ?? ProcessEncoding.ChildOutput,
+            // 不设 StandardOutput/ErrorEncoding：按原始字节读取、命令结束时整段解码。默认用
+            // ProcessEncoding.SmartDecode（UTF-8 严格优先、OEM 回退）——cmd 内建命令写系统
+            // OEM/GBK 字节（中文文件名 dir），而 .NET CLI 重定向 stdout 时强制写 UTF-8（chcp 无效），
+            // 按固定编码流式解码会把其中一种解成乱码。个别原生工具（git/python）可传 outputEncoding
+            // 钉死（如 UTF-8），跳过智能判定。
         };
         if (rawArguments is not null)
         {
@@ -115,10 +115,9 @@ internal static class ProcessRunner
         }
 
         using var process = new Process { StartInfo = psi };
-        // 有界累积：边收边丢，任意长度的输出都不会把内存打爆（见 OutputBuffer）。
-        var output = new OutputBuffer();
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) output.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) output.AppendLine(e.Data); };
+        // 有界字节累积：边收边丢，任意长度的输出都不会把内存打爆（见 BoundedByteBuffer）。
+        // 整段保留原始字节，退出后统一解码，避免流式解码锁死编码（见上方 psi 注释）。
+        var output = new BoundedByteBuffer();
 
         try
         {
@@ -130,11 +129,11 @@ internal static class ProcessRunner
             return new ProcessResult(-1, string.Empty, $"无法启动进程: {ex.Message}");
         }
 
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(timeout);
+        // stdout/stderr 并发排干到同一缓冲（BoundedByteBuffer.Append 线程安全）。
+        var stdoutTask = DrainAsync(process.StandardOutput.BaseStream, output, cts.Token);
+        var stderrTask = DrainAsync(process.StandardError.BaseStream, output, cts.Token);
 
         try
         {
@@ -151,14 +150,51 @@ internal static class ProcessRunner
             // 超时：按第五章，超时要向 Agent 返回结构化错误而非静默杀死。
             Kill(process);
             return new ProcessResult(-1,
-                output.Text,
+                Decode(output, outputEncoding),
                 $"执行超过 {timeout.TotalSeconds:0} 秒未完成，已终止");
         }
 
-        // 排干：WaitForExitAsync 只等进程退出，BeginOutputReadLine 的最后几行事件可能
-        // 还没派发完，直接读会丢尾部。带超时的 WaitForExit 等异步读收尾（有界，不挂）。
-        process.WaitForExit(DrainTimeoutMs);
-        return new ProcessResult(process.ExitCode, output.Text, null);
+        // 排干：等两个读取任务收尾；若后台子进程继承了管道，EOF 永不出现 → 有界等（不挂）。
+        using var drainCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        drainCts.CancelAfter(DrainTimeoutMs);
+        try
+        {
+            await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // 排干超时：尾部可能还有后台子进程输出，放弃等待。
+        }
+
+        return new ProcessResult(process.ExitCode, Decode(output, outputEncoding), null);
+    }
+
+    /// <summary>整段解码：传了 outputEncoding 用钉死编码，否则 UTF-8 优先 / OEM 回退智能判定。</summary>
+    private static string Decode(BoundedByteBuffer output, Encoding? outputEncoding)
+        => outputEncoding is not null
+            ? output.ToText(bytes => outputEncoding.GetString(bytes))
+            : output.ToText(ProcessEncoding.SmartDecode);
+
+    /// <summary>把原始字节流排干到有界缓冲（取消/IO 错误静默）。</summary>
+    private static async Task DrainAsync(Stream stream, BoundedByteBuffer output, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[8192];
+        try
+        {
+            while (true)
+            {
+                var n = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+                if (n <= 0)
+                    break;
+                output.Append(buffer, n);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (IOException)
+        {
+        }
     }
 
     private static void Kill(Process process)

@@ -10,7 +10,7 @@ namespace Core.Tools;
 /// 避免模型在 Windows 上发 Unix 命令（ls/tail/pwd → "不是内部或外部命令"）。
 /// 支持两种模式：一次性独立进程（可指定 working_dir）与共享持久化终端会话（cwd/环境变量
 /// 跨调用保持，经 <see cref="ShellSession"/> 交互）。超时强杀（含进程树）并返回结构化错误；
-/// 输出经 <see cref="OutputBuffer"/> 有界累积，长输出自动截断头尾。
+/// 输出经字节级 <see cref="BoundedByteBuffer"/> 有界累积，长输出自动截断头尾。
 /// </summary>
 public sealed class BashTool : ICoreTool
 {

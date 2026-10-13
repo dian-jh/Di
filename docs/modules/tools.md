@@ -47,10 +47,17 @@ Coding Agent 的**八个核心编码工具**（对应 pi 的 `https://github.com
 
 - `Core/Tools/ShellSession.cs`：持久化 shell 会话——cwd / 环境变量 / 虚拟环境跨调用保持；惰性启动
   （不执行命令不拉起进程）；bash 与 powershell **各自独立会话**（语法 / 编码不同，不能共用）。
-- `Core/Tools/ProcessRunner.cs`：统一进程执行，超时强杀（含进程树）、输出捕获。
-- `Core/Tools/ProcessEncoding.cs`：Windows 输出编码——cmd 的 OEM 字节 vs git 的 UTF-8 字节分别解码；
-  python 不依赖该假设（强制 UTF-8 两端对齐，见 `PythonTool`）。
-- `Core/Tools/OutputBuffer.cs`：有界输出累积（头尾预算），任意长度输出内存恒定，超长截断头尾。
+  每条命令按**原始字节**收集 stdout/stderr，结束时整段用 `ProcessEncoding.SmartDecode`（UTF-8 优先 /
+  OEM 回退）解码；cmd 的回显行（以提示符标签开头）在**字节层**先剥掉，避免 GBK 回显与 .NET CLI 的
+  UTF-8 输出混在同一段导致误判编码。退出码行（`_exitMarker:`）界定输出边界。
+- `Core/Tools/ProcessRunner.cs`：统一进程执行，超时强杀（含进程树）、输出捕获（字节级有界累积，
+  结束时整段解码，见 `BoundedByteBuffer`）。
+- `Core/Tools/ProcessEncoding.cs`：子进程输出解码——`ChildOutput`（OEM 代码页，中文系统 = GBK）与
+  `SmartDecode`（严格 UTF-8 优先、OEM 回退，处理接缝处被切断的多字节字符）；git / python 可传
+  显式 `outputEncoding`（UTF-8）跳过智能判定。
+- `Core/Tools/BoundedByteBuffer.cs`：**字节级**有界输出累积（头尾预算），任意长度输出内存恒定，
+  超长截断头尾并插入提示；保留原始字节到解码前，支持解码前逐行预处理（如剥回显行）。
+  （字符级版 `OutputBuffer.cs` 仍保留并被其单元测试覆盖。）
 - `Core/Tools/ToolHelpers.cs`：JSON Schema 构造、参数解析、路径解析（防越界）。
 
 ### 使用说明注入稳定前缀（`CoreTools.BuildInstructions`）
@@ -72,7 +79,7 @@ schema 表达不了的**操作知识**（观察约定 / 行为偏好 / 协议）
 | write_file | `Core/Tools/WriteFileTool.cs` | 整体覆盖写入（非追加），自动建父目录 |
 | edit_file | `Core/Tools/EditFileTool.cs` | old_string 唯一性校验的精准替换 |
 | glob | `Core/Tools/GlobTool.cs` + `Core/Tools/GlobMatcher.cs` | 文件名模式搜索（`* ? **`）；匹配器独立可单测 |
-| grep | `Core/Tools/GrepTool.cs` | 正则内容搜索，`file:行号: 内容` 输出；limit/ignore_case/literal/context |
+| grep | `Core/Tools/GrepTool.cs` | 正则内容搜索，`file:行号: 内容` 输出；limit/ignore_case/literal/context；超过 1 MiB 的文件跳过并**如实提示**（避免"跳过"伪装成"未找到匹配"） |
 | cmd / bash | `Core/Tools/BashTool.cs` | 平台默认 shell（Windows 展示为 `cmd`，其他平台为 `bash`）；一次性独立进程或共享持久化会话；超时强杀（默认 30s）；Windows 手工构造 `cmd /d /s /c`，模型侧保留 `bash` 兼容别名 |
 | powershell | `Core/Tools/PowerShellTool.cs` | 独立 PowerShell 持久化会话（不能与 shell 工具共用） |
 | python | `Core/Tools/PythonTool.cs` | 沙盒临时目录执行代码（计算 / 数据处理 / 图表） |
