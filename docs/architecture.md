@@ -42,12 +42,16 @@ E:\Agent\Di\
 │   ├── Skills/        # SKILL.md 解析、发现合并、词法自动匹配、load_skill 工具、评估
 │   ├── Sessions/      # 会话 JSONL 落盘（SessionLog）
 │   └── Configuration/ # 家目录（~/.di）单一来源
-├── Di.Cli/            # 终端宿主：组合根、REPL、AgentRunner、事件渲染
+├── Di.Cli/            # 终端宿主：组合根、REPL、AgentRunner、事件渲染、--mode rpc 后端
+├── tui/               # TS 终端前端（Node）：spawn `di --mode rpc`，只依赖 RPC 协议（见 docs/tui.md）
 ├── Di.Tests/          # Core 层单元/集成测试
 └── Di.Cli.Tests/      # CLI 宿主测试
 ```
 
 依赖方向：`Di.Cli → Core → Common`，适配器只依赖 Core 抽象，宿主不认识任何具体厂商。
+`tui/` 是**进程级**前端（TypeScript），不参与 .NET 项目引用图——它作为子进程驱动
+`di --mode rpc`，依赖面是 `docs/tui-rpc.md` 的线协议契约（见 `docs/tui.md`），与既有 C# REPL
+界面并存。
 
 ## 3. 依赖方向（唯一权威）
 
@@ -121,6 +125,8 @@ Repl.RunTurnAsync
     `PromptSnippet` / `PromptGuidelines` 贡献聚合（`Core/Tools/ICoreTool.cs`），与 schema co-locate、
     永不失配。工具集按 all/coding/read-only 组合预留扩展缝（当前只用全量，镜像 pi 的
     `https://github.com/earendil-works/pi/tree/main/packages/coding-agent/src/core/tools/index.ts` ），未来按场景暴露子集（只读模式 / 权限降级等）（见 `docs/modules/tools.md`）。
+11. **UI 解耦走进程边界**：核心层不认识任何 UI；TS TUI（`tui/`）与 C# REPL 并列，
+    都只消费 `IAgentRunner` + `AgentLoopEvent` 事件流（`--mode rpc` 序列化，见 `docs/tui-rpc.md`）。
 
 ## 关联文档
 

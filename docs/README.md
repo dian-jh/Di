@@ -12,6 +12,8 @@
 | `docs/architecture.md` | 架构总览：分层 / 依赖方向 / 数据流时序 / 关键设计决策 |
 | `docs/cli.md` | CLI 层契约：参数 / 模式 / headless / 换语言重写 |
 | `docs/di-home.md` | `~/.di` 家目录与分层配置规范 |
+| `docs/tui.md` | TS TUI 设计：分层 / 决策 / 里程碑（M1–M4） |
+| `docs/tui-rpc.md` | `--mode rpc` 线协议**唯一权威**（TS TUI ↔ C# 后端） |
 | `docs/roadmap.md` | 功能全景 + MVP 缺口 + 工业级路线图 |
 | `docs/standards/documentation.md` | 文档编写 / 组织 / 审查规范（按需读） |
 
@@ -28,6 +30,7 @@
 | 定位某个核心模块 | `docs/modules/README.md` → 对应模块文档 |
 | 配置优先级 / 家目录 / 所有权 | `docs/di-home.md` |
 | CLI 参数 / headless JSON / 退出码 / 换语言重写 | `docs/cli.md` |
+| TS TUI 设计 / RPC 协议契约 | `docs/tui.md` / `docs/tui-rpc.md` |
 | 还缺什么 / 下一步做什么 | `docs/roadmap.md` |
 | 怎么写文档 / 怎么维护索引 | `docs/standards/documentation.md` |
 
