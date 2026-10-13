@@ -2,6 +2,7 @@ using System.Text.Json;
 using Common.Events;
 using Core.Llm;
 using Core.Sessions;
+using Core.Skills;
 using Di.Cli;
 using Di.Cli.Modes;
 
@@ -230,6 +231,47 @@ public sealed class PrintModeTests
         Assert.DoesNotContain("\n", text.Trim());   // 且只输出一个 JSON 文档
     }
 
+    // ---- skill 自动匹配（headless 与 REPL 同一共享计算） ----
+
+    [Fact]
+    public async Task Print_AutoActivatesMatchingSkill_SetsActiveSkills()
+    {
+        var (host, runner) = HostWithSkills();
+        var stdout = new StringWriter();
+
+        var code = await PrintMode.RunAsync(host, new CliArgs { Positionals = ["跑一下后端测试"] },
+            TextReader.Null, stdout, new StringWriter());
+
+        Assert.Equal(0, code);
+        Assert.Equal(["backend-tests"], runner.ActiveSkills.Select(s => s.Name));
+    }
+
+    [Fact]
+    public async Task Print_NoMatchingSkill_LeavesActiveSkillsEmpty()
+    {
+        var (host, runner) = HostWithSkills();
+        var stdout = new StringWriter();
+
+        var code = await PrintMode.RunAsync(host, new CliArgs { Positionals = ["随便聊聊"] },
+            TextReader.Null, stdout, new StringWriter());
+
+        Assert.Equal(0, code);
+        Assert.Empty(runner.ActiveSkills);
+    }
+
+    [Fact]
+    public async Task Json_AutoActivatesMatchingSkill_SetsActiveSkills()
+    {
+        var (host, runner) = HostWithSkills();
+        var stdout = new StringWriter();
+
+        var code = await PrintMode.RunAsync(host, new CliArgs { Mode = "json", Positionals = ["跑一下后端测试"] },
+            TextReader.Null, stdout, new StringWriter());
+
+        Assert.Equal(0, code);
+        Assert.Equal(["backend-tests"], runner.ActiveSkills.Select(s => s.Name));
+    }
+
     [Fact]
     public async Task Json_EmptyPrompt_EmitsErrorDoc_ExitsOne()
     {
@@ -309,5 +351,19 @@ public sealed class PrintModeTests
         var runner = new FakeRunner { Bus = bus, Cost = cost };
         var sessionLog = root is null ? null : new SessionLog(new SessionLogOptions { RootDirectory = root });
         return (new CliHost(runner, bus, new FakeLlm([]), [], new ReplOptions(), sessionLog), runner);
+    }
+
+    /// <summary>带一个可匹配 skill 的宿主（供 headless 自动匹配测试）。</summary>
+    private static (CliHost Host, FakeRunner Runner) HostWithSkills()
+    {
+        var bus = new InMemoryEventBus();
+        var runner = new FakeRunner { Bus = bus };
+        var skill = new Skill
+        {
+            Name = "backend-tests",
+            Description = "运行并修复后端测试（dotnet）。当用户要求运行测试、分析失败或修复测试时使用。",
+            Instructions = "1. dotnet build\n2. dotnet test",
+        };
+        return (new CliHost(runner, bus, new FakeLlm([]), [skill], new ReplOptions(), null), runner);
     }
 }

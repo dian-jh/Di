@@ -94,14 +94,12 @@ public sealed class Repl
             using var consumer = _bus.CreateConsumer<AgentLoopEvent>();
             var renderTask = RenderAsync(consumer, turnCts.Token);
 
-            // 自动匹配：按本条消息与 skill 描述的语义相关度加载未固定的 skill。
+            // 自动匹配：按本条消息与 skill 描述的语义相关度加载未固定的 skill（共享计算，headless 同款）。
             // 固定集（/skill 手动激活）不受影响，二者可叠加；匹配结果每回合重算，不累积。
-            var autoMatched = _matcher.Match(userMessage, _skills)
-                .Where(m => !_pinned.Contains(m.Skill))
-                .ToList();
-            _runner.ActiveSkills = [.. _pinned, .. autoMatched.Select(m => m.Skill)];
-            if (autoMatched.Count > 0)
-                _output.WriteLine("⟦ 自动加载 skill：" + string.Join("、", autoMatched.Select(m => m.Skill.Name)) + "⟧");
+            var activation = SkillActivation.Compute(userMessage, _skills, _pinned, _matcher);
+            _runner.ActiveSkills = activation.Active;
+            if (activation.AutoMatched.Count > 0)
+                _output.WriteLine("⟦ 自动加载 skill：" + string.Join("、", activation.AutoMatched.Select(s => s.Name)) + "⟧");
 
             // 模型首个输出可能延迟数秒（网络/思考），先给出可见反馈，首个事件到达时被擦除。
             _renderer.ShowStatus(_options.WorkingStatusText);

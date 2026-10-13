@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Common.Events;
 using Core.AgentLoop;
+using Core.Skills;
 
 namespace Di.Cli.Modes;
 
@@ -67,6 +68,7 @@ public static class PrintMode
 
         var startedAt = DateTimeOffset.UtcNow;
         StartSession(host, args, stderr);
+        ApplySkills(host, prompt);
 
         AgentResult result;
         try
@@ -106,6 +108,7 @@ public static class PrintMode
     {
         var startedAt = DateTimeOffset.UtcNow;
         StartSession(host, args, stderr);
+        ApplySkills(host, prompt);
 
         AgentResult result;
         try
@@ -201,6 +204,17 @@ public static class PrintMode
         {
             stderr.WriteLine($"⚠ 会话日志写入失败: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// headless 单发也做 skill 自动匹配（与 REPL 同一共享计算 <see cref="SkillActivation"/>）：
+    /// 同一条提示词激活同一批 skill。匹配结果写入 runner，AgentRunner 据此把激活 skill 的
+    /// 完整指令注入系统上下文（渐进式披露；未激活的仍只广告，模型可 load_skill）。
+    /// </summary>
+    private static void ApplySkills(CliHost host, string prompt)
+    {
+        var activation = SkillActivation.Compute(prompt, host.Skills, [], new LexicalSkillMatcher());
+        host.Runner.ActiveSkills = activation.Active;
     }
 
     /// <summary>JSON 错误文档：{"error": {"code": ..., "message": ...}}（脚本可解析）。</summary>
