@@ -90,8 +90,8 @@ tui/
 |---|---|---|
 | **M1**（本任务） | C# `--mode rpc` 后端 + reasoning/toolcall 事件转发；TS TUI MVP（inline 聊天：流式文本、工具行、提示输入、Ctrl+C 中断） | 进行中 |
 | M2 | 全屏 alt-screen 视口（transcript ScrollView + dock）、工具折叠 / 展开、skills 展示、Markdown 主题 | 待办 |
-| M3 | 状态栏（模型 / 成本 / tokens）、`/tui` 主屏/全屏切换、斜杠命令 UI、编辑器增强（补全 / 粘贴） | 待办 |
-| M4 | 安装整合（`install.*` 一并构建 TS）、根 `README.md` 用户视图、`di tui` 子命令 | 待办 |
+| M3 | 状态栏（模型 / 成本 / tokens）、`/tui` 主屏/全屏切换、斜杠命令 UI、编辑器增强（补全 / 粘贴） | 部分就绪：命令注册表（内置 + `~/.di/commands/*.md` 用户命令）已挂到 C# 宿主（`CliHost.Commands`），RPC `command` 方法（list/run，`docs/tui-rpc.md` §2.5/§3）+ TS 客户端 `listCommands`/`runCommand` + 输入 `/` 前缀路由已可用；剩余：命令菜单 / 参数补全（`argument_hint` 已备） |
+| M4（本变更） | 安装整合（`install.*` 构建 TS 并复制到 `~/.di/tui/`）、`di` 交互默认启动 TUI（`node <entry>` 继承控制台；`DI_UI=repl` 逃生门回退 REPL）、根 `README.md` 用户视图 | **已实现**（`di tui` 显式子命令仍待办） |
 
 ## 6. 验收信号（M1）
 

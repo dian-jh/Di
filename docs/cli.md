@@ -78,8 +78,9 @@ string[] args
   → CliMode.Resolve(args, stdinTty, stdoutTty)   纯函数：决定 AppMode
   → 短路径（Version/Info/Help/Stats）直接输出退出，不建 DI
   → CliHost.Create(...)               组合根：配置 → AddDi → 工具/skills/runner/会话日志
-  → 分派：Interactive → Repl；Print/Json → PrintMode；ListModels → 列目录；Stats → 聚合会话；
-          SkillEval → 评估匹配器；Rpc → RpcMode（NDJSON 会话驱动后端，见 docs/tui-rpc.md）
+  → 分派：Interactive → TS TUI（`node <entry>`，回退 Repl，见 §3.4）；Print/Json → PrintMode；
+          ListModels → 列目录；Stats → 聚合会话；SkillEval → 评估匹配器；
+          Rpc → RpcMode（NDJSON 会话驱动后端，见 docs/tui-rpc.md）
 ```
 
 ### 3.2 纯数据与纯函数（语言无关，建议他语言原样复刻）
@@ -121,6 +122,19 @@ API Key 不在启动时要求 —— 凭据由模型层在**请求时**解析，
 - **回合级 Ctrl+C**（`Di.Cli/InterruptCoordinator.cs`，`Program.cs` 注册 `Console.CancelKeyPress`）：
   交互 REPL 中**第一次** Ctrl+C 只取消当前回合（`Repl` 每回合注册/注销回合级取消源，保留已写入会话，
   提示"回合已取消"后继续），**第二次** Ctrl+C 才退出进程；headless / 空闲时 Ctrl+C 直接退出。
+- **交互前端：TS TUI 为默认（M4）**：交互模式（双 TTY）默认把控制台交给 TS TUI ——
+  `node <entry>` 子进程，**继承 stdio（不重定向，TUI 拥有控制台）**，等待退出并把其退出码原样返回。
+  判定与逃生门实现在 `Di.Cli/TuiLauncher.cs`：
+  <br>① 逃生门：环境变量 `DI_UI=repl`（**精确**匹配；任何其他值或未设置 → 走 TUI 路径）；
+  <br>② 入口：环境变量 `DI_TUI`（一个 JS 入口文件，或一个含 `dist/main.js` 的目录）；
+  未设置时默认 `~/.di/tui/dist/main.js`（win32 用 `USERPROFILE`→`HOME`）；
+  <br>③ 依赖：`node` 可在 PATH 上解析（spawn `node --version` 探测）；
+  <br>④ 回退：入口缺失 / 无 node / spawn 异常或**非零退出** → stderr 一行提示原因
+  （如"未找到 TUI 入口（…），回退 REPL"）并回退旧 C# REPL。
+  安装：`install.cmd` / `install.ps1` 构建 `tui/`（`npm ci` + `npm run build`）并复制
+  `dist/`、`package.json`、`node_modules/` 到 `~/.di/tui/`；node/npm 缺失或构建失败只告警
+  （"TUI 不可用，回退 REPL"），**不失败** —— di.exe 单独仍可用。headless 各模式与本文档 §4
+  **完全不变**，不受 TUI 影响。
 - 退出码：`0` = 成功；`1` = 用法错误 / 运行错误（模型不可用等）。脚本以退出码判成败。
 
 ---
@@ -178,6 +192,7 @@ stdout 只输出**一个** JSON 文档（snake_case，可空键省略）：
 | 模式解析（纯） | `Di.Cli.Tests/cli/CliModeTests.cs` | TTY 组合 × 提示词 × `--mode`，短路径优先 |
 | 分派壳 | `Di.Cli.Tests/cli/CliAppTests.cs` | 短路径不建 DI；list-models / 交互经 fake 宿主 |
 | headless | `Di.Cli.Tests/modes/PrintModeTests.cs` | 文本/JSON、stdin、会话日志、全部失败路径 |
+| TUI 启动与回退 | `Di.Cli.Tests/TuiLauncherTests.cs` | `DI_UI=repl` / 入口缺失 / 目录入口 / node 缺失不 spawn / spawn 退出码传播 / 异常与非零退出回退 |
 | 会话驱动（harness） | `Di.Tests/AgentLoop/AgentRunnerTests.cs` | 模型路由、历史裁剪、快照、skills |
 
 ## 7. 实现现状（Di.Cli 落点）
@@ -189,18 +204,23 @@ stdout 只输出**一个** JSON 文档（snake_case，可空键省略）：
 |---|---|---|
 | REPL 外层循环 | `Di.Cli/Repl.cs` | 读行 → 斜杠命令 → 回合；回合事件实时渲染 + 兜底排空 |
 | 流式渲染 | `Di.Cli/EventRenderer.cs` | 逐字输出；工具调用 / 思考轮 / 用量+成本脚注；ANSI 状态行（重定向自动禁用）；MaxIterations 预算耗尽时补打印模型最后输出 |
-| 斜杠命令 | `Di.Cli/Repl.cs`（`RunCommandAsync`） | `/help` `/clear` `/model` `/skills` `/skill` `/skill <名> <参数>` `/exit` |
+| 斜杠命令分发 | `Di.Cli/Repl.cs`（`RunCommandAsync`） | 走 `SlashCommandRegistry` 分发（内置 + 用户命令）；回合型命令返回 `CommandResult.Turn` 由 REPL 回合机制执行；`/help` 由注册表推导 |
+| 命令注册表 | `Di.Cli/Commands/`（`SlashCommand` / `SlashCommandRegistry` / `CommandContext` / `CommandResult`） | 对齐 Pi 的 `SlashCommands` 服务：`name/description/argumentHint/handler` 注册、按名解析、重名抛异常；REPL 与 `--mode rpc` 前端共用同一份（挂在 `CliHost.Commands`） |
+| 内置命令 | `Di.Cli/Commands/BuiltinCommands.cs` | `/help` `/clear` `/model` `/skills` `/skill` `/skill <名> <参数>` `/exit`（模式无关，只经 `CommandContext` 访问能力） |
+| 用户命令（`~/.di/commands/*.md`） | `Di.Cli/Commands/CommandMarkdown.cs` + `CommandLoader.cs` | 扁平文件，命令名 = 文件名；frontmatter `description`（必填）/ `argument-hint`（可选）+ 正文指令模板；运行 = 正文 + 参数跑一个回合；无效/重名告警跳过 |
+| RPC 命令方法 | `Di.Cli/modes/RpcMode.cs`（`HandleCommandAsync`） | `command` 请求：`list` 列注册表、`run` 执行同步命令；回合型命令 → `command_error: turn_not_supported`（协议见 `docs/tui-rpc.md` §2.5/§3） |
 | 回合级 Ctrl+C | `Di.Cli/InterruptCoordinator.cs` + `Di.Cli/Program.cs` | 第一次取消当前回合、第二次退出；headless/空闲直接退出 |
 | 纯参数解析（语言无关契约） | `Di.Cli/cli/CliArgs.cs` | `string[] → CliArgs` 纯数据 + 诊断；`--` 截断、未知 / 缺值 / 非法模式报错 |
 | 纯模式解析 | `Di.Cli/cli/CliMode.cs` | `Resolve(args, stdinTty, stdoutTty)`；短路径优先（version/info/help 直接输出不建 DI；list-models 仍建宿主） |
 | 环境 / 生效配置诊断 | `Di.Cli/CliApp.cs`（`InfoAsync`） | `di --info` 打印版本 / 构建时间 / 配置源存在性 / 生效 MaxIterations、模型、provider（含 CLI 覆盖标注）；短路径不建 DI，专治"装的二进制是不是旧的" |
-| 分派壳 | `Di.Cli/CliApp.cs` | 解析 → 校验 → 模式 → 建宿主 → 分派；不碰 Console（流与 TTY 由调用方注入） |
+| TUI 启动与回退 | `Di.Cli/TuiLauncher.cs` | 交互前端抉择：`DI_UI=repl` 逃生门 → `DI_TUI`（文件 / 含 dist/main.js 的目录）?? `~/.di/tui/dist/main.js` 入口解析 → node 探测（spawn `node --version`）→ spawn `node <entry>` 继承 stdio 等待退出；入口缺失 / 无 node / spawn 异常或非零退出 → 返回原因并回退 REPL（可测：env / 入口 / node / spawn 全注入） |
+| 分派壳 | `Di.Cli/CliApp.cs` | 解析 → 校验 → 模式 → 建宿主 → 分派；不碰 Console（流与 TTY 由调用方注入）；交互模式先交 TS TUI（见上），不可用时回退 REPL |
 | 会话统计 | `Di.Cli/CliApp.cs`（`StatsAsync`）+ `Core/Sessions/SessionStats.cs` | `di --stats <file>` 聚合回合数 / token 用量 / 缓存命中率 / 成本（离线，不建宿主） |
 | skill 匹配评估 | `Di.Cli/CliApp.cs`（`SkillEvalAsync`）+ `Core/Skills/SkillCaseLoader.cs` | `di --skill-eval <cases.json>` 输出精确率 / 召回率 / 无匹配率 / 上下文成本 |
 | 组合根 | `Di.Cli/CliHost.cs` | 配置 → AddDi() → 工具 / skills / runner / 会话；`--provider/--model/--thinking` 覆盖在此生效 |
 | headless 单发 | `Di.Cli/modes/PrintMode.cs` | 文本流式渲染 / JSON 单文档；stdin 读提示词；skill 自动匹配（与 REPL 共享 `SkillActivation`）；错误 exit 1；会话日志（`--no-session` 关闭） |
 | RPC 会话驱动后端 | `Di.Cli/modes/RpcMode.cs` | `--mode rpc`：NDJSON over stdin/stdout，ready 握手、事件流（text/reasoning/tool_call delta、工具生命周期、turn_completed、run_failed）、result/error；interrupt → `cancelled`；shutdown / EOF → 退出 0（协议唯一权威：docs/tui-rpc.md） |
-| 全局命令分发 | `Di.Cli/Properties/PublishProfiles/di.pubxml` + `install.cmd` / `install.ps1` | win-x64 自包含单文件 di.exe → `~/.di/bin` → PATH 幂等 |
+| 全局命令分发 | `Di.Cli/Properties/PublishProfiles/di.pubxml` + `install.cmd` / `install.ps1` | win-x64 自包含单文件 di.exe → `~/.di/bin` → PATH 幂等；`install.*` 同时构建 TS TUI 并复制到 `~/.di/tui/`（node/npm 缺失只告警，不失败） |
 | 模型切换 | `AgentRunner.CurrentModel`（`Core/AgentLoop/AgentRunner.cs`） | 运行中切换，按名经工厂解析 |
 | 模型工厂 | `Di.Cli/DiServiceCollectionExtensions.cs` | `RetryingChatModel(ChatModelClient(llm, provider, name))` 组合 |
 | UTF-8 输出 | `Di.Cli/Program.cs` | 显式 `Console.OutputEncoding=UTF8`：GBK 代码页下中文不乱码（管道 / 脚本安全） |

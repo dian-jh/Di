@@ -58,8 +58,10 @@ MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会�
 | 4 | **上下文 token 预算** | ✅ 已实现：`AgentLoopOptions.HistoryBudgetRatio`（默认 0.5）按当前模型 `ContextWindow` × 比例做跨回合记忆预算，超限丢最旧整回合；未知窗口退回轮数启发式 | 读大文件 / 跑测试可瞬间超窗，10 轮启发式防不住 | `AgentRunner.TrimHistoryByTokens` + `CliHost` 注入的 `contextWindowProvider`（经 `ILlmService.ResolveModelAsync` 取目录窗口） |
 | 5 | **README 与上手文档** | ✅ 已实现：README 安装 / 用法 / 配置 + `docs/cli.md` 契约 | 一个要被用的项目必须有"装什么 / 怎么跑 / 怎么配" | 仓库根 `README.md` + `docs/cli.md` |
 
-> 其余未实现项（`/resume`、命令注册表、MCP、子代理、权限审批流、遥测、多 provider、登录命令）
+> 其余未实现项（`/resume`、MCP、子代理、权限审批流、遥测、多 provider、登录命令）
 > 都不属于 MVP 必须 —— 它们是工业级范畴，见 §4。
+> 命令注册表已提前落地（Phase D 首项，见 §4）：注册表 + 内置命令 + `~/.di/commands/*.md`
+> 用户命令，REPL 与 `--mode rpc` 前端共用（`Di.Cli/Commands/`，格式见 `docs/di-home.md` §6）。
 
 ## 4. 工业级路线图
 
@@ -74,8 +76,11 @@ MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会�
 - **headless 模式**：`di "prompt"`、`di -p <file>`、stdin 管道；`--yes` 无交互自动放行。
 - **回合级 Ctrl+C**：✅ 已实现（§3 缺口 #3）——第一次取消当前回合、第二次才退出。
 - **交互体验**：readline 历史（↑↓）、行编辑、斜杠命令 / 模型名 / skill 名补全。
-- **TS TUI（M1 进行中）**：`tui/` 复用 `@earendil-works/pi-tui`，驱动 `di --mode rpc`，
-  端到端（流式文本 / 工具 / 输入 / 中断）先跑通，再逐步全屏化（M2）与增强（M3）——见 `docs/tui.md`。
+- **TS TUI（M1 ✅；M4 默认交互前端 ✅）**：`tui/` 复用 `@earendil-works/pi-tui`，驱动 `di --mode rpc`，
+  端到端（流式文本 / 工具 / 输入 / 中断）已跑通（M1）；本变更完成 M4 安装整合 —— `install.*`
+  构建并安装 TUI 到 `~/.di/tui/`（node/npm 缺失只告警不失败），`di` 交互默认启动 TUI
+  （`node <entry>` 继承控制台），`DI_UI=repl` 逃生门回退旧 REPL（入口缺失 / 无 node / spawn 失败
+  同样回退）；全屏化（M2）与增强（M3）仍待办，见 `docs/tui.md`。
 - 验收：`di "读一下 README"` 在 CI 管道里能跑通并返回 0；中途 Ctrl+C 后会话文件仍完整。
 
 ### Phase B —— 安全与可信（工业级第一优先）
@@ -112,7 +117,10 @@ MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会�
 - **MCP 桥**：`~/.di/mcp.json`（stdio 命令 + 环境）→ 桥接为 `ICoreTool`，ReAct 无感。
 - **子代理**：`~/.di/agents/*.md` 定义 plan / research / review 角色——独立 loop + 上下文
   + 结果回传（事件总线已支持跨代理观察，`AgentRunner` 可作复用骨架）。
-- **命令注册表**：`Repl.RunCommand` 的 if/else → 从 `~/.di/commands/*.md` 加载。
+- **命令注册表**：✅ 已实现（MVP）——`Repl.RunCommand` 的 if/else → `SlashCommandRegistry`
+  注册表（对齐 Pi 的 `SlashCommands` 服务）+ 内置命令 + `~/.di/commands/*.md` 用户命令
+  （`Di.Cli/Commands/`，格式见 `docs/di-home.md` §6），REPL 与 `--mode rpc` 共用；
+  命令参数补全（argument hint 已备，接编辑器补全属 M3）。
 - **第二 provider**：加一个 OpenAI 兼容或 Anthropic 适配器——验证抽象正确性、获得故障切换
   （provider A 429 时切 provider B）。**这是检验模型层设计是否真的"厂商无关"的最强测试。**
 - **模型目录外置数据**：Catalog 从代码常量 → `data/*.json` + 动态刷新 + 在线模型列表。
@@ -135,7 +143,7 @@ MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会�
 ```
 MVP（已达成，5 个缺口全补齐）    工业级
 ───────────────             ──────────────
-循环/流式/工具/skills/会话   A 分发与 UX（分发/headless/Ctrl+C ✅，TS TUI 进行中，readline 补全等后续）
+循环/流式/工具/skills/会话   A 分发与 UX（分发/headless/Ctrl+C ✅，TS TUI M1 ✅ + 默认交互前端 M4 ✅，readline 补全等后续）
 成本/目录/认证/元数据        B 安全与可信（权限审批/撤销/注入防御）★
 事件总线/分层配置/624 测试    C 上下文与记忆（token 预算基础版 ✅，压缩/resume 后续）
                             D 生态（MCP/子代理/第二 provider/命令注册表）
