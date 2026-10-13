@@ -4,7 +4,7 @@
  */
 
 import { Container, Input, Text, type TuiMainScreen } from "@earendil-works/pi-tui";
-import { AssistantMessage, UserMessage } from "./message.ts";
+import { AssistantMessage, SystemMessage, UserMessage } from "./message.ts";
 import type { TurnStateMachine } from "./state.ts";
 
 export class ChatView {
@@ -17,6 +17,7 @@ export class ChatView {
 
   private assistant: AssistantMessage | null = null;
   private renderedTurnId = 0;
+  private renderedCommandSeq = 0;
 
   constructor(tui: TuiMainScreen, onSubmit: (text: string) => void) {
     this.tui = tui;
@@ -60,6 +61,16 @@ export class ChatView {
       this.assistant.setReasoning(turn.reasoning);
       this.assistant.setAnswer(turn.answer);
       this.assistant.syncToolCalls(turn.toolCalls.values());
+    }
+    // 斜杠命令：输出序号变化 → 追加「用户输入 + 系统应答」两条消息（命令不建回合）。
+    if (state.commandSeq !== this.renderedCommandSeq) {
+      this.renderedCommandSeq = state.commandSeq;
+      if (state.commandInput) {
+        this.transcript.addChild(new UserMessage(state.commandInput));
+      }
+      if (state.commandOutput) {
+        this.transcript.addChild(new SystemMessage(state.commandOutput));
+      }
     }
     this.banner.setText(state.errorBanner ?? "");
     this.status.setText(state.statusText);

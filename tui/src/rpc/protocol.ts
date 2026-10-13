@@ -10,7 +10,14 @@
  * 方向：核心 → TUI（stdout）
  * ------------------------------------------------------------------------- */
 
-export type CoreMessage = ReadyMessage | EventMessage | ResultMessage | ErrorMessage;
+export type CoreMessage =
+  | ReadyMessage
+  | EventMessage
+  | ResultMessage
+  | ErrorMessage
+  | CommandListedMessage
+  | CommandRanMessage
+  | CommandErrorMessage;
 
 /** `{"type":"ready","version":"0.1.0"}` —— 组合根构建完成、可服务请求后发出，仅一次。 */
 export interface ReadyMessage {
@@ -35,6 +42,34 @@ export interface ResultMessage {
 /** `{"type":"error","code":string,"message":string}` —— 会话级不可恢复错误。 */
 export interface ErrorMessage {
   type: "error";
+  code: string;
+  message: string;
+}
+
+/** 注册表里的一条命令（<c>command list</c> 应答）。<c>argument_hint</c> 可空省略。 */
+export interface CommandDescriptor {
+  name: string;
+  description: string;
+  argument_hint?: string;
+}
+
+/** `{"type":"command_listed","commands":[...]}` —— `command list` 的应答。 */
+export interface CommandListedMessage {
+  type: "command_listed";
+  commands: CommandDescriptor[];
+}
+
+/** `{"type":"command_ran","name":...,"lines":[...],"exit":bool}` —— `command run` 的同步应答。 */
+export interface CommandRanMessage {
+  type: "command_ran";
+  name: string;
+  lines: string[];
+  exit: boolean;
+}
+
+/** `{"type":"command_error","code":...,"message":...}` —— 命令级错误（不含在 `error` 会话级语义内）。 */
+export interface CommandErrorMessage {
+  type: "command_error";
   code: string;
   message: string;
 }
@@ -151,6 +186,7 @@ export type RequestMethod =
   | "set_model"
   | "set_skills"
   | "clear_history"
+  | "command"
   | "ping"
   | "shutdown";
 
@@ -168,7 +204,14 @@ export interface SetSkillsParams {
 
 export type EmptyParams = Record<string, never>;
 
-export type RequestParams = PromptParams | SetModelParams | SetSkillsParams | EmptyParams;
+/** `command` 请求：`list?: true` 列出注册表；否则按 `name`（+ 可选 `args`）运行。 */
+export interface CommandParams {
+  list?: true;
+  name?: string;
+  args?: string;
+}
+
+export type RequestParams = PromptParams | SetModelParams | SetSkillsParams | CommandParams | EmptyParams;
 
 /** 构造一个请求消息（id 由调用方保证单调递增）。 */
 export function makeRequest(id: number, method: RequestMethod, params: RequestParams): RequestMessage {

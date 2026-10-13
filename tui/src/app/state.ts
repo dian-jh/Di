@@ -55,6 +55,12 @@ export class TurnStateMachine {
   errorBanner: string | undefined;
   /** 累计成本（各回合 cost 求和）。 */
   totalCost = 0;
+  /** 最近一条斜杠命令的输入（用户输入原样；不参与回合状态机）。 */
+  commandInput = "";
+  /** 最近一条斜杠命令的输出（join 后，空 = 无输出）。 */
+  commandOutput = "";
+  /** 命令输出序号：每次 finishCommand 递增，ChatView 据此追加渲染新输出。 */
+  commandSeq = 0;
 
   private nextTurnId = 1;
 
@@ -86,6 +92,19 @@ export class TurnStateMachine {
       this.state = "cancelling";
       this.statusText = "正在取消… (Ctrl+C 退出)";
     }
+  }
+
+  /** 命令输入已提交：记录输入并清空上次输出（仅 idle 下有效；命令不改变回合状态）。 */
+  startCommand(input: string): void {
+    if (this.state !== "idle") return;
+    this.commandInput = input;
+    this.commandOutput = "";
+  }
+
+  /** 命令输出到达：记录输出行并递增序号（ChatView 据此追加渲染新输出）。 */
+  finishCommand(output: string): void {
+    this.commandOutput = output;
+    this.commandSeq += 1;
   }
 
   /** 回合终结（result 到达）：running/cancelling → idle。 */

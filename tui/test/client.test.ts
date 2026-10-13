@@ -84,6 +84,60 @@ describe("RpcClient：prompt 请求", () => {
   });
 });
 
+describe("RpcClient：command 请求", () => {
+  it("listCommands 返回注册表", async () => {
+    const client = makeClient();
+    await client.connect();
+
+    const commands = await client.listCommands();
+
+    assert.equal(commands.length, 2);
+    assert.equal(commands[0]?.name, "model");
+    assert.equal(commands[0]?.argument_hint, "<模型名>");
+
+    await client.stop();
+  });
+
+  it("runCommand 返回输出行", async () => {
+    const client = makeClient();
+    await client.connect();
+
+    const result = await client.runCommand("model", "deepseek-chat");
+
+    assert.equal(result.lines[0], "模型已切换为 deepseek-chat");
+    assert.equal(result.exit, false);
+
+    await client.stop();
+  });
+
+  it("runCommand 未知命令 → reject 且错误清晰", async () => {
+    const client = makeClient();
+    await client.connect();
+
+    await assert.rejects(() => client.runCommand("bogus"), /unknown_command/);
+
+    await client.stop();
+  });
+
+  it("runCommand exit 命令返回 exit=true", async () => {
+    const client = makeClient();
+    await client.connect();
+
+    const result = await client.runCommand("exit");
+
+    assert.equal(result.exit, true);
+    assert.equal(result.lines.length, 0);
+
+    await client.stop();
+  });
+
+  it("ready 前命令被拒绝", async () => {
+    const client = makeClient();
+    await assert.rejects(() => client.listCommands(), /未就绪/);
+    await client.stop();
+  });
+});
+
 describe("RpcClient：关闭", () => {
   it("stop 发 shutdown → 子进程退出", async () => {
     const client = makeClient();

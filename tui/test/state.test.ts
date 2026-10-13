@@ -175,6 +175,31 @@ describe("TurnStateMachine：事件 → 视图模型", () => {
   });
 });
 
+describe("TurnStateMachine：斜杠命令展示", () => {
+  it("startCommand / finishCommand 记录命令输入输出，不改变回合状态", () => {
+    const s = new TurnStateMachine();
+
+    s.startCommand("/model deepseek-chat");
+    assert.equal(s.state, "idle");   // 命令不进入回合状态机
+    assert.equal(s.commandInput, "/model deepseek-chat");
+    assert.equal(s.commandOutput, "");
+
+    s.finishCommand("模型已切换为 deepseek-chat");
+    assert.equal(s.commandOutput, "模型已切换为 deepseek-chat");
+    assert.equal(s.commandSeq, 1);
+  });
+
+  it("运行中 startCommand 被忽略", () => {
+    const s = new TurnStateMachine();
+    s.startTurn("q");
+
+    s.startCommand("/model x");
+
+    assert.equal(s.commandInput, "");
+    assert.equal(s.commandSeq, 0);
+  });
+});
+
 describe("TurnStateMachine：整段假事件流", () => {
   it("一回合：事件流 → 最终视图模型", () => {
     const s = new TurnStateMachine();

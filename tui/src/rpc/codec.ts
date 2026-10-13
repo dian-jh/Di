@@ -328,6 +328,47 @@ function validateCoreMessage(m: Record<string, unknown>, line: string): CoreMess
         code: expectString(m["code"], "error.code", line),
         message: expectString(m["message"], "error.message", line),
       };
+    case "command_listed": {
+      const raw = m["commands"];
+      if (!Array.isArray(raw)) {
+        throw new ProtocolError("command_listed.commands 应为数组", line);
+      }
+      const commands = raw.map((c, i) => {
+        if (!isObject(c)) {
+          throw new ProtocolError(`commands[${i}] 应为对象`, line);
+        }
+        const name = expectString(c["name"], `commands[${i}].name`, line);
+        const description = expectString(c["description"], `commands[${i}].description`, line);
+        const hint = c["argument_hint"];
+        if (hint !== undefined && typeof hint !== "string") {
+          throw new ProtocolError(`commands[${i}].argument_hint 应为 string`, line);
+        }
+        return {
+          name,
+          description,
+          ...(hint === undefined ? {} : { argument_hint: hint as string }),
+        };
+      });
+      return { type: "command_listed", commands };
+    }
+    case "command_ran": {
+      const rawLines = m["lines"];
+      if (!Array.isArray(rawLines) || rawLines.some((l) => typeof l !== "string")) {
+        throw new ProtocolError("command_ran.lines 应为 string 数组", line);
+      }
+      return {
+        type: "command_ran",
+        name: expectString(m["name"], "command_ran.name", line),
+        lines: rawLines as string[],
+        exit: expectBool(m["exit"], "command_ran.exit", line),
+      };
+    }
+    case "command_error":
+      return {
+        type: "command_error",
+        code: expectString(m["code"], "command_error.code", line),
+        message: expectString(m["message"], "command_error.message", line),
+      };
     default:
       throw new ProtocolError(`未知的消息 type: ${JSON.stringify(m["type"])}`, line);
   }

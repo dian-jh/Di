@@ -11,8 +11,22 @@ import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { encodeMessage, LineBuffer, parseMessage, ProtocolError } from "./codec.ts";
-import type { AgentEvent, AgentResult, RequestMessage, RequestMethod, RequestParams } from "./protocol.ts";
+import type {
+  AgentEvent,
+  AgentResult,
+  CommandDescriptor,
+  CommandParams,
+  RequestMessage,
+  RequestMethod,
+  RequestParams,
+} from "./protocol.ts";
 import { makeRequest } from "./protocol.ts";
+
+/** `command` 请求的统一应答：list / run / error 三种（docs/tui-rpc.md §2.5）。 */
+export type CommandOutcome =
+  | { kind: "listed"; commands: CommandDescriptor[] }
+  | { kind: "ran"; name: string; lines: string[]; exit: boolean }
+  | { kind: "error"; code: string; message: string };
 
 /** 可注入的 spawn 工厂（测试替换为假子进程用）。 */
 export type SpawnFn = (bin: string, args: string[]) => ChildProcess;
@@ -104,6 +118,7 @@ export class RpcClient {
   private ready = false;
 
   private pendingTurn: { resolve: (r: AgentResult) => void; reject: (e: Error) => void } | null = null;
+  private pendingCommand: { resolve: (o: CommandOutcome) => void; reject: (e: Error) => void } | null = null;
 
   private exited = false;
   private exitedResolve: (() => void) | null = null;
@@ -201,6 +216,39 @@ export class RpcClient {
     if (this.ready) this.sendRequest("clear_history", {});
   }
 
+  /** 列出后端斜杠命令注册表（内置 + 用户命令；协议 §3 command/list）。 */
+  listCommands(): Promise<CommandDescriptor[]> {
+    return this.sendCommand({ list: true }).then((outcome) => {
+      if (outcome.kind === "listed") return outcome.commands;
+      throw new Error(outcome.kind === "error" ? `${outcome.code}: ${outcome.message}` : "意外的命令应答");
+    });
+  }
+
+  /** 运行一个后端斜杠命令（同步应答；回合型命令 → turn_not_supported，reject）。 */
+  runCommand(name: string, args = ""): Promise<{ lines: string[]; exit: boolean }> {
+    return this.sendCommand({ name, args }).then((outcome) => {
+      if (outcome.kind === "ran") return { lines: outcome.lines, exit: outcome.exit };
+      throw new Error(outcome.kind === "error" ? `${outcome.code}: ${outcome.message}` : "意外的命令应答");
+    });
+  }
+
+  /**
+   * 发一条 `command` 请求，等对应应答。请求串行、应答按请求序同步返回（协议 §1/§2.5），
+   * 与 prompt 的事件流不交错，故单槽 pendingCommand 足够。
+   */
+  private sendCommand(params: CommandParams): Promise<CommandOutcome> {
+    if (!this.ready) {
+      return Promise.reject(new Error("RPC 未就绪（尚未收到 ready）"));
+    }
+    if (this.pendingCommand) {
+      this.pendingCommand.reject(new Error("上一命令尚未应答，被新的 command 取代"));
+    }
+    this.sendRequest("command", params);
+    return new Promise<CommandOutcome>((resolve, reject) => {
+      this.pendingCommand = { resolve, reject };
+    });
+  }
+
   /** 心跳，后端无应答。 */
   ping(): void {
     if (this.ready) this.sendRequest("ping", {});
@@ -296,6 +344,22 @@ export class RpcClient {
           this.pendingTurn.reject(new Error(`${message.code}: ${message.message}`));
           this.pendingTurn = null;
         }
+        if (this.pendingCommand) {
+          this.pendingCommand.reject(new Error(`${message.code}: ${message.message}`));
+          this.pendingCommand = null;
+        }
+        break;
+      case "command_listed":
+        this.pendingCommand?.resolve({ kind: "listed", commands: message.commands });
+        this.pendingCommand = null;
+        break;
+      case "command_ran":
+        this.pendingCommand?.resolve({ kind: "ran", name: message.name, lines: message.lines, exit: message.exit });
+        this.pendingCommand = null;
+        break;
+      case "command_error":
+        this.pendingCommand?.reject(new Error(`${message.code}: ${message.message}`));
+        this.pendingCommand = null;
         break;
       default:
         // 向后兼容：未知 type 忽略并告警（不应发生）。
@@ -320,6 +384,11 @@ export class RpcClient {
         new Error(`后端进程退出，当前回合未终结（exit=${code ?? "?"}${signal ? `, signal=${signal}` : ""}）`),
       );
       this.pendingTurn = null;
+    } else if (this.pendingCommand) {
+      this.pendingCommand.reject(
+        new Error(`后端进程退出，命令未获应答（exit=${code ?? "?"}${signal ? `, signal=${signal}` : ""}）`),
+      );
+      this.pendingCommand = null;
     }
     this.ready = false;
     this.stateValue = "closed";
@@ -338,6 +407,9 @@ export class RpcClient {
     if (this.pendingTurn) {
       this.pendingTurn.reject(err);
       this.pendingTurn = null;
+    } else if (this.pendingCommand) {
+      this.pendingCommand.reject(err);
+      this.pendingCommand = null;
     }
   }
 }

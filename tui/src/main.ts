@@ -70,6 +70,12 @@ async function main(): Promise<number> {
       view?.sync(state);
       return;
     }
+    if (text.startsWith("/")) {
+      // 斜杠命令：交给后端注册表执行（内置 + 用户命令在 C# 宿主侧，TUI 只做前缀路由）。
+      state.startCommand(text);
+      void runCommand(text);
+      return;
+    }
     state.startTurn(text);
     view?.sync(state);
     client
@@ -97,6 +103,24 @@ async function main(): Promise<number> {
   tui.terminal.setTitle("di — TUI");
   tui.start();
   view.focusInput();
+
+  /** 运行一条斜杠命令（同步应答，不流式）：成功显示输出行；exit=true 则优雅退出。 */
+  async function runCommand(text: string): Promise<void> {
+    const space = text.indexOf(" ");
+    const name = space < 0 ? text.slice(1) : text.slice(1, space);
+    const args = space < 0 ? "" : text.slice(space + 1).trim();
+    try {
+      const result = await client.runCommand(name, args);
+      if (result.exit) {
+        await shutdown();
+        return;
+      }
+      state.finishCommand(result.lines.join("\n"));
+    } catch (err: unknown) {
+      state.abort(err instanceof Error ? err.message : String(err));
+    }
+    view?.sync(state);
+  }
 
   /** 优雅退出：shutdown 后端 → 停止 TUI → 退出。 */
   async function shutdown(): Promise<void> {

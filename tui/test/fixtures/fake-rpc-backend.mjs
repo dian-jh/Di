@@ -66,6 +66,25 @@ rl.on("line", (line) => {
       seq = s + 6;
       break;
     }
+    case "command": {
+      const params = req.params ?? {};
+      if (params.list === true) {
+        write({
+          type: "command_listed",
+          commands: [
+            { name: "model", description: "切换模型", argument_hint: "<模型名>" },
+            { name: "exit", description: "退出 Di" },
+          ],
+        });
+      } else if (params.name === "model") {
+        write({ type: "command_ran", name: "model", lines: [`模型已切换为 ${params.args ?? ""}`], exit: false });
+      } else if (params.name === "exit") {
+        write({ type: "command_ran", name: "exit", lines: [], exit: true });
+      } else {
+        write({ type: "command_error", code: "unknown_command", message: `未知命令: /${params.name}` });
+      }
+      break;
+    }
     default:
       break;
   }

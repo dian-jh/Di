@@ -19,6 +19,14 @@ export class UserMessage extends Container {
   }
 }
 
+/** 斜杠命令应答：以 `‖ ` 前缀的多行系统消息。 */
+export class SystemMessage extends Container {
+  constructor(content: string) {
+    super();
+    this.addChild(new Text(content.split("\n").map((line) => `‖ ${line}`).join("\n"), 1, 0));
+  }
+}
+
 /** 助手消息：推理区 + 工具调用行 + 流式答案（推理/工具为空时零行渲染）。 */
 export class AssistantMessage extends Container {
   private readonly reasoning: Text;
