@@ -58,10 +58,6 @@ public sealed class CliApp
                 await stdout.WriteAsync(CliInfo.HelpText);
                 return 0;
 
-            case AppMode.Rpc:
-                await stderr.WriteLineAsync("--mode rpc 尚未实现");
-                return 1;
-
             case AppMode.Stats:
                 return await StatsAsync(cliArgs.Stats, stdout, stderr, cancellationToken);
 
@@ -74,6 +70,7 @@ public sealed class CliApp
                         AppMode.ListModels => await ListModelsAsync(host, cliArgs.ListModels, stdout, cancellationToken),
                         AppMode.SkillEval => await SkillEvalAsync(host, cliArgs.SkillEval, stdout, stderr, cancellationToken),
                         AppMode.Interactive => await InteractiveAsync(host, stdin, stdout, interrupt, cancellationToken),
+                        AppMode.Rpc => await RpcMode.RunAsync(host, cliArgs, stdin, stdout, stderr, cancellationToken),
                         _ => await PrintMode.RunAsync(host, cliArgs, stdin, stdout, stderr, cancellationToken),
                     };
                 }

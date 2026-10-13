@@ -76,6 +76,20 @@ public sealed class EventRendererTests
     }
 
     [Fact]
+    public void Render_ReasoningAndToolCallDeltas_AreSilentlyIgnored()
+    {
+        // M1：新增的增量事件由 TUI 消费；文本渲染器（statement switch）对未知 case 天然忽略，
+        // 不得抛出、不得输出（否则会污染 headless/REPL 的既有输出）。
+        var output = new StringWriter();
+        var renderer = new EventRenderer(output);
+
+        renderer.Render(new AgentLoopEvent.ReasoningDelta("思考中"));
+        renderer.Render(new AgentLoopEvent.ToolCallDelta("c1", "echo", """{"x":1}"""));
+
+        Assert.Equal(string.Empty, output.ToString());
+    }
+
+    [Fact]
     public void Render_TextDelta_AppendsTextAndClosesOnTurnCompleted()
     {
         var output = new StringWriter();

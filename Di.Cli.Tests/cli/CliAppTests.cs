@@ -122,15 +122,21 @@ public sealed class CliAppTests
     }
 
     [Fact]
-    public async Task RpcMode_NotImplemented_ExitsOne_WithoutBuildingHost()
+    public async Task RpcMode_BuildsHost_EmitsReady_ExitsZero()
     {
-        var (app, stdout, stderr, factory) = Setup();
+        // M1：--mode rpc 已实现，需要宿主（组合根）；stdin 经管道喂入一条 shutdown 请求，
+        // stdout 首先应出现 ready（协议握手），随后优雅退出 0。
+        var bus = new InMemoryEventBus();
+        var host = new CliHost(new FakeRunner { Bus = bus }, bus, new FakeLlm([]), [], new ReplOptions(), null);
+        var (app, stdout, stderr, factory) = Setup(host);
+        var stdin = new StringReader("""{"type":"request","id":1,"method":"shutdown","params":{}}""");
 
-        var code = await app.RunAsync(["--mode", "rpc"], TextReader.Null, stdout, stderr, Tty, Tty);
+        var code = await app.RunAsync(["--mode", "rpc"], stdin, stdout, stderr, Tty, Tty);
 
-        Assert.Equal(1, code);
-        Assert.Contains("尚未实现", stderr.ToString());
-        Assert.Equal(0, factory.Calls);
+        Assert.Equal(0, code);
+        Assert.Contains(""""type":"ready"""" , stdout.ToString());
+        Assert.Equal("", stderr.ToString());
+        Assert.Equal(1, factory.Calls);   // rpc 路径构建宿主
     }
 
     // ---- 需要宿主的路径：注入 fake 宿主 ----

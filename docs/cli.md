@@ -46,8 +46,9 @@ CLI 不感知 ReAct 内部，只消费事件流与最终结果。
 运行中的事件经 `IEventBus`（`Common.Events`）发布，UI 从同一总线消费。事件是**拉式**（channel）或**推式**（订阅）均可；headless 文本模式用拉式流式渲染，json 模式根本不消费。
 
 > 事件类型 / 负载 / 含义的**唯一权威表**见 `docs/modules/events.md` §关键符号，此处不复述。
-> 换语言契约视角：CLI 依赖的事件流只有「流式文本增量」「工具生命周期」「回合结束（用量 / 成本 /
-> 停止原因）」「循环失败」四类，字段细节以 `docs/modules/events.md` 为准。
+> 换语言契约视角：CLI 依赖的事件流有「流式文本增量」「推理增量」「工具调用增量」「工具生命周期」
+> 「回合结束（用量 / 成本 / 停止原因）」「循环失败」六类，字段细节以 `docs/modules/events.md` 为准
+> （推理 / 工具调用增量为 M1 新增，供 TUI 展示思考与实时工具参数）。
 
 ### 2.3 结果 —— `AgentResult`（`Core/AgentLoop/AgentResult.cs`）
 
@@ -78,7 +79,7 @@ string[] args
   → 短路径（Version/Info/Help/Stats）直接输出退出，不建 DI
   → CliHost.Create(...)               组合根：配置 → AddDi → 工具/skills/runner/会话日志
   → 分派：Interactive → Repl；Print/Json → PrintMode；ListModels → 列目录；Stats → 聚合会话；
-          SkillEval → 评估匹配器；Rpc → 未实现
+          SkillEval → 评估匹配器；Rpc → RpcMode（NDJSON 会话驱动后端，见 docs/tui-rpc.md）
 ```
 
 ### 3.2 纯数据与纯函数（语言无关，建议他语言原样复刻）
@@ -99,7 +100,7 @@ string[] args
 | `--mode json` | Json |
 | `--mode print` | Print |
 | `--mode interactive` | Interactive |
-| `--mode rpc` | Rpc（本实现未支持 → exit 1） |
+| `--mode rpc` | Rpc |
 | 位置参数 > 0 | Print（`di "提示词"`） |
 | `--print` 或 stdin/stdout 非 TTY | Print（`echo x | di`） |
 | 否则 | Interactive |
@@ -155,6 +156,10 @@ stdout 只输出**一个** JSON 文档（snake_case，可空键省略）：
 
 目标场景：CLI 换 Go / Rust / Python，harness（会话驱动）仍留在现有实现。
 
+> 首次落地：仓库根 `tui/`（TypeScript TUI）是本指南的第一次具体重写 —— C# 后端以
+> `--mode rpc` 子进程方式被新前端驱动。设计见 `docs/tui.md`，进程边界协议唯一权威
+> `docs/tui-rpc.md`；事件保真补齐（推理 / 工具调用增量转发）在 `Core/AgentLoop/ReAct.cs`。
+
 1. **保留**：`Core.AgentLoop`（`IAgentRunner` / 事件流 / `AgentResult`）与模型层。新 CLI 通过
    进程边界调用它们（子进程 + JSON-RPC / stdin-stdout 协议），或绑定到同一库（若新语言是 .NET 兼容）。
    会话 API 已经是"一回合 = 一次调用 + 事件流 + 结果"的契约，天然适配进程边界。
@@ -194,6 +199,7 @@ stdout 只输出**一个** JSON 文档（snake_case，可空键省略）：
 | skill 匹配评估 | `Di.Cli/CliApp.cs`（`SkillEvalAsync`）+ `Core/Skills/SkillCaseLoader.cs` | `di --skill-eval <cases.json>` 输出精确率 / 召回率 / 无匹配率 / 上下文成本 |
 | 组合根 | `Di.Cli/CliHost.cs` | 配置 → AddDi() → 工具 / skills / runner / 会话；`--provider/--model/--thinking` 覆盖在此生效 |
 | headless 单发 | `Di.Cli/modes/PrintMode.cs` | 文本流式渲染 / JSON 单文档；stdin 读提示词；skill 自动匹配（与 REPL 共享 `SkillActivation`）；错误 exit 1；会话日志（`--no-session` 关闭） |
+| RPC 会话驱动后端 | `Di.Cli/modes/RpcMode.cs` | `--mode rpc`：NDJSON over stdin/stdout，ready 握手、事件流（text/reasoning/tool_call delta、工具生命周期、turn_completed、run_failed）、result/error；interrupt → `cancelled`；shutdown / EOF → 退出 0（协议唯一权威：docs/tui-rpc.md） |
 | 全局命令分发 | `Di.Cli/Properties/PublishProfiles/di.pubxml` + `install.cmd` / `install.ps1` | win-x64 自包含单文件 di.exe → `~/.di/bin` → PATH 幂等 |
 | 模型切换 | `AgentRunner.CurrentModel`（`Core/AgentLoop/AgentRunner.cs`） | 运行中切换，按名经工厂解析 |
 | 模型工厂 | `Di.Cli/DiServiceCollectionExtensions.cs` | `RetryingChatModel(ChatModelClient(llm, provider, name))` 组合 |
