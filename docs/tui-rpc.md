@@ -75,6 +75,27 @@
 会话级不可恢复错误（如凭据缺失，code 沿用 `LlmErrorCodes`）。回合内失败走 `run_failed` /
 `result.stop_reason:"error"`，不用 `error` 消息。
 
+### 2.5 命令应答（`command` 请求的同步应答）
+
+`{"type":"request","method":"command",...}` 的应答为以下三种之一：
+**按请求序同步返回**（命令处理期间主循环不读下一条请求，不与事件流交错）：
+
+```json
+{"type":"command_listed","commands":[{"name":"clear","description":"清空屏幕与对话记忆","argument_hint":null}]}
+{"type":"command_ran","name":"model","lines":["模型已切换为 deepseek-chat"],"exit":false}
+{"type":"command_error","code":"unknown_command","message":"未知命令: /bogus"}
+```
+
+- `command_listed`：`list` 应答，列出注册表全部命令（内置 + 用户命令，按名排序）。
+  `commands[i] = {name, description, argument_hint?}`。
+- `command_ran`：`run` 应答；`lines` 为命令输出行（无 ANSI），`exit=true` 表示命令请求退出
+  （如 `/exit`，TUI 自行决定是否发 `shutdown`）。
+- `command_error`：命令级错误（**不含在 `error` 会话级语义内**）：
+  - `unknown_command` —— 注册表无此命令；
+  - `turn_not_supported` —— 回合型命令（`/skill <名> <参数>`、用户命令）：RPC 无回合执行器，
+    TUI 应改用 `prompt` 或提示在 REPL 中使用；
+  - `invalid_request` —— 参数非法（缺 `name`、类型错误等）。
+
 ## 3. 方向 TUI → 核心（stdin）
 
 每行一个请求：
@@ -94,6 +115,7 @@
 | `set_model` | `{model: string}` | `AgentRunner.CurrentModel` |
 | `set_skills` | `{names: string[]}` | `AgentRunner.ActiveSkills` |
 | `clear_history` | `{}` | `AgentRunner.ResetHistory()` |
+| `command` | `{list?: true}` 或 `{name: string, args?: string}` | 列出（`list: true`）或运行（`name`，可选 `args`）斜杠命令；应答见 §2.5。回合型命令返回 `command_error: turn_not_supported` |
 | `ping` | `{}` | 心跳，无应答 |
 | `shutdown` | `{}` | 优雅退出，exit 0 |
 

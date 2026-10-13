@@ -420,6 +420,127 @@ public sealed class RpcModeTests
         }
     }
 
+    // ---- 命令系统（docs/tui-rpc.md §3 command 方法） ----
+
+    [Fact]
+    public async Task Rpc_Command_List_EmitsCommandListed()
+    {
+        var (host, _) = Host();
+        var (code, output, _) = await RunAsync(host, new CliArgs(),
+            """
+            {"type":"request","id":1,"method":"command","params":{"list":true}}
+            {"type":"request","id":2,"method":"shutdown","params":{}}
+            """);
+
+        Assert.Equal(0, code);
+        var lines = Lines(output);
+        Assert.Equal("""{"type":"ready","version":"0.1.0"}""", lines[0]);
+        using var doc = JsonDocument.Parse(lines[1]);
+        var root = doc.RootElement;
+        Assert.Equal("command_listed", root.GetProperty("type").GetString());
+        var commands = root.GetProperty("commands");
+        Assert.True(commands.GetArrayLength() >= 6, "应列出全部内置命令");
+        var first = commands.EnumerateArray().First();
+        Assert.True(first.TryGetProperty("name", out _));
+        Assert.True(first.TryGetProperty("description", out _));
+    }
+
+    [Fact]
+    public async Task Rpc_Command_RunModel_EmitsLines_AndApplies()
+    {
+        var (host, runner) = Host();
+        var (code, output, _) = await RunAsync(host, new CliArgs(),
+            """
+            {"type":"request","id":1,"method":"command","params":{"name":"model","args":"deepseek-v4-pro"}}
+            {"type":"request","id":2,"method":"shutdown","params":{}}
+            """);
+
+        Assert.Equal(0, code);
+        Assert.Equal("deepseek-v4-pro", runner.CurrentModel);   // 命令真实生效
+        var lines = Lines(output);
+        using var doc = JsonDocument.Parse(lines[1]);
+        var root = doc.RootElement;
+        Assert.Equal("command_ran", root.GetProperty("type").GetString());
+        Assert.Equal("model", root.GetProperty("name").GetString());
+        Assert.Contains("模型已切换为 deepseek-v4-pro",
+            root.GetProperty("lines").EnumerateArray().Select(l => l.GetString()));
+        Assert.False(root.GetProperty("exit").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Rpc_Command_Unknown_EmitsCommandError()
+    {
+        var (host, _) = Host();
+        var (code, output, _) = await RunAsync(host, new CliArgs(),
+            """
+            {"type":"request","id":1,"method":"command","params":{"name":"bogus"}}
+            {"type":"request","id":2,"method":"shutdown","params":{}}
+            """);
+
+        Assert.Equal(0, code);
+        using var doc = JsonDocument.Parse(Lines(output)[1]);
+        Assert.Equal("command_error", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("unknown_command", doc.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Rpc_Command_MissingName_EmitsInvalidRequest()
+    {
+        var (host, _) = Host();
+        var (code, output, _) = await RunAsync(host, new CliArgs(),
+            """
+            {"type":"request","id":1,"method":"command","params":{}}
+            {"type":"request","id":2,"method":"shutdown","params":{}}
+            """);
+
+        Assert.Equal(0, code);
+        using var doc = JsonDocument.Parse(Lines(output)[1]);
+        Assert.Equal("command_error", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("invalid_request", doc.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Rpc_Command_TurnCommand_EmitsTurnNotSupported()
+    {
+        var bus = new InMemoryEventBus();
+        var skill = new Skill { Name = "backend-tests", Description = "跑后端测试", Instructions = "dotnet test" };
+        var host = new CliHost(new FakeRunner { Bus = bus }, bus, new FakeLlm([]), [skill], new ReplOptions(), null);
+        var (code, output, _) = await RunAsync(host, new CliArgs(),
+            """
+            {"type":"request","id":1,"method":"command","params":{"name":"skill","args":"backend-tests 补测试"}}
+            {"type":"request","id":2,"method":"shutdown","params":{}}
+            """);
+
+        Assert.Equal(0, code);
+        using var doc = JsonDocument.Parse(Lines(output)[1]);
+        Assert.Equal("command_error", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("turn_not_supported", doc.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Rpc_Command_PinnedSkills_PersistAcrossCalls()
+    {
+        var bus = new InMemoryEventBus();
+        var skill = new Skill { Name = "backend-tests", Description = "跑后端测试", Instructions = "dotnet test" };
+        var host = new CliHost(new FakeRunner { Bus = bus }, bus, new FakeLlm([]), [skill], new ReplOptions(), null);
+        var (code, output, _) = await RunAsync(host, new CliArgs(),
+            """
+            {"type":"request","id":1,"method":"command","params":{"name":"skill","args":"backend-tests"}}
+            {"type":"request","id":2,"method":"command","params":{"name":"skills"}}
+            {"type":"request","id":3,"method":"shutdown","params":{}}
+            """);
+
+        Assert.Equal(0, code);
+        var lines = Lines(output);
+        using var ran = JsonDocument.Parse(lines[1]);
+        Assert.Equal("command_ran", ran.RootElement.GetProperty("type").GetString());   // 固定成功
+
+        using var listed = JsonDocument.Parse(lines[2]);
+        // 第二次调用仍看到固定标记（跨命令保持）；行首带缩进空格，按子串判断。
+        Assert.Contains(listed.RootElement.GetProperty("lines").EnumerateArray().Select(l => l.GetString()),
+            l => l!.Contains("[*] backend-tests", StringComparison.Ordinal));
+    }
+
     // ---- 工具 ----
 
     private static (CliHost Host, FakeRunner Runner) Host(UsageCost? cost = null)

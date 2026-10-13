@@ -5,6 +5,8 @@ using System.Text.Json.Serialization;
 using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
+using Core.Skills;
+using Di.Cli.Commands;
 
 namespace Di.Cli.Modes;
 
@@ -57,6 +59,10 @@ public static class RpcMode
 
         Task? turnTask = null;
         CancellationTokenSource? turnCts = null;
+
+        // 命令系统（docs/tui-rpc.md §3 command）：注册表来自宿主（内置 + 用户命令）；
+        // 固定 skill 集在会话内跨命令保持（/skill 激活、/skills 标记）。
+        var pinnedSkills = new List<Skill>();
 
         try
         {
@@ -130,6 +136,10 @@ public static class RpcMode
                         host.Runner.ResetHistory();
                         break;
 
+                    case "command":
+                        await HandleCommandAsync(host, pinnedSkills, request, stdout, writeLock);
+                        break;
+
                     case "ping":
                         break;   // 心跳，无应答
 
@@ -161,6 +171,73 @@ public static class RpcMode
         try { await turnTask; }
         catch (Exception) { /* 回合内部已尽力自处理，这里只确保不崩 */ }
     }
+
+    /// <summary>
+    /// command 请求（docs/tui-rpc.md §3）：<c>list</c> 列注册表（内置 + 用户命令），<c>run</c> 执行同步命令。
+    /// 回合型命令（返回值带 <see cref="CommandResult.TurnMessage"/>，如 /skill 带参数、用户命令）
+    /// → <c>command_error: turn_not_supported</c>：RPC 无回合执行器，TUI 用自身 prompt 机制跑回合，
+    /// REPL 提供 RunTurn（命令定义本身与前端无关，同一份注册表）。
+    /// </summary>
+    private static async Task HandleCommandAsync(CliHost host, List<Skill> pinned, RpcRequest request,
+        TextWriter stdout, object writeLock)
+    {
+        try
+        {
+            if (request.Params is not { } p)
+                throw new FormatException("command 需要 params 对象");
+
+            if (p.TryGetPropertyValue("list", out var listNode) && listNode?.GetValueKind() == JsonValueKind.True)
+            {
+                var entries = host.Commands.List()
+                    .Select(c => new { name = c.Name, description = c.Description, argument_hint = c.ArgumentHint });
+                WriteLine(stdout, writeLock, Serialize(new { type = "command_listed", commands = entries }));
+                return;
+            }
+
+            if (p["name"] is not { } nameNode || nameNode.GetValueKind() != JsonValueKind.String)
+                throw new FormatException("command run 需要 name 字符串参数");
+            var name = nameNode.GetValue<string>();
+            var args = p["args"] is { } a && a.GetValueKind() == JsonValueKind.String ? a.GetValue<string>() : string.Empty;
+
+            if (!host.Commands.TryGet(name, out var cmd) || cmd is null)
+            {
+                WriteLine(stdout, writeLock, Serialize(new { type = "command_error", code = "unknown_command", message = $"未知命令: /{name}" }));
+                return;
+            }
+
+            // 命令输出写进内存缓冲，随应答返回（stdout 是协议流，不允许命令直接写）。
+            using var buffer = new StringWriter();
+            var context = new CommandContext(host.Commands, host.Runner, host.Skills, buffer, pinned, UseAnsi: false);
+            var result = await cmd.Handler(args, context);
+
+            if (result.TurnMessage is { Length: > 0 })
+            {
+                WriteLine(stdout, writeLock, Serialize(new
+                {
+                    type = "command_error",
+                    code = "turn_not_supported",
+                    message = $"命令 /{name} 需要运行一个回合，RPC 暂不支持（请用 prompt 或 REPL 执行）",
+                }));
+                return;
+            }
+
+            WriteLine(stdout, writeLock, Serialize(new
+            {
+                type = "command_ran",
+                name,
+                lines = BufferLines(buffer),
+                exit = result.Exit,
+            }));
+        }
+        catch (Exception ex) when (ex is FormatException)
+        {
+            WriteLine(stdout, writeLock, Serialize(new { type = "command_error", code = "invalid_request", message = ex.Message }));
+        }
+    }
+
+    /// <summary>把命令输出缓冲转成行数组（去空行、去 \r；应答不含 ANSI，RPC 端 UseAnsi=false）。</summary>
+    private static string[] BufferLines(StringWriter buffer)
+        => buffer.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.TrimEnd('\r')).ToArray();
 
     /// <summary>
     /// 运行一个回合：实时转发事件到 stdout，回合终结时发出唯一一个 <c>result</c>，并落盘会话日志。
