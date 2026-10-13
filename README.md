@@ -20,7 +20,8 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 脚本会 `dotnet publish` 出 win-x64 自包含单文件 `di.exe`（免 .NET 运行时），
-复制到 `~/.di/bin/`，并把该目录**幂等**追加到用户 PATH。新开终端后：
+复制到 `~/.di/bin/`，并把该目录**幂等**追加到用户 PATH；同时构建 TS TUI 并安装到
+`~/.di/tui/`（node/npm 缺失或构建失败只告警，di 单独仍可用）。新开终端后：
 
 ```bat
 di --version
@@ -34,13 +35,17 @@ di --version
 di "读一下 README"                :: headless 单发（文本，跑一个回合即退出）
 di --mode json "分析这个函数"       :: headless 单发（JSON 单文档，脚本友好）
 echo 总结 | di                    :: 无位置参数时从 stdin 读提示词
-di                                :: 交互 REPL（/help /model /skills /clear /exit）
+di                                :: 交互 TS TUI（未装 TUI 时自动回退旧 REPL）
+set DI_UI=repl && di              :: 强制使用旧 C# REPL（/help /clear /exit）
 di --list-models                  :: 列出可用模型
 di -m deepseek-v4-pro "跑测试"      :: 指定模型 / --provider 指定 provider
 di --no-session --no-ansi "x"      :: 脚本友好：不写会话日志、无 ANSI
 ```
 
-退出码：`0` 成功；`1` 用法错误 / 运行错误（模型不可用等）。
+交互模式默认启动 `tui/` 的 TypeScript 前端（`node ~/.di/tui/dist/main.js`，继承终端）；想用原来的
+C# REPL，设环境变量 `DI_UI=repl`。详情（`DI_TUI` 覆盖入口、TTY / node 判定、回退规则）与完整
+headless / JSON 契约见 `docs/cli.md` §3.4 / §4。退出码：`0` 成功；`1` 用法错误 / 运行错误
+（模型不可用等）。
 
 ## 配置
 

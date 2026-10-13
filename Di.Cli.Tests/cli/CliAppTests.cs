@@ -17,12 +17,16 @@ public sealed class CliAppTests
 {
     private const bool Tty = true;
 
-    private static (CliApp App, StringWriter Out, StringWriter Err, HostFactory Factory) Setup(CliHost? host = null)
+    /// <summary>强制回退 C# REPL 的 TUI 上下文：交互测试不依赖真实环境 / 文件系统 / 进程。</summary>
+    private static readonly TuiLauncher.Context ReplOnly = new() { GetEnv = _ => "repl" };
+
+    private static (CliApp App, StringWriter Out, StringWriter Err, HostFactory Factory) Setup(
+        CliHost? host = null, TuiLauncher.Context? tui = null)
     {
         var stdout = new StringWriter();
         var stderr = new StringWriter();
         var factory = new HostFactory(host);
-        return (new CliApp(factory.Create), stdout, stderr, factory);
+        return (new CliApp(factory.Create, tui), stdout, stderr, factory);
     }
 
     // ---- 短路径：不构建宿主 ----
@@ -316,7 +320,7 @@ public sealed class CliAppTests
         var bus = new InMemoryEventBus();
         var runner = new FakeRunner { Bus = bus };
         var host = new CliHost(runner, bus, new FakeLlm([]), [], new ReplOptions(), null);
-        var (app, stdout, stderr, factory) = Setup(host);
+        var (app, stdout, stderr, factory) = Setup(host, ReplOnly);
         var stdin = new StringReader("你好\n/exit\n");
 
         var code = await app.RunAsync([], stdin, stdout, stderr, Tty, Tty);
@@ -334,13 +338,51 @@ public sealed class CliAppTests
         var bus = new InMemoryEventBus();
         var runner = new FakeRunner { Bus = bus };
         var host = new CliHost(runner, bus, new FakeLlm([]), [], new ReplOptions(), null);
-        var (app, stdout, _, factory) = Setup(host);
+        var (app, stdout, _, factory) = Setup(host, ReplOnly);
 
         var code = await app.RunAsync([], TextReader.Null, stdout, new StringWriter(), Tty, Tty);
 
         Assert.Equal(0, code);
         Assert.Empty(runner.Messages);
         Assert.Contains("di>", stdout.ToString());
+    }
+
+    [Fact]
+    public async Task Interactive_WithTuiEligible_LaunchesTui_SkipsRepl()
+    {
+        // M4：交互默认交 TS TUI。TTY + 入口可解析 + node 可用 + spawn 返回 0 → 返回 TUI 退出码，
+        // Repl 完全不跑（无 "di>" 提示、无回合消费 stdin）。
+        var root = Directory.CreateTempSubdirectory("di-tui-");
+        try
+        {
+            var entry = Path.Combine(root.FullName, "main.js");
+            File.WriteAllText(entry, "// tui");
+            var spawnCalls = 0;
+            var tui = new TuiLauncher.Context
+            {
+                GetEnv = _ => null,
+                ResolveEntry = _ => entry,
+                NodeAvailable = () => true,
+                Spawn = _ => { spawnCalls++; return 0; },
+            };
+            var bus = new InMemoryEventBus();
+            var runner = new FakeRunner { Bus = bus };
+            var host = new CliHost(runner, bus, new FakeLlm([]), [], new ReplOptions(), null);
+            var (app, stdout, stderr, factory) = Setup(host, tui);
+            var stdin = new StringReader("你好\n/exit\n");
+
+            var code = await app.RunAsync([], stdin, stdout, stderr, Tty, Tty);
+
+            Assert.Equal(0, code);
+            Assert.Empty(runner.Messages);   // Repl 未运行，无回合
+            Assert.DoesNotContain("di>", stdout.ToString());
+            Assert.Equal(1, spawnCalls);
+            Assert.Equal(1, factory.Calls);
+        }
+        finally
+        {
+            Directory.Delete(root.FullName, recursive: true);
+        }
     }
 
     // ---- 工具 ----

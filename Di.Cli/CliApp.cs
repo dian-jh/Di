@@ -18,9 +18,14 @@ namespace Di.Cli;
 public sealed class CliApp
 {
     private readonly Func<CliArgs, string, TextWriter, bool, CliHost> _hostFactory;
+    private readonly TuiLauncher.Context? _tuiContext;
 
-    public CliApp(Func<CliArgs, string, TextWriter, bool, CliHost>? hostFactory = null)
-        => _hostFactory = hostFactory ?? CliHost.Create;
+    public CliApp(Func<CliArgs, string, TextWriter, bool, CliHost>? hostFactory = null,
+        TuiLauncher.Context? tui = null)
+    {
+        _hostFactory = hostFactory ?? CliHost.Create;
+        _tuiContext = tui;
+    }
 
     /// <summary>运行一次 CLI 调用，返回进程退出码（0 = 成功，1 = 用法/运行错误）。</summary>
     public async Task<int> RunAsync(string[] args, TextReader stdin, TextWriter stdout, TextWriter stderr,
@@ -69,7 +74,8 @@ public sealed class CliApp
                     {
                         AppMode.ListModels => await ListModelsAsync(host, cliArgs.ListModels, stdout, cancellationToken),
                         AppMode.SkillEval => await SkillEvalAsync(host, cliArgs.SkillEval, stdout, stderr, cancellationToken),
-                        AppMode.Interactive => await InteractiveAsync(host, stdin, stdout, interrupt, cancellationToken),
+                        AppMode.Interactive => await InteractiveAsync(host, stdin, stdout, stderr, stdinTty, stdoutTty,
+                            interrupt, cancellationToken, _tuiContext),
                         AppMode.Rpc => await RpcMode.RunAsync(host, cliArgs, stdin, stdout, stderr, cancellationToken),
                         _ => await PrintMode.RunAsync(host, cliArgs, stdin, stdout, stderr, cancellationToken),
                     };
@@ -215,12 +221,28 @@ public sealed class CliApp
         return 0;
     }
 
-    /// <summary>交互 REPL：stdin 经流式行读取器喂给 Repl，stdout 渲染。</summary>
+    /// <summary>
+    /// 交互模式：默认把控制台交给 TS TUI（node 子进程，继承 stdio，见 docs/tui.md M4）；
+    /// 不可用（逃生门 DI_UI=repl / 入口缺失 / 无 node / spawn 失败）时回退 C# REPL，
+    /// stdin 经流式行读取器喂给 Repl，stdout 渲染。
+    /// </summary>
     private static async Task<int> InteractiveAsync(CliHost host, TextReader stdin, TextWriter stdout,
-        InterruptCoordinator? interrupt, CancellationToken cancellationToken)
+        TextWriter stderr, bool stdinTty, bool stdoutTty, InterruptCoordinator? interrupt,
+        CancellationToken cancellationToken, TuiLauncher.Context? tui)
     {
+        // M4：交互默认交 TS TUI（node <entry>，继承 stdio）。仅双 TTY 下尝试；
+        // 逃生门 DI_UI=repl / 入口缺失 / 无 node / spawn 异常/非零退出 → 回退 REPL（下方既有逻辑不动）。
+        if (stdinTty && stdoutTty)
+        {
+            var decision = TuiLauncher.TryLaunch(tui);
+            if (decision.Managed)
+                return decision.ExitCode;
+            if (decision.FallbackReason is { } reason)
+                await stderr.WriteLineAsync(reason);
+        }
+
         var repl = new Repl(host.Runner, host.Bus, new StreamLineReader(stdin), stdout,
-            host.ReplOptions, host.SessionLog, host.Skills, interrupt: interrupt);
+            host.ReplOptions, host.SessionLog, host.Skills, interrupt: interrupt, commands: host.Commands);
         await repl.RunAsync(cancellationToken);
         return 0;
     }
