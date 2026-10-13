@@ -44,6 +44,8 @@ ReAct 只**发布**事件、不渲染；CLI 从总线**消费**并流式渲染�
 | 事件 | 负载 | 含义 |
 |---|---|---|
 | `TextDelta` | `Delta` | 模型流式增量文本（逐字） |
+| `ReasoningDelta` | `Delta` | 推理内容增量（M1 新增，转发 `ModelEvent.ReasoningDelta`；TUI 展示思考） |
+| `ToolCallDelta` | `ToolCallId` / `Name` / `Arguments` | 工具调用增量（M1 新增，转发 `ModelEvent.ToolCallDelta`；`Arguments` 为迄今累计的原始 JSON 串，可能未完成） |
 | `ToolStarted` / `ToolCompleted` | 调用 / 观察（含 `IsError`） | 工具生命周期 |
 | `TurnCompleted` | 迭代号、`TokenUsage`、`UsageCost?`、`FinishReason` | 一次模型调用结束 |
 | `RunFailed` | `LlmFailure` | 循环层失败（不可重试） |

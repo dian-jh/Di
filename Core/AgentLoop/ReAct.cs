@@ -176,6 +176,14 @@ public sealed class ReAct
                 case ModelEvent.TextDelta { Text: var text }:
                     Emit(new AgentLoopEvent.TextDelta(text));
                     break;
+                case ModelEvent.ReasoningDelta { Text: var reasoning }:
+                    // M1：推理增量不再丢弃，转发给 UI（TUI 展示思考）。
+                    Emit(new AgentLoopEvent.ReasoningDelta(reasoning));
+                    break;
+                case ModelEvent.ToolCallDelta { Id: var id, Name: var name, Arguments: var args }:
+                    // M1：工具参数碎片以"迄今累计值"转发，UI 可实时展示（可能未完成）。
+                    Emit(new AgentLoopEvent.ToolCallDelta(id, name, args));
+                    break;
                 case ModelEvent.Completed completed:
                     response = completed.Response;
                     break;

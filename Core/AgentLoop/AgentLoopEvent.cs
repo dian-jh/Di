@@ -12,6 +12,19 @@ public abstract record AgentLoopEvent : Event
     /// <summary>流式文本增量（模型逐字输出）。UI 据此实时渲染，日志可据此做逐字遥测。</summary>
     public sealed record TextDelta(string Delta) : AgentLoopEvent;
 
+    /// <summary>
+    /// 推理内容增量（思考模式，逐段转发自 <see cref="ModelEvent.ReasoningDelta"/>）。
+    /// M1 新增：TUI 据此展示思考过程；既有文本渲染器（EventRenderer）对未知类型天然忽略。
+    /// </summary>
+    public sealed record ReasoningDelta(string Delta) : AgentLoopEvent;
+
+    /// <summary>
+    /// 工具调用增量（逐段转发自 <see cref="ModelEvent.ToolCallDelta"/>）。
+    /// <see cref="Arguments"/> 为迄今累计的原始 JSON 串，可能尚未完成；UI 据此实时展示工具调用。
+    /// 名为 <c>ToolCallId</c> 而非 <c>Id</c>：基类 <see cref="Event.Id"/> 已是 Guid，位置参数不能与之重名。
+    /// </summary>
+    public sealed record ToolCallDelta(string ToolCallId, string Name, string Arguments) : AgentLoopEvent;
+
     /// <summary>一次模型调用完成（含累计用量、累计成本与停止原因）。</summary>
     public sealed record TurnCompleted(int Iteration, TokenUsage Usage, UsageCost? Cost, FinishReason FinishReason) : AgentLoopEvent;
 

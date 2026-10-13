@@ -581,6 +581,51 @@ public sealed class ReActTests
         Assert.Single(observer.Events.OfType<AgentLoopEvent.TextDelta>());
     }
 
+    [Fact]
+    public async Task RunStreamingAsync_ForwardsReasoningDeltaEvents()
+    {
+        var model = new FakeChatModel();
+        model.EnqueueStream(_ => StreamOf(
+            new ModelEvent.ReasoningDelta("思"),
+            new ModelEvent.ReasoningDelta("考"),
+            CompletedResponse("ok", new TokenUsage(10, 5))));
+        var (loop, observer) = LoopWithObserver(model);
+
+        var result = await loop.RunStreamingAsync(Request());
+
+        // M1：推理增量不再被丢弃，转发为 AgentLoopEvent.ReasoningDelta（TUI 据此展示思考）。
+        Assert.Equal(new[] { "思", "考" },
+            observer.Events.OfType<AgentLoopEvent.ReasoningDelta>().Select(d => d.Delta));
+        Assert.Equal("ok", result.Answer);
+        Assert.Equal(AgentStopReason.Answer, result.StopReason);
+    }
+
+    [Fact]
+    public async Task RunStreamingAsync_ForwardsToolCallDeltaEvents()
+    {
+        var model = new FakeChatModel();
+        model.EnqueueStream(_ => StreamOf(
+            new ModelEvent.ToolCallDelta("c1", "echo", """{"x":"""),
+            new ModelEvent.ToolCallDelta("c1", "echo", """{"x":1}"""),
+            new ModelEvent.Completed(new ModelResponse
+            {
+                Message = ChatMessage.Assistant("done"),
+                FinishReason = new FinishReason.Stop(),
+                Usage = TokenUsage.Zero,
+            })));
+        var (loop, observer) = LoopWithObserver(model);
+
+        await loop.RunStreamingAsync(Request());
+
+        // M1：工具参数碎片以"迄今累计值"逐段转发，UI 可实时展示工具调用（可能未完成）。
+        var deltas = observer.Events.OfType<AgentLoopEvent.ToolCallDelta>().ToArray();
+        Assert.Equal(2, deltas.Length);
+        Assert.Equal("c1", deltas[0].ToolCallId);
+        Assert.Equal("echo", deltas[0].Name);
+        Assert.Equal("""{"x":""", deltas[0].Arguments);
+        Assert.Equal("""{"x":1}""", deltas[1].Arguments);
+    }
+
     private static async IAsyncEnumerable<ModelEvent> StreamOf(params ModelEvent[] events)
     {
         foreach (var evt in events)
