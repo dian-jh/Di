@@ -40,6 +40,7 @@ public static class CliInfo
           --no-ansi             禁用 ANSI 控制序列（脚本友好）
           -h, --help            显示本帮助
           --version             显示版本
+          --info                打印环境 / 构建 / 生效配置（诊断：验证安装的二进制是否为最新）
 
         配置: ~/.di/config.json 与 &lt;workspace&gt;/.di/config.json（JSON，覆盖 appsettings 默认值）。
         """;

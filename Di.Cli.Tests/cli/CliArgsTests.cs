@@ -88,6 +88,15 @@ public sealed class CliArgsTests
     }
 
     [Fact]
+    public void Parse_InfoFlag_True()
+    {
+        var (args, diags) = Parse("--info");
+
+        Assert.True(args.Info);
+        Assert.Empty(diags);
+    }
+
+    [Fact]
     public void Parse_ShortHelpFlag_True()
     {
         var (args, diags) = Parse("-h");

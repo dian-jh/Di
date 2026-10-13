@@ -113,6 +113,50 @@ public sealed class EventRendererTests
     }
 
     [Fact]
+    public void RenderResult_MaxIterations_WithAnswer_PrintsPartialAnswer()
+    {
+        var output = new StringWriter();
+        var renderer = new EventRenderer(output);
+        var result = new AgentResult
+        {
+            Answer = "已修复 fib，但还没跑完测试",
+            Trajectory = [ChatMessage.User("hi")],
+            Usage = new TokenUsage(7, 3),
+            Iterations = 24,
+            StopReason = AgentStopReason.MaxIterations,
+        };
+
+        renderer.RenderResult(result);
+
+        var text = output.ToString();
+        Assert.Contains("已达迭代上限", text);
+        Assert.Contains("已修复 fib，但还没跑完测试", text);
+        Assert.Contains("MaxIterations", text);
+        Assert.Contains("24 轮", text);
+    }
+
+    [Fact]
+    public void RenderResult_MaxIterations_EmptyAnswer_StillPrintsNotice()
+    {
+        var output = new StringWriter();
+        var renderer = new EventRenderer(output);
+        var result = new AgentResult
+        {
+            Answer = "",
+            Trajectory = [ChatMessage.User("hi")],
+            Usage = new TokenUsage(7, 3),
+            Iterations = 8,
+            StopReason = AgentStopReason.MaxIterations,
+        };
+
+        renderer.RenderResult(result);
+
+        var text = output.ToString();
+        Assert.Contains("已达迭代上限", text);
+        Assert.Contains("MaxIterations", text);   // 即便无文本也有可见收尾
+    }
+
+    [Fact]
     public void ShowStatus_WritesStatusLineWithNewline()
     {
         var output = new StringWriter();

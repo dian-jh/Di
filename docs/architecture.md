@@ -10,8 +10,8 @@
 
 Di 是一个 **C# / .NET 10 的本地编程 agent harness**：终端 REPL 接收用户输入，
 驱动 **ReAct 循环** 调用大模型（当前为 DeepSeek），模型通过 **八个内置编码工具**
-（读 / 写 / 编辑文件、glob、grep、bash、powershell、python）在工作区内完成任务，
-整个过程经 **事件总线** 流式渲染，回合落盘为 **JSONL 会话日志**，
+（读 / 写 / 编辑文件、glob、grep、shell [Windows 为 cmd、其他平台为 bash]、powershell、python）
+在工作区内完成任务，整个过程经 **事件总线** 流式渲染，回合落盘为 **JSONL 会话日志**，
 并支持 **skills**（按需加载的指令工作流，渐进式披露）。
 
 ```

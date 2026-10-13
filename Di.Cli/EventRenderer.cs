@@ -7,6 +7,8 @@ namespace Di.Cli;
 /// <see cref="AgentLoopEvent.TextDelta"/> 以追加方式实时写出（流式），其余事件各自成行；
 /// 最终回答在流式下就是最后一段增量文本，故 <see cref="RenderResult"/> 只打印元信息脚注，
 /// 仅在 <see cref="AgentStopReason.FinalOutputTool"/>（答案未流式）时补打印答案块。
+/// <see cref="AgentStopReason.MaxIterations"/>（预算耗尽）时补打印模型最后一段输出，
+/// 避免"跑完没结果"（历史教训：旧二进制 8 轮截断，headless 无任何收尾）。
 /// </summary>
 public sealed class EventRenderer
 {
@@ -88,6 +90,14 @@ public sealed class EventRenderer
             // 最终输出工具的答案（参数）未经流式渲染，这里打印。
             _output.WriteLine("════ 回答 ════");
             _output.WriteLine(result.Answer);
+        }
+        else if (result.StopReason == AgentStopReason.MaxIterations)
+        {
+            // 预算耗尽兜底：打印模型最后一段文本（可能是半成品），让调用方至少有可见的收尾，
+            // 而不是只有一个统计脚注。Answer 在 MaxIterations 下 = 最后一段助手文本，可能为空。
+            _output.WriteLine("⚠ 已达迭代上限，任务可能未完成。模型最后输出：");
+            if (!string.IsNullOrWhiteSpace(result.Answer))
+                _output.WriteLine(result.Answer);
         }
 
         _output.Write($"（{result.StopReason} · {result.Iterations} 轮 · tokens: {result.Usage}");

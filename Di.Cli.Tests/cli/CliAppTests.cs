@@ -39,6 +39,24 @@ public sealed class CliAppTests
     }
 
     [Fact]
+    public async Task Info_PrintsEnvironmentAndEffectiveConfig_ExitsZero_WithoutBuildingHost()
+    {
+        var (app, stdout, stderr, factory) = Setup();
+
+        var code = await app.RunAsync(["--info"], TextReader.Null, stdout, stderr, Tty, Tty);
+
+        Assert.Equal(0, code);
+        var text = stdout.ToString();
+        Assert.Contains("版本", text);
+        Assert.Contains("生效配置", text);
+        Assert.Contains("MaxIterations", text);
+        Assert.Contains("DefaultModel", text);
+        Assert.Contains("Shell 工具", text);
+        Assert.Equal("", stderr.ToString());
+        Assert.Equal(0, factory.Calls);   // 信息路径不得构建宿主
+    }
+
+    [Fact]
     public async Task Help_PrintsUsage_ExitsZero_WithoutBuildingHost()
     {
         var (app, stdout, stderr, factory) = Setup();

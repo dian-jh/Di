@@ -18,6 +18,9 @@ public enum AppMode
     /// <summary>打印版本后退出。</summary>
     Version,
 
+    /// <summary>打印生效配置 / 构建 / 环境信息后退出（诊断用，不建 DI）。</summary>
+    Info,
+
     /// <summary>打印帮助后退出。</summary>
     Help,
 
@@ -34,9 +37,11 @@ public static class CliMode
 {
     public static AppMode Resolve(CliArgs args, bool stdinIsTty, bool stdoutIsTty)
     {
-        // 短路径优先：版本 / 帮助 / 列模型，命中即退出，不进入交互。
+        // 短路径优先：版本 / 信息 / 帮助 / 列模型，命中即退出，不进入交互。
         if (args.Version)
             return AppMode.Version;
+        if (args.Info)
+            return AppMode.Info;
         if (args.Help)
             return AppMode.Help;
         if (args.ListModels is not null)

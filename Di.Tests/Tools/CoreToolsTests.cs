@@ -10,7 +10,12 @@ namespace Di.Tests.Tools;
 /// </summary>
 public sealed class CoreToolsTests : IDisposable
 {
-    private static readonly string[] ExpectedNames =
+    /// <summary>工具向模型展示的名字（shell 工具随平台：Windows 为 "cmd"）。</summary>
+    private static readonly string[] ExpectedToolNames =
+        ["read_file", "write_file", "edit_file", "glob", "grep", CoreTools.PlatformShellName, "powershell", "python"];
+
+    /// <summary>内部注册键（AllToolNames 用；shell 工具的键固定为 "bash"，展示名见 PlatformShellName）。</summary>
+    private static readonly string[] ExpectedInternalKeys =
         ["read_file", "write_file", "edit_file", "glob", "grep", "bash", "powershell", "python"];
 
     private static readonly string? PythonExe = TestEnvironment.FindPython();
@@ -29,8 +34,8 @@ public sealed class CoreToolsTests : IDisposable
 
         Assert.Equal(8, tools.Count);
         Assert.Equal(8, tools.Select(t => t.Name).Distinct().Count());
-        Assert.True(ExpectedNames.All(n => tools.Any(t => t.Name == n)),
-            $"缺少工具: {string.Join(", ", ExpectedNames.Where(n => tools.All(t => t.Name != n)))}");
+        Assert.True(ExpectedToolNames.All(n => tools.Any(t => t.Name == n)),
+            $"缺少工具: {string.Join(", ", ExpectedToolNames.Where(n => tools.All(t => t.Name != n)))}");
     }
 
     [Fact]
@@ -79,7 +84,7 @@ public sealed class CoreToolsTests : IDisposable
     {
         var tools = CoreTools.CreateReadOnlyTools(_base);
 
-        Assert.DoesNotContain(tools, t => t.Name is "write_file" or "edit_file" or "bash" or "powershell" or "python");
+        Assert.Equal(["read_file", "glob", "grep"], tools.Select(t => t.Name).ToArray());
     }
 
     [Fact]
@@ -87,7 +92,8 @@ public sealed class CoreToolsTests : IDisposable
     {
         var tools = CoreTools.CreateCodingTools(_base);
 
-        Assert.Equal(["read_file", "write_file", "edit_file", "bash"], tools.Select(t => t.Name).ToArray());
+        Assert.Equal(["read_file", "write_file", "edit_file", CoreTools.PlatformShellName],
+            tools.Select(t => t.Name).ToArray());
     }
 
     [Fact]
@@ -102,7 +108,45 @@ public sealed class CoreToolsTests : IDisposable
     public void AllToolNames_ContainsAllEight()
     {
         Assert.Equal(8, CoreTools.AllToolNames.Count);
-        Assert.True(ExpectedNames.All(CoreTools.AllToolNames.Contains));
+        Assert.True(ExpectedInternalKeys.All(CoreTools.AllToolNames.Contains));
+    }
+
+    [Fact]
+    public void PlatformShellName_MatchesBashToolName()
+    {
+        // 展示名随平台：Windows=cmd、其他=bash；注册表与工具实例必须一致。
+        Assert.True(CoreTools.PlatformShellName is "cmd" or "bash");
+        Assert.Equal(CoreTools.PlatformShellName, new BashTool(_base).Name);
+    }
+
+    [Fact]
+    public void BashTool_Definition_PlatformAwareGuidance()
+    {
+        var def = new BashTool(_base).Definition;
+
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal("cmd", def.Name);
+            Assert.Contains("cmd.exe", def.Description);
+            Assert.Contains("dir", def.Description);          // 明确提示 Windows 替代命令
+            Assert.Contains("没有 ls/tail/head/pwd/grep", def.Description);   // 警告模型别发 Unix 命令
+        }
+        else
+        {
+            Assert.Equal("bash", def.Name);
+        }
+    }
+
+    [Fact]
+    public void BashTool_WindowsGuidelines_TellModelAboutCmd()
+    {
+        var guidelines = new BashTool(_base).PromptGuidelines;
+
+        Assert.Contains(guidelines, g => g.Contains("切换目录用 cd 而不是 working_dir"));
+        if (OperatingSystem.IsWindows())
+            Assert.Contains(guidelines, g => g.Contains("findstr") && g.Contains("dir"));
+        else
+            Assert.Contains(guidelines, g => g.StartsWith("bash 是共享持久化会话"));
     }
 
     [Fact]
@@ -154,6 +198,16 @@ public sealed class CoreToolsTests : IDisposable
     public async Task Executor_BashRunsCommand()
     {
         using var executor = CoreTools.CreateExecutor(_base);
+        var result = await executor.ExecuteAsync(Call(CoreTools.PlatformShellName, """{"command":"echo core-bash"}"""));
+
+        Assert.Contains("core-bash", result);
+    }
+
+    [Fact]
+    public async Task Executor_LegacyBashAlias_RoutesToShellTool()
+    {
+        // 旧提示词 / 旧 skill 可能写 "bash"：Windows 上展示名已是 "cmd"，但仍应路由到同一个 shell 工具。
+        using var executor = CoreTools.CreateExecutor(_base);
         var result = await executor.ExecuteAsync(Call("bash", """{"command":"echo core-bash"}"""));
 
         Assert.Contains("core-bash", result);
@@ -200,8 +254,8 @@ public sealed class CoreToolsTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_base, "work"));
         using var executor = CoreTools.CreateExecutor(_base);
 
-        await executor.ExecuteAsync(Call("bash", """{"command":"cd work"}"""));
-        var result = await executor.ExecuteAsync(Call("bash",
+        await executor.ExecuteAsync(Call(CoreTools.PlatformShellName, """{"command":"cd work"}"""));
+        var result = await executor.ExecuteAsync(Call(CoreTools.PlatformShellName,
             OperatingSystem.IsWindows() ? """{"command":"cd"}""" : """{"command":"pwd"}"""));
 
         Assert.StartsWith("exit: 0", result);
@@ -211,8 +265,8 @@ public sealed class CoreToolsTests : IDisposable
     [Fact]
     public void Definitions_BashIsPersistentSession_OmitsWorkingDir()
     {
-        // Definitions 与 CreateExecutor 一致：bash 是持久化会话模式，schema 里没有 working_dir。
-        var def = CoreTools.Definitions(_base).Single(d => d.Name == "bash");
+        // Definitions 与 CreateExecutor 一致：shell 工具是持久化会话模式，schema 里没有 working_dir。
+        var def = CoreTools.Definitions(_base).Single(d => d.Name == CoreTools.PlatformShellName);
 
         Assert.NotNull(def.Parameters["properties"]!["command"]);
         Assert.False(def.Parameters["properties"]!.AsObject().ContainsKey("working_dir"));
@@ -252,7 +306,7 @@ public sealed class CoreToolsTests : IDisposable
         Assert.Contains("edit_file", text);
         Assert.Contains("glob", text);
         Assert.Contains("grep", text);
-        Assert.Contains("bash", text);
+        Assert.Contains(CoreTools.PlatformShellName, text);
         Assert.Contains("powershell", text);
         Assert.Contains("python", text);
     }
@@ -278,7 +332,7 @@ public sealed class CoreToolsTests : IDisposable
     {
         var text = CoreTools.BuildInstructions(_base);
 
-        var order = new[] { "read_file", "write_file", "edit_file", "glob", "grep", "bash", "powershell", "python" };
+        var order = new[] { "read_file", "write_file", "edit_file", "glob", "grep", CoreTools.PlatformShellName, "powershell", "python" };
         var positions = order.Select(name => text.IndexOf(name, StringComparison.Ordinal)).ToArray();
         for (var i = 1; i < positions.Length; i++)
             Assert.True(positions[i - 1] < positions[i], $"工具清单顺序错乱：{order[i - 1]} 应排在 {order[i]} 之前");

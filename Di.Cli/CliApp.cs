@@ -1,4 +1,12 @@
+using System.Runtime.InteropServices;
+using Core.AgentLoop;
+using Core.Configuration;
+using Core.Llm;
+using Core.Sessions;
+using Core.Skills;
+using Core.Tools;
 using Di.Cli.Modes;
+using Microsoft.Extensions.Configuration;
 
 namespace Di.Cli;
 
@@ -43,6 +51,9 @@ public sealed class CliApp
                 await stdout.WriteLineAsync(CliInfo.Version);
                 return 0;
 
+            case AppMode.Info:
+                return await InfoAsync(cliArgs, workspace, stdout);
+
             case AppMode.Help:
                 await stdout.WriteAsync(CliInfo.HelpText);
                 return 0;
@@ -63,6 +74,63 @@ public sealed class CliApp
                     };
                 }
         }
+    }
+
+    /// <summary>
+    /// 打印环境 / 构建 / 生效配置信息（短路径，不建 DI）：验证安装的二进制是否最新、
+    /// 生效的 MaxIterations / 模型 / provider 来自哪里。历史教训：旧二进制的
+    /// <c>AgentLoop:MaxIterations</c> 是 8，headless 跑到 8 轮就截断，用户却看不出二进制过期。
+    /// 命令行覆盖（--model/--provider/--thinking）与 <see cref="CliHost.Create"/> 保持一致地标注。
+    /// </summary>
+    private static async Task<int> InfoAsync(CliArgs args, string workspace, TextWriter stdout)
+    {
+        var diHome = DiHome.Resolve();
+        var configuration = DiConfig.Load(workspace, diHome.RootDirectory);
+
+        var agentLoop = new AgentLoopOptions();
+        configuration.GetSection("AgentLoop").Bind(agentLoop);
+        var modelOptions = new ModelOptions();
+        configuration.GetSection("Model").Bind(modelOptions);
+
+        // single-file 自包含发布下 Assembly.Location 为空串（IL3000），用进程真实路径（di.exe）。
+        var assemblyPath = Environment.ProcessPath
+            ?? Path.Combine(AppContext.BaseDirectory, $"{CliInfo.Name}.exe");
+        var builtAt = File.Exists(assemblyPath) ? File.GetLastWriteTimeUtc(assemblyPath) : (DateTimeOffset?)null;
+        var os = OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsLinux() ? "Linux" : "macOS";
+        var maxIterationsConfigured = configuration.GetValue<int?>("AgentLoop:MaxIterations", null);
+
+        var effectiveProvider = !string.IsNullOrWhiteSpace(args.Provider) ? args.Provider : modelOptions.Provider;
+        var effectiveModel = args.Model ?? modelOptions.DefaultModel;
+
+        await stdout.WriteLineAsync("di —— 简洁的 ReAct 编码助手（harness）");
+        await stdout.WriteLineAsync($"版本:        {CliInfo.Version}");
+        await stdout.WriteLineAsync($"运行时:      {RuntimeInformation.FrameworkDescription}（{os}）");
+        await stdout.WriteLineAsync($"可执行文件:  {assemblyPath}" +
+            (builtAt is { } t ? $"  （构建于 {t:yyyy-MM-dd HH:mm} UTC）" : ""));
+        await stdout.WriteLineAsync($"工作区:      {workspace}");
+        await stdout.WriteLineAsync($"Di 家目录:   {diHome.RootDirectory}");
+        await stdout.WriteLineAsync($"Shell 工具:  {CoreTools.PlatformShellName}  （Windows 用 cmd.exe，其他平台用 bash）");
+        await stdout.WriteLineAsync();
+        await stdout.WriteLineAsync("配置源（后加载覆盖先加载）:");
+        await stdout.WriteLineAsync($"  内置 appsettings.json             {Path.Combine(AppContext.BaseDirectory, "appsettings.json")}");
+        await stdout.WriteLineAsync($"  用户 ~/.di/config.json            {diHome.ConfigFile}" +
+            (File.Exists(diHome.ConfigFile) ? "  存在" : "  不存在"));
+        await stdout.WriteLineAsync($"  项目 <workspace>/.di/config.json  {DiHome.ProjectConfigFile(workspace)}" +
+            (File.Exists(DiHome.ProjectConfigFile(workspace)) ? "  存在" : "  不存在"));
+        var diHomeEnv = Environment.GetEnvironmentVariable(DiHome.EnvVariableName);
+        await stdout.WriteLineAsync($"  环境变量 DI_HOME                  {(string.IsNullOrWhiteSpace(diHomeEnv) ? "（未设置）" : diHomeEnv)}");
+        await stdout.WriteLineAsync();
+        await stdout.WriteLineAsync("生效配置（含命令行覆盖）:");
+        await stdout.WriteLineAsync($"  AgentLoop:MaxIterations     {agentLoop.MaxIterations}  " +
+            (maxIterationsConfigured is null ? "（来源: 默认值）" : "（来源: 配置显式覆盖）"));
+        await stdout.WriteLineAsync($"  AgentLoop:HistoryBudgetRatio {agentLoop.HistoryBudgetRatio:F2}");
+        await stdout.WriteLineAsync($"  AgentLoop:ReasoningEffort   {(string.IsNullOrWhiteSpace(agentLoop.ReasoningEffort) ? "未设置" : agentLoop.ReasoningEffort)}" +
+            (string.IsNullOrWhiteSpace(args.Thinking) ? "" : $"   ← --thinking 覆盖为 {args.Thinking}"));
+        await stdout.WriteLineAsync($"  Model:Provider              {effectiveProvider}" +
+            (string.IsNullOrWhiteSpace(args.Provider) ? "" : "   ← --provider 覆盖"));
+        await stdout.WriteLineAsync($"  Model:DefaultModel          {effectiveModel}" +
+            (string.IsNullOrWhiteSpace(args.Model) ? "" : "   ← --model 覆盖"));
+        return 0;
     }
 
     /// <summary>交互 REPL：stdin 经流式行读取器喂给 Repl，stdout 渲染。</summary>

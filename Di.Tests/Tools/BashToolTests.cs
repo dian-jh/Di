@@ -221,7 +221,7 @@ public sealed class BashToolTests : IDisposable
     public void Definition_HasNameAndSchema()
     {
         var def = new BashTool(_base).Definition;
-        Assert.Equal("bash", def.Name);
+        Assert.Equal(CoreTools.PlatformShellName, def.Name);   // Windows 为 "cmd"，其他平台为 "bash"
         Assert.True(def.Parameters["properties"]!["command"] is not null);
     }
 
@@ -339,7 +339,7 @@ public sealed class BashToolTests : IDisposable
         using var session = new ShellSession(_base);
         var def = new BashTool(_base, session: session).Definition;
 
-        Assert.Equal("bash", def.Name);
+        Assert.Equal(CoreTools.PlatformShellName, def.Name);   // Windows 为 "cmd"，其他平台为 "bash"
         Assert.NotNull(def.Parameters["properties"]!["command"]);
         Assert.False(def.Parameters["properties"]!.AsObject().ContainsKey("working_dir"));
         Assert.Contains("持久化", def.Description);

@@ -7,7 +7,7 @@
 ## 目的与职责
 
 Coding Agent 的**八个核心编码工具**（对应 pi 的 `https://github.com/earendil-works/pi/tree/main/packages/coding-agent/src/core/tools/index.ts` 约定）+ 注册表 + 执行器。
-模型通过它们在工作区内完成任务：读 / 写 / 编辑文件、glob / grep 搜索、bash / powershell / python 执行。
+模型通过它们在工作区内完成任务：读 / 写 / 编辑文件、glob / grep 搜索、shell / powershell / python 执行。
 
 ## 实现原理
 
@@ -26,6 +26,11 @@ Coding Agent 的**八个核心编码工具**（对应 pi 的 `https://github.com
 
 - `ToolNames`：8 个工具名常量；`AllToolNames`（8 个）、`CodingToolNames`（read/write/edit/bash）、
   `ReadOnlyToolNames`（read/glob/grep）。
+- **shell 工具名随平台**（`CoreTools.PlatformShellName`）：`ToolNames.Bash = "bash"` 只是**内部注册键**，
+  向模型展示的名字是 **Windows 为 `cmd`**（cmd.exe 命令提示符）、**其他平台为 `bash`**。
+  描述 / `PromptSnippet` / `PromptGuidelines` 同样平台感知（Windows 上明确提示模型用
+  `dir`/`type`/`findstr`/`echo %CD%`，避免发 `ls`/`tail`/`pwd` 得到"不是内部或外部命令"）；
+  `CoreTools.Executor` 额外保留 `"bash"` 兼容别名（旧提示词 / 旧 skill 仍可调用，路由到同一实例）。
 - **当前生产代码只用全量**（`Di.Cli/CliHost.cs` 调 `CoreTools.Definitions(workspace)`）；
   coding/read-only 是**预留的扩展缝，不是死代码，是组合能力**（镜像 pi 的
   `createAllToolDefinitions`，见 `https://github.com/earendil-works/pi/tree/main/packages/coding-agent/src/core/agent-session.ts` ——pi 自身
@@ -68,8 +73,8 @@ schema 表达不了的**操作知识**（观察约定 / 行为偏好 / 协议）
 | edit_file | `Core/Tools/EditFileTool.cs` | old_string 唯一性校验的精准替换 |
 | glob | `Core/Tools/GlobTool.cs` + `Core/Tools/GlobMatcher.cs` | 文件名模式搜索（`* ? **`）；匹配器独立可单测 |
 | grep | `Core/Tools/GrepTool.cs` | 正则内容搜索，`file:行号: 内容` 输出；limit/ignore_case/literal/context |
-| bash | `Core/Tools/BashTool.cs` | 一次性独立进程或共享持久化会话；超时强杀（默认 30s）；Windows 手工构造 `cmd /d /s /c` |
-| powershell | `Core/Tools/PowerShellTool.cs` | 独立 PowerShell 持久化会话（不能与 bash 共用） |
+| cmd / bash | `Core/Tools/BashTool.cs` | 平台默认 shell（Windows 展示为 `cmd`，其他平台为 `bash`）；一次性独立进程或共享持久化会话；超时强杀（默认 30s）；Windows 手工构造 `cmd /d /s /c`，模型侧保留 `bash` 兼容别名 |
+| powershell | `Core/Tools/PowerShellTool.cs` | 独立 PowerShell 持久化会话（不能与 shell 工具共用） |
 | python | `Core/Tools/PythonTool.cs` | 沙盒临时目录执行代码（计算 / 数据处理 / 图表） |
 
 ## 代码入口
@@ -83,9 +88,9 @@ schema 表达不了的**操作知识**（观察约定 / 行为偏好 / 协议）
 
 ## 关键符号
 
-- `ICoreTool`、`CoreTools`（`ToolNames` / `AllToolNames` / `CodingToolNames` / `ReadOnlyToolNames` /
-  `Definitions` / `CreateExecutor` / `CreateTools` / `CreateCodingTools` / `CreateReadOnlyTools` /
-  `BuildInstructions` / `Options`（per-tool 嵌套配置类）/ `Executor`）
+- `ICoreTool`、`CoreTools`（`ToolNames` / `PlatformShellName` / `AllToolNames` / `CodingToolNames` /
+  `ReadOnlyToolNames` / `Definitions` / `CreateExecutor` / `CreateTools` / `CreateCodingTools` /
+  `CreateReadOnlyTools` / `BuildInstructions` / `Options`（per-tool 嵌套配置类）/ `Executor`）
 - `ShellSession`、`ProcessRunner`、`OutputBuffer`、`ProcessEncoding`、`ToolHelpers`
 - `CoreTools.Executor`（`IToolExecutor` 实现，按工具名分发，未知名返回错误观察）
 

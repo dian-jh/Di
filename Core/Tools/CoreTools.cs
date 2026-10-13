@@ -27,17 +27,35 @@ public static class CoreTools
         public const string EditFile = "edit_file";
         public const string Glob = "glob";
         public const string Grep = "grep";
+
+        /// <summary>
+        /// 通用 shell 工具的<b>内部注册键</b>（工具集 / 路由用）。
+        /// 向模型展示的名字是 <see cref="PlatformShellName"/>（Windows 为 "cmd"，其他平台为 "bash"），
+        /// 两者不同名，因此 Executor 额外保留 "bash" 兼容别名（旧提示词 / 旧 skill 仍可调用）。
+        /// </summary>
         public const string Bash = "bash";
+
         public const string PowerShell = "powershell";
         public const string Python = "python";
     }
+
+    /// <summary>
+    /// 平台默认 shell 工具向模型展示的名字：Windows 为 "cmd"（cmd.exe 命令提示符），
+    /// 其他平台为 "bash"。BashTool 据此决定 Name / Definition / PromptSnippet / PromptGuidelines；
+    /// Windows 上保留 "bash" 兼容别名（见 <see cref="Executor"/> 构造），旧提示词仍可调用。
+    /// </summary>
+    public static string PlatformShellName => OperatingSystem.IsWindows() ? "cmd" : "bash";
 
     /// <summary>全部内置工具名（对应 pi 的 allToolNames）。</summary>
     public static readonly IReadOnlySet<string> AllToolNames = new HashSet<string>(
         [ToolNames.ReadFile, ToolNames.WriteFile, ToolNames.EditFile, ToolNames.Glob, ToolNames.Grep, ToolNames.Bash, ToolNames.PowerShell, ToolNames.Python],
         StringComparer.Ordinal);
 
-    /// <summary>可写工具集（能修改文件系统）——对应 pi 的 coding tools。</summary>
+    /// <summary>
+    /// 可写工具集（能修改文件系统）——对应 pi 的 coding tools。
+    /// 最后一个成员 <see cref="ToolNames.Bash"/> 是内部注册键，实际展示名随平台
+    /// （Windows 为 "cmd"），见 <see cref="PlatformShellName"/>。
+    /// </summary>
     public static readonly IReadOnlySet<string> CodingToolNames = new HashSet<string>(
         [ToolNames.ReadFile, ToolNames.WriteFile, ToolNames.EditFile, ToolNames.Bash], StringComparer.Ordinal);
 
@@ -279,7 +297,14 @@ public static class CoreTools
 
         public Executor(IEnumerable<ICoreTool> tools, ShellSession? session = null, ShellSession? powerShellSession = null)
         {
-            _tools = tools.ToDictionary(t => t.Name);
+            var dict = new Dictionary<string, ICoreTool>(StringComparer.Ordinal);
+            foreach (var tool in tools)
+                dict[tool.Name] = tool;
+            // 兼容别名：非 Windows 上 shell 工具名本就是 "bash"（无需别名）；
+            // Windows 上展示名是 "cmd"，但旧提示词 / 旧 skill 可能写 "bash"，路由到同一实例。
+            if (dict.TryGetValue(CoreTools.PlatformShellName, out var shellTool) && !dict.ContainsKey(ToolNames.Bash))
+                dict[ToolNames.Bash] = shellTool;
+            _tools = dict;
             _session = session;
             _powerShellSession = powerShellSession;
         }

@@ -25,6 +25,9 @@ public sealed record CliArgs
     /// <summary>--version：打印版本后退出。</summary>
     public bool Version { get; init; }
 
+    /// <summary>--info：打印生效配置 / 构建 / 环境信息后退出（诊断"装的二进制是不是旧的"）。</summary>
+    public bool Info { get; init; }
+
     /// <summary>--help / -h：打印帮助后退出。</summary>
     public bool Help { get; init; }
 
@@ -68,7 +71,7 @@ public static class CliArgsParser
         var diagnostics = new List<CliDiagnostic>();
         string? model = null, provider = null, mode = null, thinking = null;
         string? listModels = null;
-        bool print = false, version = false, help = false, noSession = false, noAnsi = false;
+        bool print = false, version = false, info = false, help = false, noSession = false, noAnsi = false;
         var listModelsSet = false;
         var afterDoubleDash = false;
 
@@ -90,6 +93,10 @@ public static class CliArgsParser
 
                 case "--version":
                     version = true;
+                    break;
+
+                case "--info":
+                    info = true;
                     break;
 
                 case "-h":
@@ -161,6 +168,7 @@ public static class CliArgsParser
             Print = print,
             Mode = mode,
             Version = version,
+            Info = info,
             Help = help,
             ListModels = listModelsSet ? listModels : null,
             Thinking = thinking,
