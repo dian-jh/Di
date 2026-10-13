@@ -36,4 +36,10 @@ public abstract record AgentLoopEvent : Event
 
     /// <summary>模型调用抛出不可重试错误，循环以 <see cref="AgentStopReason.Error"/> 结束。</summary>
     public sealed record RunFailed(LlmFailure Failure) : AgentLoopEvent;
+
+    /// <summary>
+    /// 循环因用户软停止请求，在相位边界优雅停下（<see cref="AgentStopReason.Interrupted"/>）。
+    /// UI 据此提示"已中断、未执行的工作不再执行"；随后仍会收到携带完整结果的 <see cref="AgentResult"/>。
+    /// </summary>
+    public sealed record Interrupted : AgentLoopEvent;
 }

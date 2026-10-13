@@ -44,6 +44,8 @@ public sealed class FakeRunner : IAgentRunner
 
     public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
 
+    public IInterruptSignal? InterruptSignal { get; set; }
+
     public List<string> Messages { get; } = [];
 
     public TokenUsage Usage { get; set; } = new(10, 20);
@@ -83,6 +85,8 @@ public sealed class ThrowingRunner : IAgentRunner
 {
     public string CurrentModel { get; set; } = "deepseek-flash";
     public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
+
+    public IInterruptSignal? InterruptSignal { get; set; }
     public Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
         => throw new InvalidOperationException("boom");
     public void ResetHistory() { }
@@ -94,6 +98,8 @@ public sealed class ErrorRunner : IAgentRunner
     public IEventBus? Bus { get; set; }
     public string CurrentModel { get; set; } = "deepseek-flash";
     public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
+
+    public IInterruptSignal? InterruptSignal { get; set; }
     public LlmFailure Failure { get; set; } = new("缺少 API Key", "missing_credential");
 
     public void ResetHistory() { }

@@ -332,9 +332,10 @@ public sealed class ReplTests
     }
 
     [Fact]
-    public async Task CtrlC_FirstPress_CancelsRunningTurn_ReplStaysAlive()
+    public async Task CtrlC_FirstPressRequestsSoftStop_SecondPressHardCancels_ReplStaysAlive()
     {
-        // 集成：协调器把第一次 Ctrl+C 映射到"取消当前回合"，回合中断后 REPL 继续、会话不丢。
+        // 集成：协调器的递进式中断。第一次 Ctrl+C = 软停止（置位信号，回合照常跑完/由 ReAct 在边界观测）；
+        // 第二次 Ctrl+C = 硬取消（打断在途 I/O）。回合中断后 REPL 继续、会话不丢。
         var interrupt = new InterruptCoordinator();
         var output = new StringWriter();
         var bus = new InMemoryEventBus();
@@ -344,13 +345,34 @@ public sealed class ReplTests
 
         var runTask = repl.RunAsync();
         await runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));   // 等回合真正开始
-        var handled = interrupt.RequestInterrupt();                       // 第一次 Ctrl+C
-        await runTask.WaitAsync(TimeSpan.FromSeconds(5));                 // REPL 随后读到 /exit 正常退出
 
-        Assert.True(handled, "第一次 Ctrl+C 应被协调器处理");
-        Assert.Single(runner.Messages);   // 回合被取消，只跑了一次
+        var first = interrupt.RequestInterrupt();   // 第一次 Ctrl+C：软停止
+        Assert.True(first, "第一次 Ctrl+C 应被协调器处理");
+        Assert.True(interrupt.IsStopRequested, "第一次 Ctrl+C 应置位软停止信号（供 ReAct 在相位边界观测）");
+        Assert.False(interrupt.Lifetime.IsCancellationRequested, "软停止不应取消进程生命周期");
+
+        var second = interrupt.RequestInterrupt();  // 第二次 Ctrl+C：硬取消
+        Assert.True(second, "第二次 Ctrl+C 仍是回合级处理");
+        await runTask.WaitAsync(TimeSpan.FromSeconds(5));               // REPL 随后读到 /exit 正常退出
+
+        Assert.Single(runner.Messages);   // 只跑了一次
         Assert.Contains("回合已取消", output.ToString());
-        Assert.False(interrupt.Lifetime.IsCancellationRequested, "第一次 Ctrl+C 不应取消进程生命周期");
+        Assert.False(interrupt.Lifetime.IsCancellationRequested, "回合级中断不应取消进程生命周期");
+    }
+
+    [Fact]
+    public async Task CtrlC_SoftStopResult_RendersInterrupted_AndLogsTurn()
+    {
+        // 软停止是正常收敛（Interrupted 结果，非异常）：REPL 渲染"已中断"提示，且回合照常落盘。
+        var output = new StringWriter();
+        var bus = new InMemoryEventBus();
+        var runner = new InterruptedRunner();
+        var repl = new Repl(runner, bus, new FakeLineReader("你好", "/exit"), output, new ReplOptions());
+
+        await repl.RunAsync();
+
+        Assert.Contains("已中断", output.ToString());
+        Assert.Contains("Interrupted", output.ToString());   // 统计脚注含停止原因
     }
 
     [Fact]
@@ -446,6 +468,8 @@ public sealed class ReplTests
 
         public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
 
+        public IInterruptSignal? InterruptSignal { get; set; }
+
         public List<string> Messages { get; } = [];
 
         public bool ResetCalled { get; private set; }
@@ -477,6 +501,8 @@ public sealed class ReplTests
 
         public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
 
+        public IInterruptSignal? InterruptSignal { get; set; }
+
         public Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("boom");
 
@@ -489,6 +515,8 @@ public sealed class ReplTests
         public string CurrentModel { get; set; } = "deepseek-flash";
 
         public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
+
+        public IInterruptSignal? InterruptSignal { get; set; }
 
         public List<string> Messages { get; } = [];
 
@@ -510,6 +538,8 @@ public sealed class ReplTests
 
         public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
 
+        public IInterruptSignal? InterruptSignal { get; set; }
+
         public List<string> Messages { get; } = [];
 
         public void ResetHistory() { }
@@ -521,6 +551,33 @@ public sealed class ReplTests
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Delay(Timeout.Infinite, cancellationToken);   // 挂到取消
             throw new UnreachableException();
+        }
+    }
+
+    /// <summary>立即以 Interrupted 收敛（模拟软停止在相位边界生效，回合正常返回）。</summary>
+    private sealed class InterruptedRunner : IAgentRunner
+    {
+        public IEventBus? Bus { get; set; }
+
+        public string CurrentModel { get; set; } = "deepseek-flash";
+
+        public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
+
+        public IInterruptSignal? InterruptSignal { get; set; }
+
+        public void ResetHistory() { }
+
+        public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
+        {
+            if (Bus is not null)
+                await Bus.PublishAsync(new AgentLoopEvent.Interrupted());
+            return new AgentResult
+            {
+                Answer = "部分输出",
+                Trajectory = [ChatMessage.User(userMessage)],
+                Iterations = 1,
+                StopReason = AgentStopReason.Interrupted,
+            };
         }
     }
 }

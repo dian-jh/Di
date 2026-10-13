@@ -370,6 +370,7 @@ public static class RpcMode
             AgentStopReason.FinalOutputTool => "final_output_tool",
             AgentStopReason.MaxIterations => "max_iterations",
             AgentStopReason.Error => "error",
+            AgentStopReason.Interrupted => "interrupted",
             _ => "error",
         },
         iterations = result.Iterations,
@@ -405,6 +406,7 @@ public static class RpcMode
             finish_reason = t.FinishReason.Kind,
         },
         AgentLoopEvent.RunFailed f => new { kind = "run_failed", failure = FailurePayload(f.Failure) },
+        AgentLoopEvent.Interrupted => new { kind = "interrupted" },
         _ => throw new ArgumentOutOfRangeException(nameof(evt), evt, "未知的 AgentLoopEvent 类型"),
     };
 

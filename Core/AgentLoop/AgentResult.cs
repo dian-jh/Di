@@ -47,4 +47,10 @@ public enum AgentStopReason
 
     /// <summary>模型调用抛出不可重试的错误。</summary>
     Error,
+
+    /// <summary>
+    /// 用户请求软停止：在某个相位边界优雅停下（已开始的相位跑完，未开始的不启动）。
+    /// 见 <see cref="IInterruptSignal"/>；与硬取消（异常路径）不同，这是正常收敛，携带部分轨迹与已发生用量。
+    /// </summary>
+    Interrupted,
 }

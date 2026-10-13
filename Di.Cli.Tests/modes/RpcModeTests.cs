@@ -209,6 +209,23 @@ public sealed class RpcModeTests
         Assert.Equal("cancelled", result.RootElement.GetProperty("result").GetProperty("stop_reason").GetString());
     }
 
+    [Fact]
+    public async Task Rpc_SoftStoppedTurn_EmitsResultInterrupted()
+    {
+        // 软停止（Interrupted）是正常收敛：result.stop_reason = "interrupted"
+        // （区别于硬取消的 "cancelled"），且带轨迹/用量。
+        var bus = new InMemoryEventBus();
+        var host = new CliHost(new SoftStopRunner(), bus, new FakeLlm([]), [], new ReplOptions(), null);
+        var (code, output, _) = await RunAsync(host, new CliArgs(),
+            """{"type":"request","id":1,"method":"prompt","params":{"message":"hi"}}""");
+
+        Assert.Equal(0, code);
+        var lines = Lines(output);
+        using var result = JsonDocument.Parse(lines[^1]);
+        Assert.Equal("result", result.RootElement.GetProperty("type").GetString());
+        Assert.Equal("interrupted", result.RootElement.GetProperty("result").GetProperty("stop_reason").GetString());
+    }
+
     // ---- 会话级命令 ----
 
     [Fact]
@@ -568,6 +585,8 @@ public sealed class RpcModeTests
         public IEventBus? Bus { get; set; }
         public string CurrentModel { get; set; } = "deepseek-flash";
         public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
+
+        public IInterruptSignal? InterruptSignal { get; set; }
         public void ResetHistory() { }
 
         public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
@@ -596,6 +615,8 @@ public sealed class RpcModeTests
         public IEventBus? Bus { get; set; }
         public string CurrentModel { get; set; } = "deepseek-flash";
         public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
+
+        public IInterruptSignal? InterruptSignal { get; set; }
         public void ResetHistory() { }
 
         public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
@@ -621,6 +642,8 @@ public sealed class RpcModeTests
     {
         public string CurrentModel { get; set; } = "deepseek-flash";
         public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
+
+        public IInterruptSignal? InterruptSignal { get; set; }
         public void ResetHistory() { }
 
         public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
@@ -635,6 +658,8 @@ public sealed class RpcModeTests
     {
         public string CurrentModel { get; set; } = "deepseek-flash";
         public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
+
+        public IInterruptSignal? InterruptSignal { get; set; }
         public int ResetCalls { get; private set; }
         public void ResetHistory() => ResetCalls++;
 
@@ -645,6 +670,25 @@ public sealed class RpcModeTests
                 Trajectory = [],
                 Iterations = 0,
                 StopReason = AgentStopReason.Answer,
+            });
+    }
+
+    /// <summary>以 Interrupted 收敛并发布 Interrupted 事件（验证软停止的线格式：事件 + stop_reason）。</summary>
+    private sealed class SoftStopRunner : IAgentRunner
+    {
+        public string CurrentModel { get; set; } = "deepseek-flash";
+        public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
+
+        public IInterruptSignal? InterruptSignal { get; set; }
+        public void ResetHistory() { }
+
+        public Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
+            => Task.FromResult(new AgentResult
+            {
+                Answer = "部分输出",
+                Trajectory = [ChatMessage.User(userMessage)],
+                Iterations = 1,
+                StopReason = AgentStopReason.Interrupted,
             });
     }
 }

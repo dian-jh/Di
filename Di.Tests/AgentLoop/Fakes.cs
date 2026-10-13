@@ -81,6 +81,12 @@ internal sealed class RejectingValidator : IToolValidator
     public ToolCallBlock Validate(ToolCallBlock call) => throw new InvalidOperationException("拒绝执行");
 }
 
+/// <summary>可开关的软停止信号替身。测试在 fake 模型 / 执行器的回调里翻转它，以模拟"边界处恰好请求停止"。</summary>
+internal sealed class FakeInterruptSignal : IInterruptSignal
+{
+    public bool IsStopRequested { get; set; }
+}
+
 /// <summary>订阅事件总线并记录全部 AgentLoopEvent 的观察者。</summary>
 internal sealed class RecordingObserver : IEventHandler<AgentLoopEvent>
 {

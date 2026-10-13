@@ -47,6 +47,11 @@ public sealed class Repl
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
+        // 把软停止信号接到 runner（会话级）：Ctrl+C 第一次请求软停止，ReAct 在相位边界轮询它。
+        // 与 CurrentModel / ActiveSkills 同款——由前端持有并注入，harness 只读。
+        if (_interrupt is not null)
+            _runner.InterruptSignal = _interrupt;
+
         // 会话开始时写首行 session_meta（尽力而为：失败只告警，不阻塞 REPL）。
         try
         {

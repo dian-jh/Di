@@ -171,6 +171,42 @@ public sealed class EventRendererTests
     }
 
     [Fact]
+    public void Render_InterruptedEvent_WritesNotice()
+    {
+        var output = new StringWriter();
+        var renderer = new EventRenderer(output);
+        renderer.Render(new AgentLoopEvent.TextDelta("部分输出"));
+
+        renderer.Render(new AgentLoopEvent.Interrupted());
+
+        var text = output.ToString();
+        Assert.StartsWith("部分输出", text);   // 先关闭未换行的流式文本，再另起一行
+        Assert.Contains("已收到中断", text);
+    }
+
+    [Fact]
+    public void RenderResult_Interrupted_WritesNotice_NoAnswerReprint()
+    {
+        var output = new StringWriter();
+        var renderer = new EventRenderer(output);
+        var result = new AgentResult
+        {
+            Answer = "部分输出",   // 已随流式事件显示，不应重复回显
+            Trajectory = [ChatMessage.User("hi")],
+            Usage = new TokenUsage(7, 3),
+            Iterations = 1,
+            StopReason = AgentStopReason.Interrupted,
+        };
+
+        renderer.RenderResult(result);
+
+        var text = output.ToString();
+        Assert.Contains("已中断", text);
+        Assert.DoesNotContain("部分输出", text);
+        Assert.Contains("Interrupted", text);   // 统计脚注含停止原因
+    }
+
+    [Fact]
     public void ShowStatus_WritesStatusLineWithNewline()
     {
         var output = new StringWriter();

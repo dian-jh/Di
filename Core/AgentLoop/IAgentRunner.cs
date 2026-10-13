@@ -17,6 +17,13 @@ public interface IAgentRunner
     /// <summary>当前注入的 skills（固定激活 + 每回合自动匹配，可叠加），指令随每个回合注入系统上下文。</summary>
     IReadOnlyList<Skill> ActiveSkills { get; set; }
 
+    /// <summary>
+    /// 软停止信号（由前端注入，可空）：设置后，正在运行的回合会在下一个相位边界优雅停下
+    /// （<see cref="AgentStopReason.Interrupted"/>），不打断已开始的工作。会话级属性，与
+    /// <see cref="CurrentModel"/> / <see cref="ActiveSkills"/> 同款：前端持有并设置，harness 只读。
+    /// </summary>
+    IInterruptSignal? InterruptSignal { get; set; }
+
     /// <summary>运行一个用户回合，返回最终结果。</summary>
     Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default);
 

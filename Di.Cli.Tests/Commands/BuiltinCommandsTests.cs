@@ -174,6 +174,8 @@ public sealed class BuiltinCommandsTests
     {
         public string CurrentModel { get; set; } = "deepseek-flash";
         public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
+
+        public IInterruptSignal? InterruptSignal { get; set; }
         public int ResetCalls { get; private set; }
         public void ResetHistory() => ResetCalls++;
 

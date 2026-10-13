@@ -9,6 +9,7 @@ namespace Di.Cli;
 /// 仅在 <see cref="AgentStopReason.FinalOutputTool"/>（答案未流式）时补打印答案块。
 /// <see cref="AgentStopReason.MaxIterations"/>（预算耗尽）时补打印模型最后一段输出，
 /// 避免"跑完没结果"（历史教训：旧二进制 8 轮截断，headless 无任何收尾）。
+/// <see cref="AgentStopReason.Interrupted"/>（用户软停止）时补一行状态说明（文本已流式显示，不重复回显）。
 /// </summary>
 public sealed class EventRenderer
 {
@@ -76,6 +77,12 @@ public sealed class EventRenderer
                 CloseLine();
                 _output.WriteLine($"  ✗ 失败: [{f.Failure.Code}] {f.Failure.Message}");
                 break;
+            case AgentLoopEvent.Interrupted:
+                // 软停止请求已在某个相位边界生效：未开始的工作不再执行，回合即将正常收敛。
+                ClearStatus();
+                CloseLine();
+                _output.WriteLine("  ⏹ 已收到中断，正在安全停下…");
+                break;
         }
     }
 
@@ -98,6 +105,11 @@ public sealed class EventRenderer
             _output.WriteLine("⚠ 已达迭代上限，任务可能未完成。模型最后输出：");
             if (!string.IsNullOrWhiteSpace(result.Answer))
                 _output.WriteLine(result.Answer);
+        }
+        else if (result.StopReason == AgentStopReason.Interrupted)
+        {
+            // 软停止：模型已产出的文本在流式下已实时显示（不重复回显），这里只补一行状态说明。
+            _output.WriteLine("⏹ 已中断：未开始的工作不再执行。");
         }
 
         _output.Write($"（{result.StopReason} · {result.Iterations} 轮 · tokens: {result.Usage}");

@@ -30,6 +30,9 @@ namespace Core.AgentLoop;
 /// <item><see cref="IToolExecutor"/> —— 工具如何执行。</item>
 /// <item><see cref="IEventBus"/> —— 运行过程事件经事件总线派发（日志/遥测/UI 挂点，可空则不发）。
 ///     发布是旁路的：不阻塞循环、单个坏订阅者不拖垮 loop（总线负责异常隔离）。</item>
+/// <item><see cref="IInterruptSignal"/> —— 软停止：循环在两个相位边界（进入模型相位前 / 执行工具前）
+///     轮询它，请求后以 <see cref="AgentStopReason.Interrupted"/> 优雅收敛。可空 = 不可软中断。
+///     与硬取消（<see cref="RunAsync"/> 的 CancellationToken）正交。</item>
 /// </list>
 ///
 /// 故障语义：
@@ -46,12 +49,15 @@ public sealed class ReAct
     private readonly IChatModel _model;
     private readonly AgentLoopOptions _options;
     private readonly IEventBus? _eventBus;
+    private readonly IInterruptSignal? _interrupt;
 
-    public ReAct(IChatModel model, AgentLoopOptions options, IEventBus? eventBus = null)
+    public ReAct(IChatModel model, AgentLoopOptions options, IEventBus? eventBus = null,
+        IInterruptSignal? interrupt = null)
     {
         _model = model ?? throw new ArgumentNullException(nameof(model));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _eventBus = eventBus;
+        _interrupt = interrupt;
     }
 
     public Task<AgentResult> RunAsync(AgentRequest request, CancellationToken cancellationToken = default)
@@ -78,6 +84,11 @@ public sealed class ReAct
 
         while (iterations < maxIterations)
         {
+            // 相位边界 B0/B2：进入模型相位<b>之前</b>检查软停止。未开始的工作不启动——
+            // 已完成的工具结果照常保留在轨迹里，本回合以 Interrupted 优雅收敛。
+            if (_interrupt?.IsStopRequested == true)
+                return StopInterrupted(trajectory, usage, cost, iterations, request.History);
+
             iterations++;
 
             ModelResponse response;
@@ -120,6 +131,12 @@ public sealed class ReAct
                     StopReason = AgentStopReason.Answer,
                 };
             }
+
+            // 相位边界 B1：模型刚产出（可能是文本 + 工具调用），工具相位尚未开始。
+            // 软停止则不执行任何工具 —— 模型的可见文本已随流式事件到达 UI，这里原样保留为答案。
+            // 注意：轨迹尾部是"未被响应的 tool_calls"，宿主的 SanitizeHistory 会按良构规则处理它。
+            if (_interrupt?.IsStopRequested == true)
+                return StopInterrupted(trajectory, usage, cost, iterations, request.History);
 
             foreach (var call in toolCalls)
             {
@@ -233,6 +250,27 @@ public sealed class ReAct
         {
             return ($"error executing tool '{call.Name}': {ex.Message}", IsError: true);
         }
+    }
+
+    /// <summary>
+    /// 相位边界处的软停止：以 <see cref="AgentStopReason.Interrupted"/> 正常收敛（<b>不是</b>异常），
+    /// 保留部分答案（轨迹里最后一个 assistant 文本）、完整轨迹与已发生的 usage/cost。
+    /// 同时发布 <see cref="AgentLoopEvent.Interrupted"/> 供 UI 提示。
+    /// </summary>
+    private AgentResult StopInterrupted(IReadOnlyList<ChatMessage> trajectory, TokenUsage usage, UsageCost? cost,
+        int iterations, IReadOnlyList<ChatMessage>? history)
+    {
+        Emit(new AgentLoopEvent.Interrupted());
+        return new AgentResult
+        {
+            Answer = LastAssistantText(trajectory),
+            Trajectory = trajectory,
+            History = history,
+            Usage = usage,
+            Cost = cost,
+            Iterations = iterations,
+            StopReason = AgentStopReason.Interrupted,
+        };
     }
 
     /// <summary>不可重试的模型故障：以干净的 <see cref="AgentStopReason.Error"/> 结果结束，而不是抛异常。</summary>

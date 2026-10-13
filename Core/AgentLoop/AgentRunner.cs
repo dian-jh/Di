@@ -68,6 +68,9 @@ public sealed class AgentRunner : IAgentRunner
     /// </summary>
     public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
 
+    /// <summary>软停止信号（前端注入）：每回合转发给 <see cref="ReAct"/>，在相位边界轮询。</summary>
+    public IInterruptSignal? InterruptSignal { get; set; }
+
     public void ResetHistory()
     {
         _history = [];
@@ -77,7 +80,7 @@ public sealed class AgentRunner : IAgentRunner
     public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
     {
         var model = _modelFactory(CurrentModel);
-        var react = new ReAct(model, _options, _eventBus);
+        var react = new ReAct(model, _options, _eventBus, InterruptSignal);
 
         // 环境快照进持久历史，且只在内容变化时追加：稳定时它留在字节稳定前缀里，跨回合/迭代
         // 持续命中缓存，零重复支付；变化时（git 状态改变等）作为新 system 消息追加到历史末尾，
