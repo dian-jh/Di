@@ -36,6 +36,8 @@ public static class CliInfo
           --print               强制文本单发
           --thinking <级别>      推理强度（透传）
           --list-models [pat]   列出可用模型（可按 id/provider 过滤）
+          --stats <文件>         聚合一个会话 JSONL 的用量 / 缓存命中率 / 成本
+          --skill-eval <文件>    用带标签用例集评估 skill 匹配器（精确率 / 召回率）
           --no-session          headless 不写会话日志（默认写入 ~/.di/sessions/）
           --no-ansi             禁用 ANSI 控制序列（脚本友好）
           -h, --help            显示本帮助

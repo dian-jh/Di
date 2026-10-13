@@ -132,6 +132,7 @@ public sealed class SessionLog
                 CompletedAt = now.ToUnixTimeMilliseconds(),
                 DurationMs = (long)Math.Max(0, (now - startedAt).TotalMilliseconds),
                 Cost = result.Cost,   // 无费率时 null → 序列化省略该字段
+                Usage = result.Usage, // 含 cache_read/cache_write 与命中率，供会话级聚合（di --stats）
             });
         }
     }

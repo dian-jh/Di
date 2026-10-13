@@ -59,10 +59,14 @@ harness 在回合前按消息语义**自动匹配**激活，未激活的只**广
 - 显式调用：`/skill <名称>` 固定激活（跨回合保持）；`/skill <名称> <参数>` 一次性执行
   （对齐 Pi 的 `/skill:name args`，完整指令 + 参数作为用户请求跑一个回合，不固定）。
 
-### 匹配评估（`Core/Skills/SkillEvaluator.cs`）
+### 匹配评估（`Core/Skills/SkillEvaluator.cs` + `Core/Skills/SkillCaseLoader.cs`）
 
 在带标签用例集（`SkillTestCase(Message, ExpectedSkills)`）上统计精确率 / 召回率 / 无匹配率 /
 平均上下文 token（触发 / 排除测试即标签用例）。
+`di --skill-eval <cases.json>` 命令（`Di.Cli/CliApp.cs`）：用例文件为 JSON 数组，每项
+`{"message": "...", "expected_skills": ["..."]}`（snake_case，与线格式一致；`expected_skills`
+缺省 = 排除测试）。文件级错误抛异常；条目级错误告警并跳过。加载后用**与生产一致的 skills**
+（复用宿主发现结果）跑 `SkillEvaluator`，输出四项指标。
 
 ## 组件清单（全部在 `Core/Skills/`）
 
@@ -73,7 +77,9 @@ harness 在回合前按消息语义**自动匹配**激活，未激活的只**广
 | 多源发现合并 | `Core/Skills/SkillRepository.cs` | 有序多源合并（目录式 + 扁平式），同源冲突告警，无效跳过只告警 |
 | 标准位置 | `Core/Skills/SkillLocations.cs` | `~/.agents/skills` + 祖先 `.agents/skills` 发现（到 git 根，近者优先） |
 | 词法自动匹配 | `Core/Skills/SkillMatcher.cs` | `ISkillMatcher` + `LexicalSkillMatcher`（重叠系数，跳过被禁用项） |
+| 激活计算（共享） | `Core/Skills/SkillActivation.cs` | 固定 + 自动匹配叠加；REPL 与 headless 单发共用，结果写入 `ActiveSkills` |
 | 匹配评估 | `Core/Skills/SkillEvaluator.cs` | 精确率 / 召回率 / 无匹配率 / 上下文成本 |
+| 用例加载 | `Core/Skills/SkillCaseLoader.cs` | JSON 数组 → `SkillTestCase`；文件级错误抛、条目级告警跳过（`di --skill-eval` 用） |
 | 上下文渲染 | `Core/Skills/SkillContext.cs` | 广告块渲染 + token 成本估算 |
 | load_skill 工具 | `Core/Skills/SkillTools.cs` | `load_skill` 定义（含目录提示）+ `SkillAwareExecutor` 装饰器 |
 
@@ -83,9 +89,11 @@ harness 在回合前按消息语义**自动匹配**激活，未激活的只**广
 - `SkillRepository.Load(IReadOnlyList<string> sources, warn)`（有序源合并；`Load(user, project, warn)` 为其特例）
 - `SkillLocations.UserAgentsSkillsDirectory` / `AncestorAgentsSkillDirectories`（`.agents` 标准位置，到 git 根）
 - `ISkillMatcher` / `LexicalSkillMatcher`（`MinRelevance` / `MaxMatches` / 重叠系数）
+- `SkillActivation.Compute` / `SkillActivationResult`（固定 + 自动匹配的共享计算，REPL / headless 共用）
 - `SkillContext.BuildAdvertisement` / `EstimateTokens`
 - `SkillTools.LoadSkillTool` / `ExecuteLoadSkill`（含目录提示）/ `SkillAwareExecutor`
 - `SkillEvaluator.Evaluate` / `SkillTestCase` / `SkillMetrics`
+- `SkillCaseLoader.Load(path, warn)`（`di --skill-eval` 的用例加载；文件级错误抛、条目级告警跳过）
 - 注入侧：`AgentRunner.ActiveSkills`（`Core/AgentLoop/AgentRunner.cs`）、`Repl`（`Di.Cli/Repl.cs`）
 
 ## 流动路径（装配到注入）
@@ -104,7 +112,8 @@ Core/AgentLoop/AgentRunner.cs
 Core/Skills/SkillTools.cs（SkillAwareExecutor）← 模型调 load_skill 时拦截，返回完整指令或 error 观察
 ```
 
-每回合自动匹配发生在 `Di.Cli/Repl.cs`（`_matcher.Match(userMessage, _skills)`，剔除已固定 `/skill` 的），
+每回合自动匹配经 `Core/Skills/SkillActivation.cs`（固定 + 自动匹配的共享计算，剔除已固定 `/skill` 的）
+在 `Di.Cli/Repl.cs`（交互）与 `Di.Cli/modes/PrintMode.cs`（headless 单发，文本 / JSON 同款）中调用，
 结果写入 `AgentRunner.ActiveSkills`（固定 + 自动匹配逐回合注入）。
 
 ## 测试与指标
@@ -139,6 +148,8 @@ Core/Skills/SkillTools.cs（SkillAwareExecutor）← 模型调 load_skill 时拦
 | 渐进式披露（广告 + load_skill 含目录） | `SkillContext` + `SkillTools` | `Di.Tests/Skills/SkillToolsTests.cs` |
 | 匹配质量评估 | `SkillEvaluator` | `Di.Tests/Skills/SkillEvaluatorTests.cs` |
 | 固定激活 `/skill` + `/skill <名> <参数>` | `Di.Cli/Repl.cs`（`ActivateSkillAsync`） | `Di.Cli.Tests/ReplTests.cs` |
+| 共享激活计算 + headless 自动匹配 | `SkillActivation` + `Di.Cli/modes/PrintMode.cs` | `Di.Tests/Skills/SkillActivationTests.cs` + `Di.Cli.Tests/modes/PrintModeTests.cs` |
+| `di --skill-eval` 评估命令（用例加载 + 指标输出） | `CliApp.SkillEvalAsync` + `SkillCaseLoader` | `Di.Cli.Tests/cli/CliAppTests.cs` + `Di.Tests/Skills/SkillCaseLoaderTests.cs` |
 | 生产级设计符合性审计 | 全部 | `Di.Tests/Skills/SkillDesignAuditTests.cs` |
 
 ## 关联文档

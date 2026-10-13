@@ -62,6 +62,9 @@ public sealed class CliApp
                 await stderr.WriteLineAsync("--mode rpc 尚未实现");
                 return 1;
 
+            case AppMode.Stats:
+                return await StatsAsync(cliArgs.Stats, stdout, stderr, cancellationToken);
+
             default:
                 // 需要真实运行的路径：构建宿主（组合根）后分派；宿主释放工具会话与 DI 容器。
                 using (var host = _hostFactory(cliArgs, workspace, stderr, useAnsi))
@@ -69,6 +72,7 @@ public sealed class CliApp
                     return mode switch
                     {
                         AppMode.ListModels => await ListModelsAsync(host, cliArgs.ListModels, stdout, cancellationToken),
+                        AppMode.SkillEval => await SkillEvalAsync(host, cliArgs.SkillEval, stdout, stderr, cancellationToken),
                         AppMode.Interactive => await InteractiveAsync(host, stdin, stdout, interrupt, cancellationToken),
                         _ => await PrintMode.RunAsync(host, cliArgs, stdin, stdout, stderr, cancellationToken),
                     };
@@ -130,6 +134,87 @@ public sealed class CliApp
             (string.IsNullOrWhiteSpace(args.Provider) ? "" : "   ← --provider 覆盖"));
         await stdout.WriteLineAsync($"  Model:DefaultModel          {effectiveModel}" +
             (string.IsNullOrWhiteSpace(args.Model) ? "" : "   ← --model 覆盖"));
+        return 0;
+    }
+
+    /// <summary>
+    /// 用带标签用例集（JSON 数组，<c>{"message", "expected_skills"}</c>）评估当前 skill 匹配器：
+    /// 精确率 / 召回率 / 无匹配率 / 平均上下文 token。触发与排除测试即对应的标签用例。
+    /// 依赖宿主（复用与生产一致的 <see cref="CliHost.Skills"/> 发现结果）。
+    /// </summary>
+    private static async Task<int> SkillEvalAsync(CliHost host, string? casesPath, TextWriter stdout,
+        TextWriter stderr, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(casesPath))
+        {
+            await stderr.WriteLineAsync("用法: di --skill-eval <cases.json>");
+            return 1;
+        }
+
+        IReadOnlyList<SkillTestCase> cases;
+        try
+        {
+            cases = SkillCaseLoader.Load(casesPath, msg => stderr.WriteLine($"  ⚠ {msg}"));
+        }
+        catch (Exception ex)
+        {
+            await stderr.WriteLineAsync($"✗ 无法加载用例文件: {ex.Message}");
+            return 1;
+        }
+        if (cases.Count == 0)
+        {
+            await stderr.WriteLineAsync("✗ 用例文件为空（全部条目被跳过）");
+            return 1;
+        }
+
+        var metrics = SkillEvaluator.Evaluate(new LexicalSkillMatcher(), host.Skills, cases);
+        await stdout.WriteLineAsync($"用例数: {cases.Count}");
+        await stdout.WriteLineAsync($"精确率: {metrics.Precision:F3}");
+        await stdout.WriteLineAsync($"召回率: {metrics.Recall:F3}");
+        await stdout.WriteLineAsync($"无匹配率: {metrics.NoMatchRate:F3}");
+        await stdout.WriteLineAsync($"平均上下文 token/回合: {metrics.AverageContextTokens:F0}");
+        return 0;
+    }
+
+    /// <summary>
+    /// 聚合一个会话 JSONL（离线，无需构建宿主）：回合数、token 用量、缓存命中率、总成本。
+    /// 会话级命中率 = Σcache_read ÷ Σ计费输入，让"SC 布局是否最优"从论证变成数字。
+    /// </summary>
+    private static async Task<int> StatsAsync(string? path, TextWriter stdout, TextWriter stderr,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            await stderr.WriteLineAsync("用法: di --stats <会话.jsonl>");
+            return 1;
+        }
+        if (!File.Exists(path))
+        {
+            await stderr.WriteLineAsync($"✗ 会话文件不存在: {path}");
+            return 1;
+        }
+
+        SessionStatsSummary stats;
+        try
+        {
+            stats = SessionStats.Aggregate(path);
+        }
+        catch (Exception ex)
+        {
+            await stderr.WriteLineAsync($"✗ 无法解析会话文件: {ex.Message}");
+            return 1;
+        }
+        if (stats.Turns == 0)
+        {
+            await stderr.WriteLineAsync("✗ 未找到任何 task_complete 记录（这不是一次有效会话）");
+            return 1;
+        }
+
+        await stdout.WriteLineAsync($"回合数: {stats.Turns}");
+        await stdout.WriteLineAsync($"输入 token: {stats.InputTokens}（缓存命中 {stats.CacheReadTokens}，命中率 {stats.CacheHitRate:P1}）");
+        await stdout.WriteLineAsync($"输出 token: {stats.OutputTokens}");
+        if (stats.TotalCost is { } cost)
+            await stdout.WriteLineAsync($"总成本: ${cost:F4}");
         return 0;
     }
 

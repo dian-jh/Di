@@ -9,14 +9,18 @@ namespace Di.Cli.Tests.Cli;
 public sealed class CliModeTests
 {
     private static CliArgs Args(string[] positionals, string? mode = null, bool print = false,
-        bool version = false, bool help = false, string? listModels = null) => new()
+        bool version = false, bool info = false, bool help = false, string? listModels = null,
+        string? stats = null, string? skillEval = null) => new()
     {
         Positionals = positionals,
         Mode = mode,
         Print = print,
         Version = version,
+        Info = info,
         Help = help,
         ListModels = listModels,
+        Stats = stats,
+        SkillEval = skillEval,
     };
 
     private const bool Tty = true;
@@ -89,6 +93,12 @@ public sealed class CliModeTests
     }
 
     [Fact]
+    public void Resolve_Info_PriorityOverPromptAndMode()
+    {
+        Assert.Equal(AppMode.Info, CliMode.Resolve(Args(["prompt"], mode: "json", info: true), Tty, Tty));
+    }
+
+    [Fact]
     public void Resolve_Help_PriorityOverEverything()
     {
         Assert.Equal(AppMode.Help, CliMode.Resolve(Args([], mode: "json", help: true), Tty, Tty));
@@ -98,5 +108,17 @@ public sealed class CliModeTests
     public void Resolve_ListModels_PriorityOverPrompt()
     {
         Assert.Equal(AppMode.ListModels, CliMode.Resolve(Args(["prompt"], listModels: ""), Tty, Tty));
+    }
+
+    [Fact]
+    public void Resolve_Stats_PriorityOverPrompt()
+    {
+        Assert.Equal(AppMode.Stats, CliMode.Resolve(Args(["prompt"], stats: "session.jsonl"), Tty, Tty));
+    }
+
+    [Fact]
+    public void Resolve_SkillEval_PriorityOverPrompt()
+    {
+        Assert.Equal(AppMode.SkillEval, CliMode.Resolve(Args(["prompt"], skillEval: "cases.json"), Tty, Tty));
     }
 }

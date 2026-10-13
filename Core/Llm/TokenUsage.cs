@@ -18,6 +18,19 @@ public sealed record TokenUsage(
     public int BillableInputTokens =>
         InputTokens + (CacheReadTokens ?? 0) + (CacheWriteTokens ?? 0);
 
+    /// <summary>
+    /// 前缀缓存命中率 = 命中读取 ÷ 计费输入（0~1）；无任何输入时为 null（避免除零）。
+    /// 会话日志 / 统计据此观测缓存效率。
+    /// </summary>
+    public double? CacheHitRate
+    {
+        get
+        {
+            var billable = BillableInputTokens;
+            return billable > 0 ? (double)(CacheReadTokens ?? 0) / billable : null;
+        }
+    }
+
     public static TokenUsage Zero { get; } = new(0, 0);
 
     public TokenUsage Add(TokenUsage other) => new(

@@ -75,23 +75,27 @@ string[] args
   → CliArgsParser.Parse(args)         纯函数：args → CliArgs + 诊断（未知旗标/缺值/非法模式）
   → 诊断有 error ? 打 stderr + exit 1
   → CliMode.Resolve(args, stdinTty, stdoutTty)   纯函数：决定 AppMode
-  → 短路径（Version/Help）直接输出退出，不建 DI
+  → 短路径（Version/Info/Help/Stats）直接输出退出，不建 DI
   → CliHost.Create(...)               组合根：配置 → AddDi → 工具/skills/runner/会话日志
-  → 分派：Interactive → Repl；Print/Json → PrintMode；ListModels → 列目录；Rpc → 未实现
+  → 分派：Interactive → Repl；Print/Json → PrintMode；ListModels → 列目录；Stats → 聚合会话；
+          SkillEval → 评估匹配器；Rpc → 未实现
 ```
 
 ### 3.2 纯数据与纯函数（语言无关，建议他语言原样复刻）
 
 - **`CliArgs`**（`Di.Cli/cli/CliArgs.cs`）：`Positionals`、`Model`、`Provider`、`Print`、`Mode`、
-  `Version`、`Help`、`ListModels`、`Thinking`、`NoSession`、`NoAnsi`、`UnknownFlags`。
+  `Version`、`Info`、`Help`、`ListModels`、`Stats`、`SkillEval`、`Thinking`、`NoSession`、`NoAnsi`、`UnknownFlags`。
   规则：`--` 后全为位置参数；带值旗标缺值报错；`--list-models [pattern]` 可选吃下一个非旗标 token；
+  `--stats <file>` / `--skill-eval <file>` 必选吃下一个非旗标 token（缺值报错）；
   `--mode` 值域 `interactive/print/json/rpc`；未知旗标记入 `UnknownFlags` 并报错（不静默忽略）。
 - **`CliMode.Resolve(CliArgs, stdinTty, stdoutTty)`**（`Di.Cli/cli/CliMode.cs`）：
 
 | 条件 | 模式 |
 |---|---|
-| `--version` / `--help` | 对应短路径（优先，直接输出退出，不建 DI） |
+| `--version` / `--info` / `--help` | 对应短路径（优先，直接输出退出，不建 DI） |
 | `--list-models` | ListModels（仍建宿主，列出模型目录） |
+| `--stats <file>` | Stats（短路径：聚合会话 JSONL 后退出，不建 DI） |
+| `--skill-eval <file>` | SkillEval（仍建宿主，用与生产一致的 skills 评估匹配器） |
 | `--mode json` | Json |
 | `--mode print` | Print |
 | `--mode interactive` | Interactive |
@@ -126,6 +130,12 @@ API Key 不在启动时要求 —— 凭据由模型层在**请求时**解析，
 
 事件流式渲染到 stdout（无 ANSI、无"正在请求"状态行），结果脚注；`--no-ansi` 进一步禁控制序列。
 会话日志写入 `~/.di/sessions/`（`--no-session` 关闭）。
+**预算耗尽兜底**：`StopReason == MaxIterations` 时（`EventRenderer.RenderResult`）在脚注前补打印
+"已达迭代上限，任务可能未完成"与模型最后一段输出（`AgentResult.Answer`），避免"跑完没结果"；
+JSON 模式 `stop_reason` 字段本身即 `maxiterations`，脚本据此判断。
+与 REPL 同一共享计算（`Core/Skills/SkillActivation`，见 `docs/modules/skills.md`）做 skill 自动匹配：
+提示词命中 skill 描述时完整指令注入系统上下文，未命中的只广告（headless 输出不额外打印激活信息，
+保持脚本友好）。
 
 ### 4.2 JSON 模式（`--mode json`）
 
@@ -173,14 +183,17 @@ stdout 只输出**一个** JSON 文档（snake_case，可空键省略）：
 | 能力 | 代码（相对仓库根） | 说明 |
 |---|---|---|
 | REPL 外层循环 | `Di.Cli/Repl.cs` | 读行 → 斜杠命令 → 回合；回合事件实时渲染 + 兜底排空 |
-| 流式渲染 | `Di.Cli/EventRenderer.cs` | 逐字输出；工具调用 / 思考轮 / 用量+成本脚注；ANSI 状态行（重定向自动禁用） |
+| 流式渲染 | `Di.Cli/EventRenderer.cs` | 逐字输出；工具调用 / 思考轮 / 用量+成本脚注；ANSI 状态行（重定向自动禁用）；MaxIterations 预算耗尽时补打印模型最后输出 |
 | 斜杠命令 | `Di.Cli/Repl.cs`（`RunCommandAsync`） | `/help` `/clear` `/model` `/skills` `/skill` `/skill <名> <参数>` `/exit` |
 | 回合级 Ctrl+C | `Di.Cli/InterruptCoordinator.cs` + `Di.Cli/Program.cs` | 第一次取消当前回合、第二次退出；headless/空闲直接退出 |
 | 纯参数解析（语言无关契约） | `Di.Cli/cli/CliArgs.cs` | `string[] → CliArgs` 纯数据 + 诊断；`--` 截断、未知 / 缺值 / 非法模式报错 |
-| 纯模式解析 | `Di.Cli/cli/CliMode.cs` | `Resolve(args, stdinTty, stdoutTty)`；短路径优先（version/help 直接输出不建 DI；list-models 仍建宿主） |
+| 纯模式解析 | `Di.Cli/cli/CliMode.cs` | `Resolve(args, stdinTty, stdoutTty)`；短路径优先（version/info/help 直接输出不建 DI；list-models 仍建宿主） |
+| 环境 / 生效配置诊断 | `Di.Cli/CliApp.cs`（`InfoAsync`） | `di --info` 打印版本 / 构建时间 / 配置源存在性 / 生效 MaxIterations、模型、provider（含 CLI 覆盖标注）；短路径不建 DI，专治"装的二进制是不是旧的" |
 | 分派壳 | `Di.Cli/CliApp.cs` | 解析 → 校验 → 模式 → 建宿主 → 分派；不碰 Console（流与 TTY 由调用方注入） |
+| 会话统计 | `Di.Cli/CliApp.cs`（`StatsAsync`）+ `Core/Sessions/SessionStats.cs` | `di --stats <file>` 聚合回合数 / token 用量 / 缓存命中率 / 成本（离线，不建宿主） |
+| skill 匹配评估 | `Di.Cli/CliApp.cs`（`SkillEvalAsync`）+ `Core/Skills/SkillCaseLoader.cs` | `di --skill-eval <cases.json>` 输出精确率 / 召回率 / 无匹配率 / 上下文成本 |
 | 组合根 | `Di.Cli/CliHost.cs` | 配置 → AddDi() → 工具 / skills / runner / 会话；`--provider/--model/--thinking` 覆盖在此生效 |
-| headless 单发 | `Di.Cli/modes/PrintMode.cs` | 文本流式渲染 / JSON 单文档；stdin 读提示词；错误 exit 1；会话日志（`--no-session` 关闭） |
+| headless 单发 | `Di.Cli/modes/PrintMode.cs` | 文本流式渲染 / JSON 单文档；stdin 读提示词；skill 自动匹配（与 REPL 共享 `SkillActivation`）；错误 exit 1；会话日志（`--no-session` 关闭） |
 | 全局命令分发 | `Di.Cli/Properties/PublishProfiles/di.pubxml` + `install.cmd` / `install.ps1` | win-x64 自包含单文件 di.exe → `~/.di/bin` → PATH 幂等 |
 | 模型切换 | `AgentRunner.CurrentModel`（`Core/AgentLoop/AgentRunner.cs`） | 运行中切换，按名经工厂解析 |
 | 模型工厂 | `Di.Cli/DiServiceCollectionExtensions.cs` | `RetryingChatModel(ChatModelClient(llm, provider, name))` 组合 |

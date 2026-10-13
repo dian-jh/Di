@@ -26,6 +26,12 @@ public enum AppMode
 
     /// <summary>列出可用模型后退出。</summary>
     ListModels,
+
+    /// <summary>聚合一个会话 JSONL 的用量 / 缓存命中率 / 成本后退出。</summary>
+    Stats,
+
+    /// <summary>用带标签用例集评估 skill 匹配器后退出。</summary>
+    SkillEval,
 }
 
 /// <summary>
@@ -46,6 +52,10 @@ public static class CliMode
             return AppMode.Help;
         if (args.ListModels is not null)
             return AppMode.ListModels;
+        if (args.Stats is not null)
+            return AppMode.Stats;
+        if (args.SkillEval is not null)
+            return AppMode.SkillEval;
 
         // 显式 --mode 优先；未指定时按"提示词/TTY"推导。
         return args.Mode switch

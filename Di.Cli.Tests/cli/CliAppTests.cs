@@ -1,6 +1,8 @@
 using Common.Events;
 using Core.AgentLoop;
 using Core.Llm;
+using Core.Sessions;
+using Core.Skills;
 using Di.Cli;
 
 namespace Di.Cli.Tests.Cli;
@@ -178,6 +180,128 @@ public sealed class CliAppTests
 
         Assert.Equal(0, code);
         Assert.Contains("无可用模型", stdout.ToString());
+    }
+
+    // ---- --stats：离线聚合，不构建宿主 ----
+
+    [Fact]
+    public async Task Stats_WithSessionFile_PrintsSummary_ExitsZero_WithoutHost()
+    {
+        var root = Directory.CreateTempSubdirectory("di-cli-stats-").FullName;
+        try
+        {
+            var log = new SessionLog(new SessionLogOptions { RootDirectory = root });
+            log.AppendTurn(new AgentResult
+            {
+                Answer = "ok",
+                Trajectory = [ChatMessage.User("hi")],
+                Iterations = 1,
+                Usage = new TokenUsage(InputTokens: 100, OutputTokens: 50, CacheReadTokens: 900),
+                StopReason = AgentStopReason.Answer,
+            }, DateTimeOffset.UtcNow);
+            var (app, stdout, stderr, factory) = Setup();
+
+            var code = await app.RunAsync(["--stats", log.LogFilePath], TextReader.Null, stdout, stderr, Tty, Tty);
+
+            Assert.Equal(0, code);
+            var text = stdout.ToString();
+            Assert.Contains("回合数: 1", text);
+            Assert.Contains("缓存命中 900", text);
+            Assert.Contains("命中率 90.0%", text);
+            Assert.Equal("", stderr.ToString());
+            Assert.Equal(0, factory.Calls);   // 离线命令绝不构建宿主
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Stats_MissingPath_ExitsOne_WithoutHost()
+    {
+        var (app, stdout, stderr, factory) = Setup();
+
+        var code = await app.RunAsync(["--stats"], TextReader.Null, stdout, stderr, Tty, Tty);
+
+        Assert.Equal(1, code);
+        Assert.Contains("缺少值", stderr.ToString());
+        Assert.Equal(0, factory.Calls);
+    }
+
+    [Fact]
+    public async Task Stats_FileNotFound_ExitsOne_WithoutHost()
+    {
+        var (app, stdout, stderr, factory) = Setup();
+
+        var code = await app.RunAsync(["--stats", "no-such-session.jsonl"], TextReader.Null, stdout, stderr, Tty, Tty);
+
+        Assert.Equal(1, code);
+        Assert.Contains("不存在", stderr.ToString());
+        Assert.Equal(0, factory.Calls);
+    }
+
+    // ---- --skill-eval：用带标签用例集评估匹配器（依赖宿主） ----
+
+    [Fact]
+    public async Task SkillEval_WithCases_PrintsMetrics_ExitsZero()
+    {
+        var casesPath = WriteCases("""
+            [
+              { "message": "跑一下后端测试", "expected_skills": ["backend-tests"] },
+              { "message": "随便聊聊", "expected_skills": [] }
+            ]
+            """);
+        var skill = new Skill
+        {
+            Name = "backend-tests",
+            Description = "运行并修复后端测试（dotnet）。当用户要求运行测试、分析失败或修复测试时使用。",
+            Instructions = "1. dotnet build\n2. dotnet test",
+        };
+        var bus = new InMemoryEventBus();
+        var host = new CliHost(new FakeRunner { Bus = bus }, bus, new FakeLlm([]), [skill], new ReplOptions(), null);
+        var (app, stdout, stderr, factory) = Setup(host);
+
+        var code = await app.RunAsync(["--skill-eval", casesPath], TextReader.Null, stdout, stderr, Tty, Tty);
+
+        Assert.Equal(0, code);
+        var text = stdout.ToString();
+        Assert.Contains("用例数: 2", text);
+        Assert.Contains("精确率: 1.000", text);
+        Assert.Contains("召回率: 1.000", text);
+        Assert.Contains("平均上下文 token/回合", text);
+        Assert.Equal("", stderr.ToString());
+        Assert.Equal(1, factory.Calls);   // skill-eval 复用宿主的 skill 发现结果
+    }
+
+    [Fact]
+    public async Task SkillEval_MissingPath_ExitsOne_WithoutHost()
+    {
+        var (app, stdout, stderr, factory) = Setup();
+
+        var code = await app.RunAsync(["--skill-eval"], TextReader.Null, stdout, stderr, Tty, Tty);
+
+        Assert.Equal(1, code);
+        Assert.Contains("缺少值", stderr.ToString());
+        Assert.Equal(0, factory.Calls);
+    }
+
+    [Fact]
+    public async Task SkillEval_NoCasesFile_ExitsOne()
+    {
+        var (app, stdout, stderr, factory) = Setup(Host([]));
+
+        var code = await app.RunAsync(["--skill-eval", "no-such-cases.json"], TextReader.Null, stdout, stderr, Tty, Tty);
+
+        Assert.Equal(1, code);
+        Assert.Contains("无法加载用例文件", stderr.ToString());
+    }
+
+    private static string WriteCases(string content)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "di-eval-cases-" + Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(path, content);
+        return path;
     }
 
     [Fact]

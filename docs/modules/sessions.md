@@ -16,6 +16,12 @@
   （`SessionLog.AppendFailure`），异常回合在会话文件里同样有迹可查，可复盘。
 - **成本落盘**：`task_complete` 顺带记录 `cost`（`{input, output, cache_read, cache_write, total}`；
   无费率时省略）。
+- **用量落盘（缓存可观测）**：`task_complete` 记录 `usage`（`input_tokens` / `output_tokens` /
+  `cache_read_tokens` / `cache_write_tokens` / `cache_hit_rate` 等），供会话级聚合
+  （`di --stats <file>`，见 `docs/cli.md`）。
+- **会话级聚合**：`Core/Sessions/SessionStats.cs` 解析一个会话 JSONL，聚合全部 `task_complete`
+  记录 → 回合数 / token 用量 / 会话级缓存命中率（Σcache_read ÷ Σ计费输入）/ 总成本 / 总耗时。
+  容错：无法解析的行跳过，不中断聚合。
 - **追加按行 flush**：进程中断不损坏已写记录；线程安全（单锁 + 单调 `ordinal`）。
 - **尽力而为**：磁盘错误只告警，绝不打断聊天。
 
@@ -24,13 +30,16 @@
 | 文件（相对仓库根） | 职责 |
 |---|---|
 | `Core/Sessions/SessionLog.cs` | 全部：`SessionLogOptions` + `SessionLog`（`StartSession` / `AppendTurn` / `AppendFailure`） |
+| `Core/Sessions/SessionStats.cs` | 会话 JSONL 聚合：`SessionStats.Aggregate` → `SessionStatsSummary` |
 
 ## 关键符号
 
 - `SessionLog` / `SessionLogOptions`
 - `SessionLog.StartSession()`、`AppendTurn(AgentResult result, DateTimeOffset startedAt)`
 - `SessionLog.AppendFailure(string userMessage, string errorMessage, DateTimeOffset startedAt)`
+- `SessionStats.Aggregate(string logFilePath)` / `SessionStatsSummary`（回合数 / 用量 / 命中率 / 成本 / 耗时）
 - `AgentResult`（`Core/AgentLoop/AgentResult.cs`）—— 一次运行结局，轨迹 / 用量 / 成本 / 停止原因
+- `TokenUsage.CacheHitRate`（`Core/Llm/TokenUsage.cs`）—— 每回合缓存命中率 = 命中读取 ÷ 计费输入
 
 ## 调用关系
 
@@ -47,6 +56,8 @@ Di.Cli/Repl.cs（每回合结束）
 |---|---|---|
 | 会话 JSONL（对齐 codex 格式，snake_case 信封） | `SessionLog` | `Di.Tests/Sessions/SessionLogTests.cs` |
 | 会话成本落盘（task_complete.cost，无费率省略） | `SessionLog.AppendTurn` | `Di.Tests/Sessions/SessionLogTests.cs` |
+| 用量 + 命中率落盘（task_complete.usage） | `SessionLog.AppendTurn` | `Di.Tests/Sessions/SessionLogTests.cs` |
+| 会话级聚合（`di --stats`：命中率 / 成本 / 耗时，容错跳过坏行） | `SessionStats` | `Di.Tests/Sessions/SessionStatsTests.cs` + `Di.Cli.Tests/cli/CliAppTests.cs` |
 | 失败回合落盘（task_failed，异常回合有迹可查） | `SessionLog.AppendFailure` | `Di.Tests/Sessions/SessionLogTests.cs` + `Di.Cli.Tests/ReplTests.cs` |
 | 追加按行 flush（中断不损坏）+ 线程安全 | `SessionLog` | `Di.Tests/Sessions/SessionLogTests.cs` |
 | 尽力而为（磁盘错误只告警） | `SessionLog` 调用方（`Di.Cli/Repl.cs`） | `Di.Tests/Sessions/SessionLogTests.cs` |

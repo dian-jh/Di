@@ -34,6 +34,12 @@ public sealed record CliArgs
     /// <summary>--list-models [pattern]：列出可用模型。无 pattern 时为空字符串。</summary>
     public string? ListModels { get; init; }
 
+    /// <summary>--stats &lt;file&gt;：聚合一个会话 JSONL 的用量 / 缓存命中率 / 成本。</summary>
+    public string? Stats { get; init; }
+
+    /// <summary>--skill-eval &lt;file&gt;：用带标签用例集评估 skill 匹配器（精确率 / 召回率 / 无匹配率）。</summary>
+    public string? SkillEval { get; init; }
+
     /// <summary>--thinking：推理强度（透传）。</summary>
     public string? Thinking { get; init; }
 
@@ -70,7 +76,7 @@ public static class CliArgsParser
         var unknown = new List<string>();
         var diagnostics = new List<CliDiagnostic>();
         string? model = null, provider = null, mode = null, thinking = null;
-        string? listModels = null;
+        string? listModels = null, stats = null, skillEval = null;
         bool print = false, version = false, info = false, help = false, noSession = false, noAnsi = false;
         var listModelsSet = false;
         var afterDoubleDash = false;
@@ -146,6 +152,14 @@ public static class CliArgsParser
                         listModels = args[++i];
                     break;
 
+                case "--stats":
+                    if (TryTakeValue(args, ref i, "--stats", diagnostics, out var s)) stats = s;
+                    break;
+
+                case "--skill-eval":
+                    if (TryTakeValue(args, ref i, "--skill-eval", diagnostics, out var se)) skillEval = se;
+                    break;
+
                 default:
                     if (token.StartsWith('-'))
                     {
@@ -171,6 +185,8 @@ public static class CliArgsParser
             Info = info,
             Help = help,
             ListModels = listModelsSet ? listModels : null,
+            Stats = stats,
+            SkillEval = skillEval,
             Thinking = thinking,
             NoSession = noSession,
             NoAnsi = noAnsi,

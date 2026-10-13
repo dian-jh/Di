@@ -98,7 +98,8 @@ MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会�
 - **`/resume` 会话恢复**：`SessionLog` 已可重放，接回 UI（`--resume [session-id]`）。
 - **项目记忆与 AGENTS.md**：`~/.di/memory/<project>.md` 长期事实（跨会话）；项目级
   `AGENTS.md` 作为指令注入（当前是代码内默认 `CoreTools.BuildInstructions` 的输出）。
-- **缓存友好深化**：前缀缓存命中率指标（DeepSeek 已给 cache_read/cache_write token，
+- **缓存友好深化**：✅ 基础版已实现——`task_complete` 落盘 `usage`（含 cache_read/cache_write 与
+  命中率），`di --stats <file>` 做会话级聚合（DeepSeek 已给 cache_read/cache_write token，
   `CostCalculator` 已按缓存价计费）——命中率可观测，优化有依据。
 - 验收：连续 50 回合的会话 token 不超窗；`/resume` 后模型记得上一会话关键结论。
 

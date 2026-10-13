@@ -170,6 +170,42 @@ public sealed class CliArgsTests
     }
 
     [Fact]
+    public void Parse_Stats_TakesRequiredValue()
+    {
+        var (args, diags) = Parse("--stats", "session.jsonl");
+
+        Assert.Equal("session.jsonl", args.Stats);
+        Assert.Empty(diags);
+    }
+
+    [Fact]
+    public void Parse_StatsMissingValue_AddsDiagnosticError()
+    {
+        var (args, diags) = Parse("--stats");
+
+        Assert.Null(args.Stats);
+        Assert.Contains(diags, d => d.IsError);
+    }
+
+    [Fact]
+    public void Parse_SkillEval_TakesRequiredValue()
+    {
+        var (args, diags) = Parse("--skill-eval", "cases.json");
+
+        Assert.Equal("cases.json", args.SkillEval);
+        Assert.Empty(diags);
+    }
+
+    [Fact]
+    public void Parse_SkillEvalMissingValue_AddsDiagnosticError()
+    {
+        var (args, diags) = Parse("--skill-eval");
+
+        Assert.Null(args.SkillEval);
+        Assert.Contains(diags, d => d.IsError);
+    }
+
+    [Fact]
     public void Parse_UnknownFlag_AddsDiagnosticError()
     {
         var (args, diags) = Parse("--bogus", "hi");

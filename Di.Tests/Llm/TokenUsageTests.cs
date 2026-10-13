@@ -58,4 +58,39 @@ public sealed class TokenUsageTests
         Assert.Contains("cache_read=1792", usage.ToString());
         Assert.Contains("reasoning=44", usage.ToString());
     }
+
+    // ---- CacheHitRate：命中读取 ÷ 计费输入（input + cache_read + cache_write） ----
+
+    [Fact]
+    public void CacheHitRate_WithCacheRead_ComputesShareOfBillableInput()
+    {
+        var usage = new TokenUsage(InputTokens: 100, OutputTokens: 50, CacheReadTokens: 900);
+
+        Assert.Equal(0.9, usage.CacheHitRate!.Value, precision: 10);
+    }
+
+    [Fact]
+    public void CacheHitRate_NoCacheRead_IsZero()
+    {
+        var usage = new TokenUsage(InputTokens: 100, OutputTokens: 50);
+
+        Assert.Equal(0, usage.CacheHitRate!.Value, precision: 10);
+    }
+
+    [Fact]
+    public void CacheHitRate_IncludesCacheWriteInDenominator()
+    {
+        // 计费输入 = 50 + 50 + 100 = 200；命中读取 50 → 25%
+        var usage = new TokenUsage(InputTokens: 50, OutputTokens: 10, CacheReadTokens: 50, CacheWriteTokens: 100);
+
+        Assert.Equal(0.25, usage.CacheHitRate!.Value, precision: 10);
+    }
+
+    [Fact]
+    public void CacheHitRate_NoInput_IsNull()
+    {
+        var usage = new TokenUsage(0, 0);
+
+        Assert.Null(usage.CacheHitRate);
+    }
 }

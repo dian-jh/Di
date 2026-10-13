@@ -263,6 +263,28 @@ public sealed class SessionLogTests : IDisposable
     }
 
     [Fact]
+    public void AppendTurn_TaskComplete_IncludesUsageAndCacheHitRate()
+    {
+        var log = NewLog();
+        log.StartSession();
+        log.AppendTurn(new AgentResult
+        {
+            Answer = "ok",
+            Trajectory = [ChatMessage.User("你好")],
+            Iterations = 1,
+            Usage = new TokenUsage(InputTokens: 100, OutputTokens: 50, CacheReadTokens: 900),
+            StopReason = AgentStopReason.Answer,
+        }, DateTimeOffset.UtcNow);
+
+        var complete = TaskCompletePayload(ReadRecords(log.LogFilePath));
+        var usage = complete.GetProperty("usage");
+        Assert.Equal(100, usage.GetProperty("input_tokens").GetInt32());
+        Assert.Equal(50, usage.GetProperty("output_tokens").GetInt32());
+        Assert.Equal(900, usage.GetProperty("cache_read_tokens").GetInt32());
+        Assert.Equal(0.9, usage.GetProperty("cache_hit_rate").GetDouble(), precision: 10);
+    }
+
+    [Fact]
     public void SessionId_IsUniquePerInstance()
     {
         Assert.NotEqual(NewLog().SessionId, NewLog().SessionId);
