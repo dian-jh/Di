@@ -5,6 +5,7 @@ using Core.Llm;
 using Core.Sessions;
 using Core.Skills;
 using Core.Tools;
+using Di.Cli.Commands;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
@@ -38,8 +39,15 @@ public sealed class CliHost : IDisposable
     /// <summary>会话持久化（headless 单发也写日志；--no-session 时跳过）。</summary>
     public SessionLog? SessionLog { get; }
 
+    /// <summary>
+    /// 斜杠命令注册表（内置 + 用户命令，两前端共用同一份）：REPL 与 RPC 模式都从宿主取。
+    /// 用户命令来自 <c>~/.di/commands/*.md</c>（<see cref="Create"/> 里加载；测试直接构造宿主时仅内置）。
+    /// </summary>
+    public SlashCommandRegistry Commands { get; }
+
     public CliHost(IAgentRunner runner, IEventBus bus, ILlmService llm, IReadOnlyList<Skill> skills,
-        ReplOptions replOptions, SessionLog? sessionLog = null, IDisposable? disposer = null)
+        ReplOptions replOptions, SessionLog? sessionLog = null, IDisposable? disposer = null,
+        SlashCommandRegistry? commands = null)
     {
         Runner = runner ?? throw new ArgumentNullException(nameof(runner));
         Bus = bus ?? throw new ArgumentNullException(nameof(bus));
@@ -48,6 +56,7 @@ public sealed class CliHost : IDisposable
         ReplOptions = replOptions ?? throw new ArgumentNullException(nameof(replOptions));
         SessionLog = sessionLog;
         _disposer = disposer;
+        Commands = commands ?? BuiltinCommands.CreateRegistry();
     }
 
     public void Dispose() => _disposer?.Dispose();
@@ -144,6 +153,11 @@ public sealed class CliHost : IDisposable
         if (!useAnsi)
             replOptions.UseAnsi = false;
 
+        // 命令系统（roadmap Phase D 命令注册表）：内置 + ~/.di/commands/*.md 用户命令。
+        // 与 skills 同规则：无效/重名文件只告警，绝不让启动失败；REPL 与 RPC 共用这份注册表。
+        var commands = BuiltinCommands.CreateRegistry();
+        CommandLoader.LoadInto(commands, diHome.CommandsDirectory, warn: msg => stderr.WriteLine($"⚠ {msg}"));
+
         return new CliHost(
             runner,
             provider.GetRequiredService<IEventBus>(),
@@ -151,7 +165,8 @@ public sealed class CliHost : IDisposable
             skills,
             replOptions,
             sessionLog,
-            disposer: new CompositeDisposer(executor, provider));
+            disposer: new CompositeDisposer(executor, provider),
+            commands: commands);
     }
 
     /// <summary>顺序释放多个资源（工具执行器 → DI 容器）。</summary>

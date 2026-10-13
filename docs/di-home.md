@@ -31,8 +31,8 @@
 ├── skills/                # 用户 skills（已实现；解析/匹配/披露见 docs/modules/skills.md）
 │   ├── <name>/SKILL.md    # 目录式（MS 规范）
 │   └── <name>.md          # 扁平式（对齐 Pi 的 .pi/skills/*.md，二选一）
-├── commands/              # 用户斜杠命令（将来）
-│   └── <name>.md
+├── commands/              # 用户斜杠命令（命令名 = 文件名；格式见 §6）
+│   └── <name>.md          # 扁平式：frontmatter(description[, argument-hint]) + 指令模板
 ├── agents/                # 子代理定义（将来）
 │   └── <name>.md
 └── mcp.json               # MCP 服务器配置（将来，JSON 数组）
@@ -56,7 +56,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 | `config.json` | 用户 | 程序（分层配置源 #2） | ✅ 已实现（用户级） |
 | `sessions/YYYY/MM/DD/*.jsonl` | 程序（SessionLog） | 用户/重放工具 | ✅ 已实现 |
 | `skills/<name>/SKILL.md` 或 `skills/<name>.md` | 用户 | SkillRepository（多源合并 + `/skill` 激活） | ✅ MVP |
-| `commands/<name>.md` | 用户 | 将来命令注册表 | 🔜 格式已预留 |
+| `commands/<name>.md` | 用户 | `Di.Cli/Commands/CommandLoader`（内置 + 用户命令 → `SlashCommandRegistry`） | ✅ 已实现 |
 | `agents/<name>.md` | 用户 | 将来子代理加载器 | 🔜 格式已预留 |
 | `mcp.json` | 用户 | 将来 MCP 桥 | 🔜 格式已预留 |
 
@@ -81,7 +81,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 |---|---|---|
 | `AgentLoop` | `AgentLoopOptions` | `SystemPrompt`、`MaxIterations`、`HistoryBudgetRatio` |
 | `Model` | `ModelOptions` | `Provider`、`DefaultModel` |
-| `Repl` | `ReplOptions` | `Prompt`、`HelpText`、`WorkingStatusText`、`UseAnsi` |
+| `Repl` | `ReplOptions` | `Prompt`、`WorkingStatusText`、`UseAnsi` |
 | `Retry` | `RetryPolicyOptions` | `MaxAttempts`、`InitialBackoff` 等 |
 | `DeepSeek` | `DeepSeekAdapterConfig` | `ApiKey`、`BaseUrl`、`DefaultReasoningEffort`、`StrictTools` |
 
@@ -128,10 +128,14 @@ export Model__DefaultModel=deepseek-flash
 | Skills：MS 规范解析 + 多源发现（`.di` + `.agents` 标准位置）+ 激活注入 | `Core/Skills/` + `Di.Cli/Repl.cs` | ✅ |
 | Skills：渐进式披露（广告块 + `load_skill` 工具） | `Core/Skills/SkillTools.cs` + `AgentRunner` | ✅ |
 | Skills：匹配器质量与上下文成本指标 | `Core/Skills/SkillEvaluator.cs` | ✅ |
+| 命令注册表：内置 + `~/.di/commands/*.md` 用户命令，REPL 与 RPC/TUI 共用 | `Di.Cli/Commands/`（`SlashCommandRegistry` / `BuiltinCommands` / `CommandLoader`） | ✅ |
 
 ## 6. 将来扩展（格式预留给定）
 
-- **commands**：`commands/<name>.md`，把 `Repl.RunCommand` 的 if/else 换成从该目录加载的注册表。
+- **commands/<name>.md 格式**：`---` 包裹的 frontmatter（`description` 必填、`argument-hint` 可选）
+  + 正文指令模板；命令名 = 文件名（小写字母/数字/连字符，对齐 `SkillMarkdown` 命名规则）。
+  输入 `/名 参数` 时正文模板 + 参数作为用户请求运行一个完整回合（对齐 Pi 的 prompt templates；
+  MVP 不做 `$1` 占位符替换）。无效 / 与内置重名的文件告警跳过，绝不让启动失败。
 - **MCP**：`mcp.json` 声明服务器（stdio 命令 + 环境），通过 `ICoreTool`/`IToolProvider` 桥接，
   ReAct 循环无感。
 - **项目级指令**：将来支持 `<workspace>/AGENTS.md` 作为项目指令注入（当前

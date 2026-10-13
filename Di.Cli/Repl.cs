@@ -2,6 +2,7 @@ using Common.Events;
 using Core.AgentLoop;
 using Core.Sessions;
 using Core.Skills;
+using Di.Cli.Commands;
 
 namespace Di.Cli;
 
@@ -22,13 +23,14 @@ public sealed class Repl
     private readonly IReadOnlyList<Skill> _skills;
     private readonly ISkillMatcher _matcher;
     private readonly InterruptCoordinator? _interrupt;
+    private readonly SlashCommandRegistry _registry;
 
     /// <summary>固定激活的 skills（/skill 手动设置，跨回合保持）。自动匹配的结果是每回合临时算的，不存这里。</summary>
     private readonly List<Skill> _pinned = [];
 
     public Repl(IAgentRunner runner, IEventBus bus, ILineReader reader, TextWriter output, ReplOptions options,
         SessionLog? sessionLog = null, IReadOnlyList<Skill>? skills = null, ISkillMatcher? matcher = null,
-        InterruptCoordinator? interrupt = null)
+        InterruptCoordinator? interrupt = null, SlashCommandRegistry? commands = null)
     {
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
@@ -40,6 +42,7 @@ public sealed class Repl
         _skills = skills ?? [];
         _matcher = matcher ?? new LexicalSkillMatcher();
         _interrupt = interrupt;
+        _registry = commands ?? BuiltinCommands.CreateRegistry();
     }
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
@@ -192,118 +195,28 @@ public sealed class Repl
         }
     }
 
-    /// <summary>斜杠命令；返回 true 表示退出。/skill 带参数时可能运行一个聊天回合，故为异步。</summary>
+    /// <summary>
+    /// 斜杠命令；返回 true 表示退出。走注册表分发（内置 <see cref="BuiltinCommands"/> + 用户命令）；
+    /// 回合型命令（返回值带 <see cref="CommandResult.TurnMessage"/>，如 /skill 带参数）由本 REPL 的
+    /// 回合机制执行 —— 命令本身不依赖任何前端，REPL 与 RPC/TUI 共用同一批命令定义。
+    /// </summary>
     private async Task<bool> RunCommandAsync(string command, CancellationToken cancellationToken)
     {
-        var (name, args) = SplitCommand(command);
-        switch (name)
-        {
-            case "/exit":
-                return true;
-            case "/help":
-                _output.WriteLine(_options.HelpText);
-                break;
-            case "/clear":
-                _output.Write("\x1b[2J\x1b[H");   // ANSI 清屏（主屏幕）
-                _runner.ResetHistory();           // 同时清空跨回合记忆
-                _output.WriteLine("已清空屏幕与对话记忆");
-                break;
-            case "/model" when args.Length > 0:
-                _runner.CurrentModel = args;
-                _output.WriteLine($"模型已切换为 {args}");
-                break;
-            case "/model":
-                _output.WriteLine("用法: /model <模型名>");
-                break;
-            case "/skills":
-                ListSkills();
-                break;
-            case "/skill":
-                await ActivateSkillAsync(args, cancellationToken);
-                break;
-            default:
-                _output.WriteLine($"未知命令: {name}（输入 /help 查看帮助）");
-                break;
-        }
-        return false;
-    }
+        var (slashName, args) = SlashCommandRegistry.Split(command);
+        var name = slashName.TrimStart('/');
 
-    private static (string Name, string Args) SplitCommand(string command)
-    {
-        var space = command.IndexOf(' ');
-        return space < 0 ? (command, string.Empty) : (command[..space], command[(space + 1)..].Trim());
-    }
-
-    /// <summary>/skills：列出所有可用 skill（用户级 + 项目级已合并），固定的以 * 标记。</summary>
-    private void ListSkills()
-    {
-        if (_skills.Count == 0)
+        if (!_registry.TryGet(name, out var cmd) || cmd is null)
         {
-            _output.WriteLine("没有可用 skill。把 <名称>/SKILL.md 或 <名称>.md 放在 ~/.di/skills/ 或 <工作区>/.di/skills/ 下。");
-            return;
+            _output.WriteLine($"未知命令: /{name}（输入 /help 查看帮助）");
+            return false;
         }
-        foreach (var skill in _skills)
-        {
-            var marker = _pinned.Contains(skill) ? "*" : " ";
-            _output.WriteLine($"  [{marker}] {skill.Name} —— {skill.Description}");
-        }
-    }
 
-    /// <summary>
-    /// /skill：无参数显示用法；<c>/skill &lt;名称&gt;</c> 切换固定激活；<c>/skill &lt;名称&gt; &lt;参数&gt;</c>
-    /// 一次性执行——完整指令 + 参数作为用户请求运行一个回合（对齐 Pi 的 /skill:name args），不固定。
-    /// </summary>
-    private async Task ActivateSkillAsync(string args, CancellationToken cancellationToken)
-    {
-        var (name, skillArgs) = SplitCommand(args);
-        if (skillArgs.Length > 0)
-        {
-            var skill = _skills.FirstOrDefault(s => s.Name == name);
-            if (skill is null)
-            {
-                _output.WriteLine($"未找到 skill：{name}（/skills 查看可用列表）");
-                return;
-            }
-            var message = $"【Skill：{skill.Name}】{skill.Description}\n\n{skill.Instructions}\n\n{skillArgs}";
+        var context = new CommandContext(_registry, _runner, _skills, _output, _pinned,
+            UseAnsi: _options.UseAnsi, RunTurn: RunTurnAsync, CancellationToken: cancellationToken);
+
+        var result = await cmd.Handler(args, context);
+        if (result.TurnMessage is { Length: > 0 } message)
             await RunTurnAsync(message, cancellationToken);
-            return;
-        }
-        ActivateSkill(name);
-    }
-
-    /// <summary>/skill：带名称切换固定激活，off/none 清空固定集，无参数显示当前与用法。</summary>
-    private void ActivateSkill(string name)
-    {
-        if (name.Length == 0)
-        {
-            _output.WriteLine(_pinned.Count == 0
-                ? "当前未固定任何 skill。用法: /skill <名称> 固定（再输一次停用，/skill off 全部停用）；/skill <名称> <参数> 一次性执行（指令+参数）。匹配到的 skill 也会自动加载。"
-                : $"当前已固定：{string.Join("、", _pinned.Select(s => s.Name))}。用法: /skill <名称> 切换；/skill <名称> <参数> 一次性执行。");
-            return;
-        }
-        if (name is "off" or "none")
-        {
-            _pinned.Clear();
-            _runner.ActiveSkills = [.. _pinned];
-            _output.WriteLine("已停用全部 skill");
-            return;
-        }
-        var skill = _skills.FirstOrDefault(s => s.Name == name);
-        if (skill is null)
-        {
-            _output.WriteLine($"未找到 skill：{name}（/skills 查看可用列表）");
-            return;
-        }
-        if (_pinned.Contains(skill))
-        {
-            _pinned.Remove(skill);
-            _output.WriteLine($"已停用 skill：{skill.Name}");
-        }
-        else
-        {
-            _pinned.Add(skill);
-            _output.WriteLine($"已激活 skill：{skill.Name}");
-        }
-        _runner.ActiveSkills = [.. _pinned];
+        return result.Exit;
     }
 }
