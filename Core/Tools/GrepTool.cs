@@ -8,7 +8,9 @@ namespace Core.Tools;
 /// 搜索文件内容工具（Grep）：按正则表达式逐行扫描文件内容。
 /// 返回格式（第五章示例）：相对路径:行号: 内容，如 src/api.py:42: # TODO: ...
 /// 支持 glob 过滤文件类型、path 限定搜索起点、ignore_case/literal 控制匹配方式、
-/// context 显示上下文行；跳过超大/二进制文件。
+/// context 显示上下文行；跳过超大（超过 1 MiB）/二进制文件，且跳过会<b>如实上报</b>
+/// （"N 个文件超过 1 MiB 已跳过…"），避免与"确实没有匹配"混淆——否则被跳过大文件里的
+/// 命中会伪装成"未找到匹配"（假阴性）。
 /// 输出受限时给出可执行的续查提示（对应 pi grep）：达匹配上限提示"用 limit=2N 续查"，
 /// 长行按 <see cref="MaxMatchLineChars"/> 截断并提示"用 read_file 看完整行"。
 /// </summary>
@@ -103,6 +105,8 @@ public sealed class GrepTool : ICoreTool
             var matchCount = 0;
             var matchLimitReached = false;
             var linesTruncated = false;
+            var skippedOverSize = new List<string>();   // 超限文件：跳过但如实上报，避免与"无匹配"混淆
+            var skippedOverSizeTotal = 0;
             var results = new List<string>();
 
             foreach (var file in ToolHelpers.EnumerateFiles(searchRoot))
@@ -113,7 +117,12 @@ public sealed class GrepTool : ICoreTool
                 if (globRegex is not null && !globRegex.IsMatch(rel))
                     continue;
                 if (new FileInfo(file).Length > _maxFileBytes)
+                {
+                    skippedOverSizeTotal++;
+                    if (skippedOverSize.Count < 3)
+                        skippedOverSize.Add(rel);
                     continue;
+                }
 
                 try
                 {
@@ -146,8 +155,17 @@ public sealed class GrepTool : ICoreTool
                 }
             }
 
-            var output = results.Count == 0 ? "（未找到匹配）" : string.Join('\n', results);
+            // 有超限文件被跳过时不输出"（未找到匹配）"，避免与"确实没有匹配"混淆；跳过提示作主输出。
+            var output = results.Count == 0 && skippedOverSizeTotal == 0
+                ? "（未找到匹配）"
+                : string.Join('\n', results);
             var notices = new List<string>();
+            if (skippedOverSizeTotal > 0)
+            {
+                // 前 3 个文件名作样本（超出只列样本）；前面的数字就是被跳过的总数。
+                var sample = string.Join("、", skippedOverSize.Select(s => $"“{s}”"));
+                notices.Add($"{skippedOverSizeTotal} 个文件超过 {_maxFileBytes / (1024 * 1024)} MiB 已跳过（如 {sample}）。可用 read_file 分段读取，或用 python/findstr 处理");
+            }
             if (matchLimitReached)
                 notices.Add($"{effectiveLimit} 条匹配上限已到。用 limit={effectiveLimit * 2} 查看更多，或缩小 pattern");
             if (linesTruncated)

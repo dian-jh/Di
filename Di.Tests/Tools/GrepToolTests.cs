@@ -151,6 +151,36 @@ public sealed class GrepToolTests : IDisposable
     }
 
     [Fact]
+    public void Execute_OversizedFile_ReportsSkipNoticeInsteadOfSilentSkip()
+    {
+        // 回归（问题 A）：超过 1 MiB 的文件过去被静默跳过，输出"（未找到匹配）"，模型无法区分
+        // "没有匹配"与"文件太大没搜"。修复后必须如实上报跳过数量与文件名样本。
+        Write("big.dat", new string('x', (int)GrepTool.MaxFileBytes + 1) + "hit\n");
+        var result = NewTool().ExecuteAsync("""{"pattern":"hit"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("1 个文件超过 1 MiB 已跳过", result);
+        Assert.Contains("big.dat", result);
+        Assert.Contains("read_file 分段读取", result);   // 给出可执行续查提示
+        Assert.DoesNotContain("未找到匹配", result);       // 不再伪装成"无匹配"
+    }
+
+    [Fact]
+    public void Execute_MultipleOversizedFiles_ReportTotalCount()
+    {
+        var big = new string('x', (int)GrepTool.MaxFileBytes + 1) + "hit\n";
+        Write("a.dat", big);
+        Write("b.dat", big);
+        Write("c.dat", big);
+        Write("d.dat", big);
+        var result = NewTool().ExecuteAsync("""{"pattern":"hit"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("4 个文件超过 1 MiB 已跳过", result);   // 总数单列
+        // 文件名只采样前 3 个。
+        Assert.Contains("a.dat", result);
+        Assert.DoesNotContain("d.dat", result);
+    }
+
+    [Fact]
     public void Execute_ResultCap_LimitsMatches()
     {
         // 单文件 120 行都命中 → 只返回前 MaxResults 条（默认 limit）。
