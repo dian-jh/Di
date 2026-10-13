@@ -211,3 +211,9 @@ venv/
 # Claude Code machine-specific settings (git PATH workaround for stale host env)
 .claude/settings.local.json
 
+# ---------------------------------------------------------------
+#  TS TUI（tui/，Node 前端）
+# ---------------------------------------------------------------
+tui/node_modules/
+tui/dist/
+

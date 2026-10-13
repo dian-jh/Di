@@ -1,0 +1,22 @@
+{
+  "name": "di-tui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Di terminal UI (TypeScript frontend for `di --mode rpc`)",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-tui": "^1.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.10.0"
+  }
+}

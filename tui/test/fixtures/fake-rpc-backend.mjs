@@ -1,0 +1,72 @@
+// 测试用假后端：模拟 `di --mode rpc` 的最小协议行为。
+//
+// 行为：
+//   - 启动即发 `ready`（FAKE_MODE=exit 时直接 exit 1，模拟旧版不支持 rpc）。
+//   - 收到 `prompt` 请求 → 发一段事件流（text/tool/iteration）+ 一个 `result`。
+//   - 收到 `shutdown` → exit 0。
+//   - 其余请求（ping 等）无应答。
+//
+// 只在测试中使用，不属于产品代码。
+
+import process from "node:process";
+import { createInterface } from "node:readline";
+
+const mode = process.env.FAKE_MODE ?? "ok";
+
+function write(obj) {
+  process.stdout.write(`${JSON.stringify(obj)}\n`);
+}
+
+if (mode === "exit") {
+  process.exit(1);
+}
+
+write({ type: "ready", version: "0.0.0-fake" });
+
+const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+
+let seq = 0;
+
+rl.on("line", (line) => {
+  let req;
+  try {
+    req = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (req.type !== "request") return;
+
+  switch (req.method) {
+    case "shutdown":
+      process.exit(0);
+      break;
+    case "prompt": {
+      seq += 1;
+      const s = seq;
+      write({ type: "event", seq: s, event: { kind: "text_delta", delta: "Hello from fake. " } });
+      write({ type: "event", seq: s + 1, event: { kind: "tool_call_delta", id: "t1", name: "fake_tool", arguments: '{"x":' } });
+      write({ type: "event", seq: s + 2, event: { kind: "tool_call_delta", id: "t1", name: "fake_tool", arguments: '{"x":1}' } });
+      write({ type: "event", seq: s + 3, event: { kind: "tool_started", call: { id: "t1", name: "fake_tool", arguments: '{"x":1}' } } });
+      write({
+        type: "event",
+        seq: s + 4,
+        event: { kind: "tool_completed", call: { id: "t1", name: "fake_tool", arguments: '{"x":1}' }, observation: "ok", is_error: false },
+      });
+      write({ type: "event", seq: s + 5, event: { kind: "text_delta", delta: "Done." } });
+      write({
+        type: "event",
+        seq: s + 6,
+        event: { kind: "turn_completed", iteration: 1, usage: { input_tokens: 10, output_tokens: 5 }, cost: 0.001, finish_reason: "answer" },
+      });
+      write({
+        type: "result",
+        seq: s + 6,
+        result: { answer: "Hello from fake. Done.", stop_reason: "answer", iterations: 1, usage: { input_tokens: 10, output_tokens: 5 }, cost: 0.001 },
+      });
+      seq = s + 6;
+      break;
+    }
+    default:
+      break;
+  }
+});
