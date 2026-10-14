@@ -252,11 +252,29 @@ internal static class ProcessRunner
         catch { return 0; }
     }
 
-    /// <summary>实际解析到的可执行文件路径（MainModule 失败时退回配置的 fileName，如 "python"）。</summary>
+    /// <summary>
+    /// 实际解析到的可执行文件路径（要诊断 WindowsApps 别名等解析漂移，必须拿到真实路径而非配置名）。
+    /// <see cref="Process.MainModule"/> 在 Start() 后立刻读存在已知竞态（进程 PE 头未就绪抛 Win32Exception），
+    /// 短重试（最多 3 次 × 20ms）骑过竞态，仍失败才退回配置的 fileName（如 "python"）。
+    /// </summary>
     private static string ResolveExecutable(Process process, string fileName)
     {
-        try { return process.MainModule?.FileName ?? fileName; }
-        catch { return fileName; }
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                var resolved = process.MainModule?.FileName;
+                if (!string.IsNullOrWhiteSpace(resolved))
+                    return resolved;
+            }
+            catch
+            {
+                // 竞态未就绪：短暂退避后重试；最后一次失败落回 fileName。
+            }
+            if (attempt < 2)
+                Thread.Sleep(20);
+        }
+        return fileName;
     }
 
     /// <summary>拼命令行：优先读 Start 后 .NET 生成的完整行（AppendArgumentList 也在此刻成型），退回手工拼接。</summary>
