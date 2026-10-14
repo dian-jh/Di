@@ -89,6 +89,40 @@ public sealed class PrintModeTests
     }
 
     [Fact]
+    public async Task Print_StdoutTty_ShowsWorkingStatusBeforeFirstOutput()
+    {
+        var (host, _) = Host();
+        var stdout = new StringWriter();
+
+        var code = await PrintMode.RunAsync(host, new CliArgs { Positionals = ["hi"] },
+            TextReader.Null, stdout, new StringWriter(), stdoutTty: true);
+
+        Assert.Equal(0, code);
+        var text = stdout.ToString();
+        // 真实终端（stdout 未重定向）等待模型首 token 期间有"正在请求模型…"反馈，
+        // 且必须出现在首个回合输出（第 1 轮思考完成）之前。
+        Assert.Contains("正在请求模型", text);
+        Assert.True(
+            text.IndexOf("正在请求模型", StringComparison.Ordinal)
+                < text.IndexOf("第 1 轮思考完成", StringComparison.Ordinal),
+            "状态行应先于首个回合输出出现");
+    }
+
+    [Fact]
+    public async Task Print_StdoutRedirected_OmitsWorkingStatus()
+    {
+        var (host, _) = Host();
+        var stdout = new StringWriter();
+
+        // stdoutTty 缺省 false（管道 / 文件 / 脚本）：不得输出状态行污染捕获内容。
+        var code = await PrintMode.RunAsync(host, new CliArgs { Positionals = ["hi"] },
+            TextReader.Null, stdout, new StringWriter());
+
+        Assert.Equal(0, code);
+        Assert.DoesNotContain("正在请求模型", stdout.ToString());
+    }
+
+    [Fact]
     public async Task Print_RunnerThrows_ExitsOne_WritesErrorToStderr()
     {
         var bus = new InMemoryEventBus();

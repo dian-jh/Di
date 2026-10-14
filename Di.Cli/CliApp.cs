@@ -77,7 +77,7 @@ public sealed class CliApp
                         AppMode.Interactive => await InteractiveAsync(host, stdin, stdout, stderr, stdinTty, stdoutTty,
                             interrupt, cancellationToken, _tuiContext),
                         AppMode.Rpc => await RpcMode.RunAsync(host, cliArgs, stdin, stdout, stderr, cancellationToken),
-                        _ => await PrintMode.RunAsync(host, cliArgs, stdin, stdout, stderr, cancellationToken),
+                        _ => await PrintMode.RunAsync(host, cliArgs, stdin, stdout, stderr, stdoutTty, cancellationToken),
                     };
                 }
         }

@@ -9,7 +9,8 @@ namespace Di.Cli.Modes;
 
 /// <summary>
 /// Headless 单发模式（对应 Pi 的 print 模式）：跑一个回合就退出。
-/// 文本（默认 / --mode print）：事件流式渲染到 stdout（禁用 ANSI、不显示状态行，适合管道/脚本）；
+/// 文本（默认 / --mode print）：事件流式渲染到 stdout（禁用 ANSI；TTY 下回合开始时先显示
+/// <c>正在请求模型…</c> 状态行，首个输出到达后不再出现——管道/重定向时省略，保持捕获输出干净）；
 /// JSON（--mode json）：回合结束输出<b>单个</b> JSON 文档（脚本友好）。
 /// 提示词 = 位置参数拼接，无位置参数时从 stdin 读到 EOF。
 /// 失败路径（空提示词 / 模型异常 / StopReason.Error）→ 退出码 1；默认写会话日志（--no-session 关闭）。
@@ -25,7 +26,7 @@ public static class PrintMode
     };
 
     public static async Task<int> RunAsync(CliHost host, CliArgs args, TextReader stdin, TextWriter stdout,
-        TextWriter stderr, CancellationToken cancellationToken = default)
+        TextWriter stderr, bool stdoutTty = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(args);
@@ -54,12 +55,12 @@ public static class PrintMode
 
         return args.Mode == "json"
             ? await RunJsonAsync(host, args, prompt, stdout, stderr, cancellationToken)
-            : await RunTextAsync(host, args, prompt, stdout, stderr, cancellationToken);
+            : await RunTextAsync(host, args, prompt, stdout, stderr, stdoutTty, cancellationToken);
     }
 
     /// <summary>文本：事件流式渲染（实时写出，模型生成即显示）。</summary>
     private static async Task<int> RunTextAsync(CliHost host, CliArgs args, string prompt,
-        TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken)
+        TextWriter stdout, TextWriter stderr, bool stdoutTty, CancellationToken cancellationToken)
     {
         using var consumer = host.Bus.CreateConsumer<AgentLoopEvent>();
         using var renderCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -69,6 +70,11 @@ public static class PrintMode
         var startedAt = DateTimeOffset.UtcNow;
         StartSession(host, args, stderr);
         ApplySkills(host, prompt);
+
+        // 真实终端（stdoutTty）等待模型首 token 期间显示"正在请求模型…"（与 REPL 同款文案，
+        // 见 ReplOptions.WorkingStatusText），首个事件到达即被清除；管道/重定向省略，避免污染捕获输出。
+        if (stdoutTty)
+            renderer.ShowStatus("⟳ 正在请求模型…");
 
         AgentResult result;
         try
