@@ -5,9 +5,10 @@ using Di.Tests.Tools;
 namespace Di.Tests.AgentLoop;
 
 /// <summary>
-/// 针对 <see cref="EnvironmentSnapshot"/>（环境感知快照/状态栏技术）的测试。
-/// 覆盖：非 git 目录只含工作目录、git 缺失不抛异常、真实仓库含分支/提交/变更、
-/// 中文提交信息不乱码（git 写 UTF-8）、变更概览截断。
+/// 针对 <see cref="EnvironmentSnapshot"/>（环境感知快照，最小化注入 + 工具自取）的测试。
+/// 设计对齐 pi（参考 E:\Agent\PI\pi 的 system-prompt.ts / footer-data-provider.ts）：
+/// 「最小化注入 + 工具自取」——提示词里只注入工作目录与一行自取提示，不注入 git 分支 /
+/// 改动 / 提交（低频易变信息改为模型需要时用 bash 自取）；git 分支的用户可见展示归 UI 层。
 /// 依赖真实 git 的用例在 testhost 找不到 git 时静默跳过（与 FindPython 同款策略）。
 /// </summary>
 public sealed class EnvironmentSnapshotTests : IDisposable
@@ -22,28 +23,22 @@ public sealed class EnvironmentSnapshotTests : IDisposable
     }
 
     [Fact]
-    public async Task Capture_NonGitDirectory_ReturnsWorkingDirectoryOnly()
+    public async Task Capture_ReturnsWorkingDirectoryAndSelfFetchHint()
     {
-        var text = await EnvironmentSnapshot.CaptureAsync(_base, Git ?? "git");
+        var text = await EnvironmentSnapshot.CaptureAsync(_base);
 
         Assert.Contains("工作目录", text);
         Assert.Contains(_base, text);
-        Assert.DoesNotContain("git 分支", text);
-        Assert.DoesNotContain("最近提交", text);
-        Assert.DoesNotContain("未提交变更", text);
+        // 自取提示：仓库详情（分支/改动/提交）不再注入，改为教模型用 bash 自助查询。
+        Assert.Contains("git status --short -b", text);
+        // 旧版注入格式必须绝迹：git 分支 / 变更列表 / 提交列表。
+        Assert.DoesNotContain("- git 分支:", text);
+        Assert.DoesNotContain("- 未提交变更", text);
+        Assert.DoesNotContain("- 最近提交:", text);
     }
 
     [Fact]
-    public async Task Capture_GitExecutableMissing_DoesNotThrow_ReturnsWorkingDirectoryOnly()
-    {
-        var text = await EnvironmentSnapshot.CaptureAsync(_base, "definitely_not_a_real_git_xyz");
-
-        Assert.Contains("工作目录", text);
-        Assert.DoesNotContain("git 分支", text);
-    }
-
-    [Fact]
-    public async Task Capture_GitRepo_IncludesBranchCommitsAndChanges()
+    public async Task Capture_GitRepo_DoesNotInjectBranchCommitsChanges()
     {
         if (Git is null) return;
         var repo = InitRepo("repo");
@@ -52,45 +47,21 @@ public sealed class EnvironmentSnapshotTests : IDisposable
         RunGit(repo, "commit", "-m", "init");
         File.WriteAllText(Path.Combine(repo, "untracked.txt"), "x");
 
-        var text = await EnvironmentSnapshot.CaptureAsync(repo, Git);
+        var text = await EnvironmentSnapshot.CaptureAsync(repo);
 
+        // 最小化注入：即使仓库真实存在，分支/提交/变更也不进提示词（模型需要时用 bash 自取）。
         Assert.Contains("工作目录", text);
-        Assert.Contains("git 分支", text);
-        Assert.Contains("最近提交", text);
-        Assert.Contains("init", text);
-        Assert.Contains("未提交变更", text);
-        Assert.Contains("untracked.txt", text);
+        Assert.DoesNotContain("- git 分支:", text);
+        Assert.DoesNotContain("- 最近提交:", text);
+        Assert.DoesNotContain("- 未提交变更", text);
+        Assert.DoesNotContain("init", text);   // 提交信息也不得漏进快照
     }
 
     [Fact]
-    public async Task Capture_GitRepo_ChineseCommitMessage_IsNotMojibake()
+    public async Task Capture_NullOrWhitespaceWorkingDirectory_Throws()
     {
-        if (Git is null) return;
-        var repo = InitRepo("zh");
-        WriteGit(repo, "a.txt", "1");
-        RunGit(repo, "add", "a.txt");
-        RunGit(repo, "commit", "-m", "中文提交");
-
-        var text = await EnvironmentSnapshot.CaptureAsync(repo, Git);
-
-        Assert.Contains("中文提交", text);   // git 往管道写 UTF-8，快照必须按 UTF-8 解码
-    }
-
-    [Fact]
-    public async Task Capture_LargeStatus_IsTruncatedWithMarker()
-    {
-        if (Git is null) return;
-        var repo = InitRepo("big");
-        RunGit(repo, "commit", "--allow-empty", "-m", "init");
-        var total = EnvironmentSnapshot.MaxStatusLines + 10;
-        for (var i = 0; i < total; i++)
-            File.WriteAllText(Path.Combine(repo, $"f{i:000}.txt"), "x");
-
-        var text = await EnvironmentSnapshot.CaptureAsync(repo, Git);
-
-        Assert.Contains("未提交变更", text);
-        Assert.Contains("还有 10 项未显示", text);
-        Assert.DoesNotContain("f050.txt", text);   // 第 50 行之后被截断
+        await Assert.ThrowsAsync<ArgumentException>(() => EnvironmentSnapshot.CaptureAsync(""));
+        await Assert.ThrowsAsync<ArgumentException>(() => EnvironmentSnapshot.CaptureAsync("   "));
     }
 
     // ---- 工具 ----

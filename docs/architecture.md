@@ -88,7 +88,7 @@ Repl.RunTurnAsync
   ├─ 创建 AgentLoopEvent 消费者，启动并发渲染任务
   ├─ 词法匹配 skills → AgentRunner.ActiveSkills = 固定 + 自动匹配
   ├─ AgentRunner.RunAsync(用户消息)
-  │   ├─ 捕获环境快照；与上次比较，变化才追加为历史 system 消息
+  │   ├─ 捕获环境快照（最小化：仅工作目录 + 自取提示，git 状态不注入）；有变化才追加为历史 system 消息
   │   ├─ 构建 SystemContext（skill 广告 + 激活 skill 指令）
   │   └─ ReAct.RunStreamingAsync(AgentRequest)
   │       └─ 循环：

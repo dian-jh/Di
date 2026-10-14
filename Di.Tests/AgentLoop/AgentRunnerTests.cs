@@ -328,7 +328,7 @@ public sealed class AgentRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_SnapshotChanged_AppendsUpdatedSnapshot()
+    public async Task RunAsync_SnapshotStable_DoesNotReinject_WhenGitStateChanges()
     {
         if (FindGit() is null) return;   // 无 git 则跳过（与 Di.Tests 同款策略）
         var repo = InitGitRepo();
@@ -343,14 +343,17 @@ public sealed class AgentRunnerTests
                 workingDirectory: repo);
 
             await runner.RunAsync("第一问");
-            File.WriteAllText(Path.Combine(repo, "changed.txt"), "x");   // 让 git 状态发生变化
+            File.WriteAllText(Path.Combine(repo, "changed.txt"), "x");   // git 状态变化
             await runner.RunAsync("第二问");
 
             var second = model.Requests[1];
+            // 快照最小化（仅"工作目录 + 自取提示"，不注入 git 状态，参考 pi 设计）：
+            // git 状态变化不再导致快照重发 → 历史里始终只有一条快照，字节稳定前缀持续命中缓存
+            // （这是"最小化注入"的缓存稳定性契约：低频易变信息改为模型用 bash 自取）。
             var snapshots = second.Messages.OfType<SystemMessage>()
                 .Where(m => m.Text.Contains("工作目录")).ToList();
-            Assert.Equal(2, snapshots.Count);                 // 旧快照 + 变化后的新快照
-            Assert.Contains("changed.txt", snapshots[1].Text);   // 新快照带上未提交变更
+            Assert.Single(snapshots);
+            Assert.DoesNotContain("changed.txt", snapshots[0].Text);
         }
         finally
         {

@@ -35,8 +35,10 @@ harness 的核心执行引擎：
 ### AgentRunner（`Core/AgentLoop/AgentRunner.cs`）
 
 - 按当前模型名经工厂解析 `IChatModel`（`CurrentModel` 可运行中切换）。
-- **环境快照 append-on-change 进持久历史**（`_lastSnapshotText` 去重）：只在内容变化时追加，
-  稳定时留在缓存前缀零重复支付；被历史裁剪裁掉后自动重置重新注入。
+- **环境快照最小化注入 + 工具自取**（参考 pi 设计）：只注入"工作目录 + 自取提示"，仓库详情
+  （分支/改动/提交）改为模型需要时用 bash `git status` / `git log` 自助查询，避免为低频易变信息
+  每回合支付 git 进程与 token（Windows 上每次 git spawn ≈100ms+，且注入内容拉高 TTFT）。
+  `_lastSnapshotText` 去重：内容恒定 → 首次追加后留在缓存前缀零重复支付；被历史裁剪裁掉后自动重置重新注入。
 - **跨回合记忆裁剪（轮数 + token 预算）**：先按当前模型的上下文 token 预算
   （`ContextWindow × AgentLoopOptions.HistoryBudgetRatio`，默认 0.5）丢最旧整回合
   （`TrimHistoryByTokens`，估算见 `TokenEstimator`，至少保留最近 1 轮），再按最大轮数兜底
@@ -93,7 +95,7 @@ Di.Cli/Repl.cs ── IAgentRunner.RunAsync ──► AgentRunner
 | 工具失败 = 观察，不是崩溃 | `ReAct.ExecuteToolAsync` | `Di.Tests/AgentLoop/ReActTests.cs` |
 | 不可重试模型错误 → 干净结局 | `ReAct.RunCoreAsync` | `Di.Tests/AgentLoop/ReActTests.cs` |
 | 跨回合记忆 + 整回合裁剪（轮数 + token 预算） | `AgentRunner` | `Di.Tests/AgentLoop/AgentRunnerTests.cs` |
-| 环境快照 append-on-change | `Core/AgentLoop/EnvironmentSnapshot.cs` | `Di.Tests/AgentLoop/EnvironmentSnapshotTests.cs` |
+| 环境快照（最小化注入 + 工具自取） | `Core/AgentLoop/EnvironmentSnapshot.cs` | `Di.Tests/AgentLoop/EnvironmentSnapshotTests.cs` |
 | 最终输出工具 | `AgentLoopOptions.FinalOutputTool` | `Di.Tests/AgentLoop/ReActTests.cs` |
 | 工具校验缝 | `IToolValidator`（MVP 传 null） | —（预留） |
 | 成本跨轮累计 | `ReAct.CombineCost` | `Di.Tests/AgentLoop/ReActTests.cs` |

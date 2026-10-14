@@ -82,9 +82,9 @@ public sealed class AgentRunner : IAgentRunner
         var model = _modelFactory(CurrentModel);
         var react = new ReAct(model, _options, _eventBus, InterruptSignal);
 
-        // 环境快照进持久历史，且只在内容变化时追加：稳定时它留在字节稳定前缀里，跨回合/迭代
-        // 持续命中缓存，零重复支付；变化时（git 状态改变等）作为新 system 消息追加到历史末尾，
-        // 付一次成本后也进入缓存前缀。相比"每回合重发到请求末尾"，不再为未变化的环境反复花钱。
+        // 环境快照进持久历史，且只在内容变化时追加：快照已最小化（仅"工作目录 + 自取提示"，见
+        // EnvironmentSnapshot，参考 pi 的"最小化注入 + 工具自取"）→ 内容恒定，首次注入后即留在
+        // 字节稳定前缀里，跨回合/迭代持续命中缓存，零重复支付。相比"每回合重发到请求末尾"，不再为环境反复花钱。
         if (!string.IsNullOrWhiteSpace(_workingDirectory))
         {
             var snapshot = await EnvironmentSnapshot.CaptureAsync(_workingDirectory, cancellationToken: cancellationToken)
