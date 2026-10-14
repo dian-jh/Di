@@ -7,7 +7,7 @@
  * 以 `\n` 结尾。为兼容 Windows 工具链，解析时容忍行尾 `\r\n`。
  */
 
-import type { AgentEvent, AgentResult, CoreMessage, TokenUsage, ToolCall } from "./protocol.ts";
+import type { AgentEvent, AgentResult, CoreMessage, ModelInfo, SkillInfo, TokenUsage, ToolCall } from "./protocol.ts";
 
 /** 协议解析 / 校验失败。`line` 为原始行（调试用，可能很长）。 */
 export class ProtocolError extends Error {
@@ -192,6 +192,36 @@ function validateToolCall(value: unknown, line: string): ToolCall {
   };
 }
 
+function validateSkillInfos(value: unknown, line: string): SkillInfo[] {
+  if (!Array.isArray(value)) {
+    throw new ProtocolError("ready.skills 应为数组", line);
+  }
+  return value.map((item, i) => {
+    if (!isObject(item)) {
+      throw new ProtocolError(`ready.skills[${i}] 应为对象`, line);
+    }
+    return {
+      name: expectString(item["name"], `ready.skills[${i}].name`, line),
+      description: expectString(item["description"], `ready.skills[${i}].description`, line),
+    };
+  });
+}
+
+function validateModelInfos(value: unknown, line: string): ModelInfo[] {
+  if (!Array.isArray(value)) {
+    throw new ProtocolError("ready.models 应为数组", line);
+  }
+  return value.map((item, i) => {
+    if (!isObject(item)) {
+      throw new ProtocolError(`ready.models[${i}] 应为对象`, line);
+    }
+    return {
+      id: expectString(item["id"], `ready.models[${i}].id`, line),
+      name: expectString(item["name"], `ready.models[${i}].name`, line),
+    };
+  });
+}
+
 function validateFailure(value: unknown, line: string): { code: string; message: string } {
   if (!isObject(value)) {
     throw new ProtocolError("failure 应为对象", line);
@@ -302,8 +332,19 @@ function validateAgentResult(value: unknown, line: string): AgentResult {
 
 function validateCoreMessage(m: Record<string, unknown>, line: string): CoreMessage {
   switch (m["type"]) {
-    case "ready":
-      return { type: "ready", version: expectString(m["version"], "ready.version", line) };
+    case "ready": {
+      // 新旧字段均可选：容忍旧后端（只发 version）。
+      return {
+        type: "ready",
+        version: expectString(m["version"], "ready.version", line),
+        ...(m["model"] === undefined ? {} : { model: expectString(m["model"], "ready.model", line) }),
+        ...(m["effort"] === undefined
+          ? {}
+          : { effort: m["effort"] === null ? null : expectString(m["effort"], "ready.effort", line) }),
+        ...(m["skills"] === undefined ? {} : { skills: validateSkillInfos(m["skills"], line) }),
+        ...(m["models"] === undefined ? {} : { models: validateModelInfos(m["models"], line) }),
+      };
+    }
     case "event": {
       const event = m["event"];
       if (!isObject(event)) {
@@ -361,6 +402,10 @@ function validateCoreMessage(m: Record<string, unknown>, line: string): CoreMess
         name: expectString(m["name"], "command_ran.name", line),
         lines: rawLines as string[],
         exit: expectBool(m["exit"], "command_ran.exit", line),
+        ...(m["model"] === undefined ? {} : { model: expectString(m["model"], "command_ran.model", line) }),
+        ...(m["effort"] === undefined
+          ? {}
+          : { effort: m["effort"] === null ? null : expectString(m["effort"], "command_ran.effort", line) }),
       };
     }
     case "command_error":
@@ -368,6 +413,9 @@ function validateCoreMessage(m: Record<string, unknown>, line: string): CoreMess
         type: "command_error",
         code: expectString(m["code"], "command_error.code", line),
         message: expectString(m["message"], "command_error.message", line),
+        ...(m["turn_message"] === undefined
+          ? {}
+          : { turn_message: expectString(m["turn_message"], "command_error.turn_message", line) }),
       };
     default:
       throw new ProtocolError(`未知的消息 type: ${JSON.stringify(m["type"])}`, line);

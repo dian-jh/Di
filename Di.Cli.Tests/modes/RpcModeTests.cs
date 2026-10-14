@@ -29,9 +29,42 @@ public sealed class RpcModeTests
 
         Assert.Equal(0, code);
         var lines = Lines(output);
-        Assert.Equal("""{"type":"ready","version":"0.1.0"}""", lines[0]);
+        Assert.Equal("""{"type":"ready","version":"0.1.0","model":"deepseek-flash","skills":[],"models":[]}""", lines[0]);
         Assert.Single(lines);   // shutdown 无应答，仅 ready
         Assert.Equal("", stderr);
+    }
+
+    [Fact]
+    public async Task Rpc_Ready_EmitsModelEffortSkillsModels()
+    {
+        // ready 握手携带当前模型/强度/skills/模型目录快照，TUI 据此渲染右下角状态栏与命令补全。
+        var bus = new InMemoryEventBus();
+        var skill = new Skill { Name = "backend-tests", Description = "跑后端测试", Instructions = "dotnet test" };
+        var llm = new FakeLlm(
+        [
+            new LlmModelInfo("deepseek", "deepseek-flash", "DeepSeek Flash"),
+            new LlmModelInfo("deepseek", "deepseek-v4-pro", "DeepSeek Pro"),
+        ]);
+        var host = new CliHost(new FakeRunner { Bus = bus }, bus, llm, [skill], new ReplOptions(),
+            null, null, null, reasoningEffort: "high");
+        var (code, output, _) = await RunAsync(host, new CliArgs(),
+            """{"type":"request","id":1,"method":"shutdown","params":{}}""");
+
+        Assert.Equal(0, code);
+        using var doc = JsonDocument.Parse(Lines(output)[0]);
+        var root = doc.RootElement;
+        Assert.Equal("ready", root.GetProperty("type").GetString());
+        Assert.Equal("deepseek-flash", root.GetProperty("model").GetString());
+        Assert.Equal("high", root.GetProperty("effort").GetString());
+        var skills = root.GetProperty("skills");
+        Assert.Single(skills.EnumerateArray());
+        Assert.Equal("backend-tests", skills[0].GetProperty("name").GetString());
+        Assert.Equal("跑后端测试", skills[0].GetProperty("description").GetString());
+        var models = root.GetProperty("models");
+        Assert.Equal(2, models.GetArrayLength());
+        Assert.Equal("deepseek-flash", models[0].GetProperty("id").GetString());
+        Assert.Equal("DeepSeek Flash", models[0].GetProperty("name").GetString());
+        Assert.Equal("deepseek-v4-pro", models[1].GetProperty("id").GetString());
     }
 
     [Fact]
@@ -42,7 +75,7 @@ public sealed class RpcModeTests
 
         Assert.Equal(0, code);
         Assert.Empty(runner.Messages);
-        Assert.Equal("""{"type":"ready","version":"0.1.0"}""", Lines(output)[0]);
+        Assert.Equal("""{"type":"ready","version":"0.1.0","model":"deepseek-flash","skills":[],"models":[]}""", Lines(output)[0]);
     }
 
     // ---- prompt：事件流 + result ----
@@ -60,7 +93,7 @@ public sealed class RpcModeTests
         Assert.Equal(0, code);
         Assert.Equal(["hi"], runner.Messages);
         var lines = Lines(output);
-        Assert.Equal("""{"type":"ready","version":"0.1.0"}""", lines[0]);
+        Assert.Equal("""{"type":"ready","version":"0.1.0","model":"deepseek-flash","skills":[],"models":[]}""", lines[0]);
 
         using var evt1 = JsonDocument.Parse(lines[1]);
         Assert.Equal("event", evt1.RootElement.GetProperty("type").GetString());
@@ -106,7 +139,7 @@ public sealed class RpcModeTests
         Assert.Equal(0, code);
         var expected =
             """
-            {"type":"ready","version":"0.1.0"}
+            {"type":"ready","version":"0.1.0","model":"deepseek-flash","skills":[],"models":[]}
             {"type":"event","seq":1,"event":{"kind":"text_delta","delta":"回答: hi"}}
             {"type":"event","seq":2,"event":{"kind":"turn_completed","iteration":1,"usage":{"input_tokens":10,"output_tokens":20},"finish_reason":"stop"}}
             {"type":"result","seq":3,"result":{"answer":"回答: hi","stop_reason":"answer","iterations":1,"usage":{"input_tokens":10,"output_tokens":20}}}
@@ -451,7 +484,7 @@ public sealed class RpcModeTests
 
         Assert.Equal(0, code);
         var lines = Lines(output);
-        Assert.Equal("""{"type":"ready","version":"0.1.0"}""", lines[0]);
+        Assert.Equal("""{"type":"ready","version":"0.1.0","model":"deepseek-flash","skills":[],"models":[]}""", lines[0]);
         using var doc = JsonDocument.Parse(lines[1]);
         var root = doc.RootElement;
         Assert.Equal("command_listed", root.GetProperty("type").GetString());
@@ -482,6 +515,8 @@ public sealed class RpcModeTests
         Assert.Contains("模型已切换为 deepseek-v4-pro",
             root.GetProperty("lines").EnumerateArray().Select(l => l.GetString()));
         Assert.False(root.GetProperty("exit").GetBoolean());
+        // 应答携带切换后的模型/强度快照，TUI 据此更新右下角状态栏。
+        Assert.Equal("deepseek-v4-pro", root.GetProperty("model").GetString());
     }
 
     [Fact]
@@ -532,6 +567,10 @@ public sealed class RpcModeTests
         using var doc = JsonDocument.Parse(Lines(output)[1]);
         Assert.Equal("command_error", doc.RootElement.GetProperty("type").GetString());
         Assert.Equal("turn_not_supported", doc.RootElement.GetProperty("code").GetString());
+        // turn_message 携带指令+参数全文，TUI 据此改用自身 prompt 机制跑回合（docs/tui-rpc.md §2.5）。
+        var turnMessage = doc.RootElement.GetProperty("turn_message").GetString();
+        Assert.Contains("【Skill：backend-tests】", turnMessage);
+        Assert.Contains("补测试", turnMessage);
     }
 
     [Fact]

@@ -47,8 +47,17 @@ public static class RpcMode
         // 主循环与后台回合任务都可能写 stdout：同一把锁串行化，保证线序 = 序号一致、无交错。
         var writeLock = new object();
 
-        // 组合根已构建、可服务请求：先握手（仅一次）。
-        WriteLine(stdout, writeLock, Serialize(new { type = "ready", version = "0.1.0" }));
+        // 组合根已构建、可服务请求：先握手（仅一次）。携带当前模型 / 强度 / skills / 模型目录快照，
+        // TUI 据此渲染右下角状态栏并对齐命令补全（docs/tui-rpc.md §2.1）。
+        WriteLine(stdout, writeLock, Serialize(new
+        {
+            type = "ready",
+            version = "0.1.0",
+            model = host.Runner.CurrentModel,
+            effort = host.ReasoningEffort,
+            skills = host.Skills.Select(s => new { name = s.Name, description = s.Description }),
+            models = host.Llm.ListModels().Select(m => new { id = m.Id, name = m.Name }),
+        }));
 
         // 会话开始写首行 session_meta（尽力而为；--no-session 时跳过）。
         if (!args.NoSession)
@@ -212,21 +221,27 @@ public static class RpcMode
 
             if (result.TurnMessage is { Length: > 0 })
             {
+                // 回合型命令：错误载荷附带 turn_message（指令+参数全文），TUI 据此改用自身
+                // prompt 机制跑回合（docs/tui-rpc.md §2.5 —— 命令定义与前端无关，同一份注册表）。
                 WriteLine(stdout, writeLock, Serialize(new
                 {
                     type = "command_error",
                     code = "turn_not_supported",
-                    message = $"命令 /{name} 需要运行一个回合，RPC 暂不支持（请用 prompt 或 REPL 执行）",
+                    message = $"命令 /{name} 是回合型命令，TUI 应改用 prompt 执行（turn_message 已附指令全文）",
+                    turn_message = result.TurnMessage,
                 }));
                 return;
             }
 
+            // 应答携带执行后的模型 / 强度快照（/model 切换后 TUI 据此更新状态栏，不依赖解析中文提示）。
             WriteLine(stdout, writeLock, Serialize(new
             {
                 type = "command_ran",
                 name,
                 lines = BufferLines(buffer),
                 exit = result.Exit,
+                model = host.Runner.CurrentModel,
+                effort = host.ReasoningEffort,
             }));
         }
         catch (Exception ex) when (ex is FormatException)

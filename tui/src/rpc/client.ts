@@ -16,6 +16,7 @@ import type {
   AgentResult,
   CommandDescriptor,
   CommandParams,
+  ReadyMessage,
   RequestMessage,
   RequestMethod,
   RequestParams,
@@ -25,8 +26,21 @@ import { makeRequest } from "./protocol.ts";
 /** `command` 请求的统一应答：list / run / error 三种（docs/tui-rpc.md §2.5）。 */
 export type CommandOutcome =
   | { kind: "listed"; commands: CommandDescriptor[] }
-  | { kind: "ran"; name: string; lines: string[]; exit: boolean }
-  | { kind: "error"; code: string; message: string };
+  | { kind: "ran"; name: string; lines: string[]; exit: boolean; model?: string; effort?: string | null }
+  | { kind: "error"; code: string; message: string; turnMessage?: string };
+
+/** `command` 请求的拒绝载体：message 保留 `code: message` 可读文本；回合型命令带 turnMessage。 */
+export class CommandError extends Error {
+  readonly code: string;
+  readonly turnMessage?: string;
+
+  constructor(code: string, message: string, turnMessage?: string) {
+    super(`${code}: ${message}`);
+    this.name = "CommandError";
+    this.code = code;
+    this.turnMessage = turnMessage;
+  }
+}
 
 /** 可注入的 spawn 工厂（测试替换为假子进程用）。 */
 export type SpawnFn = (bin: string, args: string[]) => ChildProcess;
@@ -47,7 +61,7 @@ export interface RpcClientOptions {
   /** 发 `shutdown` 后等待退出的超时（默认 2000ms）。 */
   stopTimeoutMs?: number;
 
-  onReady?: (version: string) => void;
+  onReady?: (meta: ReadyMessage) => void;
   onEvent?: (event: AgentEvent) => void;
   onResult?: (result: AgentResult) => void;
   onError?: (message: string, code: string) => void;
@@ -224,11 +238,19 @@ export class RpcClient {
     });
   }
 
-  /** 运行一个后端斜杠命令（同步应答；回合型命令 → turn_not_supported，reject）。 */
-  runCommand(name: string, args = ""): Promise<{ lines: string[]; exit: boolean }> {
+  /**
+ * 运行一个后端斜杠命令（同步应答）。应答携带切换后的模型/强度快照（/model 用，状态栏据此更新）。
+ * 回合型命令（/skill <名> <参数>、用户命令）→ 抛 {@link CommandError}（code=turn_not_supported，带 turnMessage）。
+ */
+  runCommand(name: string, args = ""): Promise<{ lines: string[]; exit: boolean; model?: string; effort?: string | null }> {
     return this.sendCommand({ name, args }).then((outcome) => {
-      if (outcome.kind === "ran") return { lines: outcome.lines, exit: outcome.exit };
-      throw new Error(outcome.kind === "error" ? `${outcome.code}: ${outcome.message}` : "意外的命令应答");
+      if (outcome.kind === "ran") {
+        return { lines: outcome.lines, exit: outcome.exit, model: outcome.model, effort: outcome.effort };
+      }
+      if (outcome.kind === "error") {
+        throw new CommandError(outcome.code, outcome.message, outcome.turnMessage);
+      }
+      throw new Error("意外的命令应答");
     });
   }
 
@@ -324,7 +346,7 @@ export class RpcClient {
       case "ready":
         this.ready = true;
         this.stateValue = "ready";
-        this.options.onReady?.(message.version);
+        this.options.onReady?.(message);
         this.readyResolve?.();
         this.readyResolve = null;
         break;
@@ -354,11 +376,18 @@ export class RpcClient {
         this.pendingCommand = null;
         break;
       case "command_ran":
-        this.pendingCommand?.resolve({ kind: "ran", name: message.name, lines: message.lines, exit: message.exit });
+        this.pendingCommand?.resolve({
+          kind: "ran",
+          name: message.name,
+          lines: message.lines,
+          exit: message.exit,
+          model: message.model,
+          effort: message.effort,
+        });
         this.pendingCommand = null;
         break;
       case "command_error":
-        this.pendingCommand?.reject(new Error(`${message.code}: ${message.message}`));
+        this.pendingCommand?.reject(new CommandError(message.code, message.message, message.turn_message));
         this.pendingCommand = null;
         break;
       default:

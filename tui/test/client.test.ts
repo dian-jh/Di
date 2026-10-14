@@ -11,8 +11,8 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { RpcClient, resolveDiBin } from "../src/rpc/client.ts";
-import type { AgentEvent, AgentResult } from "../src/rpc/protocol.ts";
+import { CommandError, RpcClient, resolveDiBin } from "../src/rpc/client.ts";
+import type { AgentEvent, AgentResult, ReadyMessage } from "../src/rpc/protocol.ts";
 
 const BACKEND = fileURLToPath(new URL("./fixtures/fake-rpc-backend.mjs", import.meta.url));
 
@@ -32,6 +32,22 @@ describe("RpcClient：ready 握手", () => {
     const client = makeClient();
     await client.connect();
     assert.equal(client.state, "ready");
+    await client.stop();
+  });
+
+  it("onReady 收到富化元数据（模型/强度/skills/模型目录）", async () => {
+    let ready: ReadyMessage | null = null;
+    const client = makeClient({
+      onReady: (msg) => {
+        ready = msg;
+      },
+    });
+    await client.connect();
+    assert.ok(ready, "应当收到 ready");
+    assert.equal(ready.model, "deepseek-flash");
+    assert.equal(ready.effort, "high");
+    assert.equal(ready.skills?.[0]?.name, "backend-tests");
+    assert.equal(ready.models?.length, 2);
     await client.stop();
   });
 
@@ -108,6 +124,35 @@ describe("RpcClient：command 请求", () => {
     assert.equal(result.exit, false);
 
     await client.stop();
+  });
+
+  it("runCommand /model 应答携带切换后的模型/强度", async () => {
+    const client = makeClient();
+    await client.connect();
+
+    const result = await client.runCommand("model", "deepseek-v4-pro");
+
+    assert.equal(result.model, "deepseek-v4-pro");
+    assert.equal(result.effort, "high");
+
+    await client.stop();
+  });
+
+  it("runCommand 回合型命令抛 CommandError 且带 turnMessage", async () => {
+    const client = makeClient();
+    await client.connect();
+
+    try {
+      await client.runCommand("skill", "backend-tests 补测试");
+      assert.fail("回合型命令应当 reject");
+    } catch (err) {
+      assert.ok(err instanceof CommandError, `期望 CommandError，实际 ${err}`);
+      assert.equal((err as CommandError).code, "turn_not_supported");
+      assert.match((err as CommandError).turnMessage ?? "", /【Skill：backend-tests】/);
+      assert.match((err as CommandError).turnMessage ?? "", /补测试/);
+    } finally {
+      await client.stop();
+    }
   });
 
   it("runCommand 未知命令 → reject 且错误清晰", async () => {

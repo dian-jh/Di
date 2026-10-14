@@ -19,10 +19,33 @@ export type CoreMessage =
   | CommandRanMessage
   | CommandErrorMessage;
 
-/** `{"type":"ready","version":"0.1.0"}` —— 组合根构建完成、可服务请求后发出，仅一次。 */
+/** 一个可见 skill 的展示元数据（/skill 补全用）。 */
+export interface SkillInfo {
+  name: string;
+  description: string;
+}
+
+/** 一个可供 /model 切换的模型条目（参数补全用）。 */
+export interface ModelInfo {
+  id: string;
+  name: string;
+}
+
+/**
+ * `{"type":"ready","version":"0.1.0",...}` —— 组合根构建完成、可服务请求后发出，仅一次。
+ * 携带当前模型 / 强度 / skills / 模型目录快照（docs/tui-rpc.md §2.1），供状态栏与命令补全。
+ */
 export interface ReadyMessage {
   type: "ready";
   version: string;
+  /** 当前生效模型名（/model 可切换）。 */
+  model?: string;
+  /** 推理强度（off/low/high/max 等，启动时固定；缺省 = 未配置）。 */
+  effort?: string | null;
+  /** 可见 skills（/skill 补全）。 */
+  skills?: SkillInfo[];
+  /** 模型目录（/model 参数补全）。 */
+  models?: ModelInfo[];
 }
 
 /** `{"type":"event","seq":<int>,"event":{...}}` —— seq 单调递增（回合内连续）。 */
@@ -59,12 +82,15 @@ export interface CommandListedMessage {
   commands: CommandDescriptor[];
 }
 
-/** `{"type":"command_ran","name":...,"lines":[...],"exit":bool}` —— `command run` 的同步应答。 */
+/** `{"type":"command_ran","name":...,"lines":[...],"exit":bool,...}` —— `command run` 的同步应答。 */
 export interface CommandRanMessage {
   type: "command_ran";
   name: string;
   lines: string[];
   exit: boolean;
+  /** 命令执行后的模型/强度快照（/model 切换后 TUI 据此更新状态栏）。 */
+  model?: string;
+  effort?: string | null;
 }
 
 /** `{"type":"command_error","code":...,"message":...}` —— 命令级错误（不含在 `error` 会话级语义内）。 */
@@ -72,6 +98,8 @@ export interface CommandErrorMessage {
   type: "command_error";
   code: string;
   message: string;
+  /** 回合型命令（turn_not_supported）附带的指令全文，TUI 据此改用自身 prompt 机制跑回合。 */
+  turn_message?: string;
 }
 
 /* ---------------------------------------------------------------------------

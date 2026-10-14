@@ -68,6 +68,48 @@ describe("parseMessage（parse + validate）", () => {
     });
   });
 
+  it("解析富化 ready（模型/强度/skills/模型目录）", () => {
+    const msg = parseMessage(
+      '{"type":"ready","version":"0.1.0","model":"deepseek-flash","effort":"high","skills":[{"name":"backend-tests","description":"跑后端测试"}],"models":[{"id":"m1","name":"M1"}]}',
+    );
+    assert.equal(msg.type, "ready");
+    if (msg.type !== "ready") throw new Error("unreachable");
+    assert.equal(msg.version, "0.1.0");
+    assert.equal(msg.model, "deepseek-flash");
+    assert.equal(msg.effort, "high");
+    assert.deepEqual(msg.skills, [{ name: "backend-tests", description: "跑后端测试" }]);
+    assert.deepEqual(msg.models, [{ id: "m1", name: "M1" }]);
+  });
+
+  it("容忍旧后端 ready 缺省新字段（向后兼容）", () => {
+    const msg = parseMessage('{"type":"ready","version":"0.1.0"}');
+    assert.equal(msg.type, "ready");
+    if (msg.type !== "ready") throw new Error("unreachable");
+    assert.equal(msg.model, undefined);
+    assert.equal(msg.effort, undefined);
+    assert.equal(msg.skills, undefined);
+  });
+
+  it("解析 command_ran 携带模型/强度快照", () => {
+    const msg = parseMessage(
+      '{"type":"command_ran","name":"model","lines":["模型已切换为 deepseek-v4-pro"],"exit":false,"model":"deepseek-v4-pro","effort":"high"}',
+    );
+    assert.equal(msg.type, "command_ran");
+    if (msg.type !== "command_ran") throw new Error("unreachable");
+    assert.equal(msg.model, "deepseek-v4-pro");
+    assert.equal(msg.effort, "high");
+  });
+
+  it("解析 command_error 携带 turn_message（回合型命令回退）", () => {
+    const msg = parseMessage(
+      '{"type":"command_error","code":"turn_not_supported","message":"回合型命令","turn_message":"【Skill：backend-tests】跑后端测试\\n\\ndotnet test\\n\\n补测试"}',
+    );
+    assert.equal(msg.type, "command_error");
+    if (msg.type !== "command_error") throw new Error("unreachable");
+    assert.equal(msg.code, "turn_not_supported");
+    assert.equal(msg.turn_message, "【Skill：backend-tests】跑后端测试\n\ndotnet test\n\n补测试");
+  });
+
   it("容忍 \\r\\n 行尾", () => {
     const msg = parseMessage('{"type":"ready","version":"1.0"}\r');
     assert.deepEqual(msg, { type: "ready", version: "1.0" });

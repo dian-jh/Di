@@ -21,7 +21,14 @@ if (mode === "exit") {
   process.exit(1);
 }
 
-write({ type: "ready", version: "0.0.0-fake" });
+write({
+  type: "ready",
+  version: "0.0.0-fake",
+  model: "deepseek-flash",
+  effort: "high",
+  skills: [{ name: "backend-tests", description: "跑后端测试" }],
+  models: [{ id: "deepseek-flash", name: "DeepSeek Flash" }, { id: "deepseek-v4-pro", name: "DeepSeek Pro" }],
+});
 
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 
@@ -77,7 +84,23 @@ rl.on("line", (line) => {
           ],
         });
       } else if (params.name === "model") {
-        write({ type: "command_ran", name: "model", lines: [`模型已切换为 ${params.args ?? ""}`], exit: false });
+        write({
+          type: "command_ran",
+          name: "model",
+          lines: [`模型已切换为 ${params.args ?? ""}`],
+          exit: false,
+          model: params.args ?? "deepseek-flash",
+          effort: "high",
+        });
+      } else if (params.name === "skill") {
+        // 回合型命令：错误载荷附带 turn_message（TUI 据此改用 prompt 跑回合）。
+        const [skillName, ...rest] = (params.args ?? "").split(" ");
+        write({
+          type: "command_error",
+          code: "turn_not_supported",
+          message: "回合型命令",
+          turn_message: `【Skill：${skillName}】跑后端测试\n\ndotnet test\n\n${rest.join(" ")}`,
+        });
       } else if (params.name === "exit") {
         write({ type: "command_ran", name: "exit", lines: [], exit: true });
       } else {

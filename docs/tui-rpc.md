@@ -22,10 +22,18 @@
 ### 2.1 `ready`
 
 ```json
-{"type":"ready","version":"0.1.0"}
+{"type":"ready","version":"0.1.0","model":"deepseek-flash","effort":"high","skills":[{"name":"backend-tests","description":"跑后端测试"}],"models":[{"id":"deepseek-flash","name":"DeepSeek Flash"}]}
 ```
 
-组合根（`CliHost`）构建完成、可服务请求后发出，仅一次。
+组合根（`CliHost`）构建完成、可服务请求后发出，仅一次。携带会话元数据快照，TUI 据此渲染
+右下角状态栏（模型 + 强度）与命令补全（`/model`、`/skill`）：
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `model` | string | 当前生效模型名（`/model` 可切换） |
+| `effort` | string? | 推理强度（off/low/high/max 等；启动时由 `--thinking` / 配置固定，运行期暂不可切）。null 键省略 |
+| `skills` | `[{name,description}]` | 可见 skills（`/skill` 补全与一次性执行） |
+| `models` | `[{id,name}]` | 模型目录（`/model <Tab>` 参数补全） |
 
 ### 2.2 `event`
 
@@ -85,18 +93,20 @@
 
 ```json
 {"type":"command_listed","commands":[{"name":"clear","description":"清空屏幕与对话记忆","argument_hint":null}]}
-{"type":"command_ran","name":"model","lines":["模型已切换为 deepseek-chat"],"exit":false}
+{"type":"command_ran","name":"model","lines":["模型已切换为 deepseek-chat"],"exit":false,"model":"deepseek-chat","effort":"high"}
+{"type":"command_error","code":"turn_not_supported","message":"命令 /skill 是回合型命令，TUI 应改用 prompt 执行","turn_message":"【Skill：backend-tests】跑后端测试\n\ndotnet test\n\n补测试"}
 {"type":"command_error","code":"unknown_command","message":"未知命令: /bogus"}
 ```
 
 - `command_listed`：`list` 应答，列出注册表全部命令（内置 + 用户命令，按名排序）。
   `commands[i] = {name, description, argument_hint?}`。
 - `command_ran`：`run` 应答；`lines` 为命令输出行（无 ANSI），`exit=true` 表示命令请求退出
-  （如 `/exit`，TUI 自行决定是否发 `shutdown`）。
+  （如 `/exit`，TUI 自行决定是否发 `shutdown`）。`model` / `effort` 为命令执行后的模型/强度
+  快照（`/model` 切换后 TUI 据此更新状态栏，不依赖解析提示文本）。
 - `command_error`：命令级错误（**不含在 `error` 会话级语义内**）：
   - `unknown_command` —— 注册表无此命令；
   - `turn_not_supported` —— 回合型命令（`/skill <名> <参数>`、用户命令）：RPC 无回合执行器，
-    TUI 应改用 `prompt` 或提示在 REPL 中使用；
+    应答携带 `turn_message`（指令+参数全文），TUI 据此**改用自身 `prompt` 机制跑回合**；
   - `invalid_request` —— 参数非法（缺 `name`、类型错误等）。
 
 ## 3. 方向 TUI → 核心（stdin）
