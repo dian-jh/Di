@@ -11,7 +11,7 @@
  * 回合终结以 `result` 为准（协议 §2.3：每个 prompt 恰好一个 result）。
  */
 
-import type { AgentEvent, AgentResult, RunFailure, TokenUsage, ToolCall } from "../rpc/protocol.ts";
+import type { AgentEvent, AgentResult, ModelInfo, ReadyMessage, RunFailure, SkillInfo, TokenUsage, ToolCall } from "../rpc/protocol.ts";
 
 export type TurnState = "idle" | "running" | "cancelling";
 
@@ -43,14 +43,27 @@ export interface TurnView {
 /** 状态推进排序：pending → running → completed/failed（只前进不回退）。 */
 const STATUS_RANK: Record<ToolStatus, number> = { pending: 0, running: 1, completed: 2, failed: 2 };
 
+/**
+ * 把 TokenUsage 格式化为 REPL 同款（对齐 Core/Llm/TokenUsage.cs ToString / EventRenderer.cs:140）：
+ * `in=X (cache_read=Y) out=Z (reasoning=R) total=T`。可空键缺省视作 0（对齐 C# `?? 0`）；
+ * total 缺省时按计费输入 + 输出兜底（计费输入 = 未命中 + 命中读 + 命中写）。
+ */
+function formatTokenUsage(usage: TokenUsage): string {
+  const cacheRead = usage.cache_read_tokens ?? 0;
+  const reasoning = usage.reasoning_tokens ?? 0;
+  const billable = usage.input_tokens + cacheRead + (usage.cache_write_tokens ?? 0);
+  const total = usage.total_tokens ?? billable + usage.output_tokens;
+  return `in=${usage.input_tokens} (cache_read=${cacheRead}) out=${usage.output_tokens} (reasoning=${reasoning}) total=${total}`;
+}
+
 export class TurnStateMachine {
   state: TurnState = "idle";
   /** 全部回合（含历史，按时间序）。 */
   turns: TurnView[] = [];
   /** 当前正在流式输出的回合；idle 时为 null。 */
   current: TurnView | null = null;
-  /** 状态行文本（idle 提示 / 运行提示 / iteration 脚注 / 结果摘要）。 */
-  statusText = "idle";
+  /** 状态行文本（idle 提示 / 运行提示 / iteration 脚注 / 结果摘要）。空串 = 不显示（dock 中塌缩）。 */
+  statusText = "";
   /** 错误横幅（run_failed / result.stop_reason=error / 后端异常退出）。 */
   errorBanner: string | undefined;
   /** 累计成本（各回合 cost 求和）。 */
@@ -62,10 +75,40 @@ export class TurnStateMachine {
   /** 命令输出序号：每次 finishCommand 递增，ChatView 据此追加渲染新输出。 */
   commandSeq = 0;
 
+  /* ---- 会话元数据（ready 握手 + command_ran 快照；右下角状态栏与命令补全） ---- */
+
+  /** 当前模型名（/model 可切换）。 */
+  model = "";
+  /** 推理强度（off/low/high/max 等，启动固定；null = 未配置）。 */
+  effort: string | null = null;
+  /** 可见 skills（/skill 补全）。 */
+  skills: SkillInfo[] = [];
+  /** 模型目录（/model 参数补全）。 */
+  models: ModelInfo[] = [];
+
   private nextTurnId = 1;
 
   get isIdle(): boolean {
     return this.state === "idle";
+  }
+
+  /** ready 握手写入会话元数据（模型/强度/skills/模型目录）。 */
+  setMeta(meta: ReadyMessage): void {
+    this.model = meta.model ?? "";
+    this.effort = meta.effort ?? null;
+    this.skills = meta.skills ?? [];
+    this.models = meta.models ?? [];
+  }
+
+  /** command_ran 快照更新模型/强度（如 /model 切换后）。 */
+  applyModel(model: string, effort: string | null): void {
+    this.model = model;
+    this.effort = effort;
+  }
+
+  /** 右下角状态栏标签：`模型 · 强度`（无强度仅模型名）。 */
+  modelLabel(): string {
+    return this.model ? (this.effort ? `${this.model} · ${this.effort}` : this.model) : "";
   }
 
   /** 回合开始：idle → running。后端正忙时忽略。 */
@@ -122,8 +165,14 @@ export class TurnStateMachine {
     }
     this.current = null;
     this.state = "idle";
-    const cost = typeof result.cost === "number" ? ` · $${result.cost.toFixed(4)}` : "";
-    this.statusText = `✓ ${result.stop_reason}${cost}`;
+    // 左下角状态行记录本回合统计摘要（对齐 REPL 展示，EventRenderer.cs:140 同源；cost F6）。
+    // 取消回合不产生有效统计，单独提示。
+    if (result.stop_reason === "cancelled") {
+      this.statusText = "已取消";
+    } else {
+      const cost = typeof result.cost === "number" ? ` · cost:$${result.cost.toFixed(6)}` : "";
+      this.statusText = `${result.iterations} 轮 · tokens: ${formatTokenUsage(result.usage)}${cost}`;
+    }
   }
 
   /** run_failed：错误横幅 + 记录 failure；回合终结仍由后续 result 负责。 */
@@ -162,7 +211,7 @@ export class TurnStateMachine {
     this.state = "idle";
     this.errorBanner = undefined;
     this.totalCost = 0;
-    this.statusText = "idle";
+    this.statusText = "";
   }
 
   /* ------------------------- 事件 → 视图模型 ------------------------- */

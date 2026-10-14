@@ -9,13 +9,16 @@
 
 import { Container, Text, type Component } from "@earendil-works/pi-tui";
 import { ToolCallView } from "./tool-call.ts";
+import { Rule } from "./rule.ts";
 import type { ToolCallEntry } from "./state.ts";
 
-/** 用户消息：一行 `❯ 内容`。 */
+/** 用户消息：浅灰条形框（上/下边）+ `❯ 内容`，与非用户输入区分。 */
 export class UserMessage extends Container {
   constructor(content: string) {
     super();
+    this.addChild(new Rule());
     this.addChild(new Text(`❯ ${content}`, 1, 0));
+    this.addChild(new Rule());
   }
 }
 

@@ -54,9 +54,12 @@ Di.Cli --mode rpc（C# 后端，复用既有 CliHost 组合根与 AgentRunner）
    在 `Di.Cli/Repl.cs`。RPC 模式下这些语义由 TS TUI 拥有；后端无状态、串行处理请求，
    Ctrl+C 由 TUI 捕获并翻译成 `interrupt` 请求（后端取消当前回合 → `stop_reason: "cancelled"`）。
    递进式软停止（先退回合 / 再退退出）的完整语义见 `docs/interrupt.md`；TUI 侧接线见其 §7。
-4. **MVP 用主屏（inline）**：先落 `TuiMainScreen`（常规模式，随终端滚动），不依赖 alt-screen
-   布局引擎；聊天视口（transcript ScrollView + dock）留到 M2 全屏化。MVP 聚焦端到端跑通：
-   流式文本、工具生命周期、输入、中断。
+4. **全屏视口（alt-screen）落地（M2 先行）**：聊天采用 pi coding-agent `createChatViewport` 同构的
+   全屏布局 —— `root = VStack[transcript ScrollView(follow end, grow) + dock(basis auto)]`，输入框固定
+   dock 在终端底部（`tui/src/app/chat-layout.ts`），内容再多也不会把输入框顶出屏幕；滚轮 / PgUp / PgDn
+   滚动与「↓ 最新消息」跳底由 `TuiAltScreen` 内置。MVP 早期曾用 `TuiMainScreen`（inline 随终端自然
+   滚动），但 transcript 超过屏幕后输入框随文档流离开视口——本变更据此弃用。`/tui` 主屏/全屏切换留待
+   M3。
 5. **依赖已发布包**：`@earendil-works/pi-tui@^1.2.0`（npm 官方包，比本地 PI 仓库 1.1.0 新），
    不 fork、不 vendor、不依赖本地 `E:\Agent\PI` 检出。win32 剪贴板等走包内预编译 N-API 二进制。
 6. **会话日志仍由后端落盘**：`SessionLog.AppendTurn` 在 RpcMode 宿主内执行（复用 `CliHost` 的
@@ -75,9 +78,13 @@ tui/
 │   │   ├── codec.ts        # NDJSON 编解码（行帧、parse/validate、FIFO 队列）
 │   │   └── client.ts       # 子进程管理：spawn、ready 握手、请求方法、事件订阅、退出清理
 │   └── app/
-│       ├── state.ts        # 回合状态机（idle/running/cancelling）→ 事件映射为视图变更
-│       ├── chat-view.ts    # 聊天视口：transcript(ScrollView) + dock(状态行 + 提示输入)
-│       ├── message.ts      # 用户/助手消息组件（Markdown/Text + 流式追加）
+│       ├── state.ts        # 回合状态机（idle/running/cancelling）+ 会话元数据（模型/强度/skills/models）
+│       ├── chat-view.ts    # 聊天视口：transcript + 错误横幅 + 状态行（左下回合统计）+ 输入框，装载到全屏布局根
+│       ├── chat-layout.ts  # 全屏布局装配（纯函数）：root = VStack[transcript ScrollView + dock]，可单测
+│       ├── badge.ts        # 输入框右下角模型徽标包装（合成到底部边框；委托鼠标/键盘）
+│       ├── message.ts      # 用户/助手消息组件（用户输入自带浅灰条形框）
+│       ├── rule.ts         # 浅灰框线（消息分隔 / 用户条形框 / 输入框边框，颜色可配）
+│       ├── commands.ts     # 斜杠命令文本解析 + skill: 前缀归一（纯函数，可单测）
 │       └── tool-call.ts    # 工具调用组件（标题行 + 结果，M2 再做折叠/展开）
 └── test/                   # node --test：codec 往返、状态机（不依赖终端）
 ```
@@ -89,9 +96,9 @@ tui/
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
-| **M1**（本任务） | C# `--mode rpc` 后端 + reasoning/toolcall 事件转发；TS TUI MVP（inline 聊天：流式文本、工具行、提示输入、Ctrl+C 中断） | 进行中 |
-| M2 | 全屏 alt-screen 视口（transcript ScrollView + dock）、工具折叠 / 展开、skills 展示、Markdown 主题 | 待办 |
-| M3 | 状态栏（模型 / 成本 / tokens）、`/tui` 主屏/全屏切换、斜杠命令 UI、编辑器增强（补全 / 粘贴） | 部分就绪：命令注册表（内置 + `~/.di/commands/*.md` 用户命令）已挂到 C# 宿主（`CliHost.Commands`），RPC `command` 方法（list/run，`docs/tui-rpc.md` §2.5/§3）+ TS 客户端 `listCommands`/`runCommand` + 输入 `/` 前缀路由已可用；剩余：命令菜单 / 参数补全（`argument_hint` 已备） |
+| **M1**（本任务） | C# `--mode rpc` 后端 + reasoning/toolcall 事件转发；TS TUI MVP（流式文本、工具行、提示输入、Ctrl+C 中断） | 进行中 |
+| M2 | 全屏 alt-screen 视口（transcript ScrollView + dock）、工具折叠 / 展开、skills 展示、Markdown 主题 | 部分实现（本变更）：全屏 alt-screen 视口已落地 —— transcript ScrollView（follow end，滚轮 / PgUp / PgDn 滚动、`↓ 最新消息`跳底）+ dock（错误横幅 / 状态行 / 输入框固定终端底部，对齐 pi coding-agent `createChatViewport`，`tui/src/app/chat-layout.ts`）。剩余：工具折叠 / 展开、skills 展示、Markdown 主题 |
+| M3 | 状态栏（模型 / 成本 / tokens）、`/tui` 主屏/全屏切换、斜杠命令 UI、编辑器增强（补全 / 粘贴） | 部分就绪：命令注册表（内置 + `~/.di/commands/*.md` 用户命令）已挂到 C# 宿主（`CliHost.Commands`），RPC `command` 方法（list/run，`docs/tui-rpc.md` §2.5/§3）。**本变更**：命令 UI + 状态显示落地 —— 输入框换 `Editor`（内置斜杠菜单：行首 `/` 弹命令+skills 列表、Tab/Enter 选择、`/m` 模糊命中），`ready` 握手携带 model/effort/skills/models 快照 → 模型徽标（`模型 · 强度`）固定在输入框底部边框右下角、终端一开即显示（启动时 `view.sync`，`/model` 切换后经 `command_ran` 快照实时更新）；用户输入消息自带浅灰条形框（区分非用户输入）；左下角状态行记录最近一回合统计（`N 轮 · tokens: … · cost:…`，与 REPL 摘要同格式，`EventRenderer.cs:140`/`TokenUsage.cs` 同源）；`/model <Tab>`/`/skill <Tab>` 参数补全；回合型命令（`/skill <名> <参数>`、用户命令）经 `turn_message` 回退到 TUI 自身 prompt 回合。剩余：`/tui` 主屏/全屏切换、粘贴增强 |
 | M4（本变更） | 安装整合（`install.*` 构建 TS 并复制到 `~/.di/tui/`）、`di` 交互默认启动 TUI（`node <entry>` 继承控制台；`DI_UI=repl` 逃生门回退 REPL）、根 `README.md` 用户视图 | **已实现**（`di tui` 显式子命令仍待办） |
 
 ## 6. 验收信号（M1）

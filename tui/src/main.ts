@@ -4,15 +4,23 @@
  * 流程：
  * 1. 解析 di 可执行文件（DI_BIN → PATH → ~/.di/bin/di.exe）。
  * 2. 创建 RpcClient 并等待 `ready` 握手（失败则报错退出）。
- * 3. 构建 TuiMainScreen（常规主屏）+ ChatView。
+ * 3. 构建 TuiAltScreen（全屏视口）+ ChatView —— 输入框固定 dock 在终端底部（见 chat-layout.ts）。
  * 4. 客户端事件 → 状态机（state）→ 视图（view.sync）。
  * 5. 输入：Enter 提交 prompt；Ctrl+C 首按 interrupt、次按 shutdown 退出。
  */
 
-import { matchesKey, ProcessTerminal, TuiMainScreen } from "@earendil-works/pi-tui";
+import {
+  getTerminalColorMode,
+  matchesKey,
+  parseColor,
+  ProcessTerminal,
+  styleText,
+  TuiAltScreen,
+} from "@earendil-works/pi-tui";
 import { ChatView } from "./app/chat-view.ts";
+import { normalizeSlash } from "./app/commands.ts";
 import { TurnStateMachine } from "./app/state.ts";
-import { RpcClient, resolveDiBin } from "./rpc/client.ts";
+import { CommandError, RpcClient, resolveDiBin } from "./rpc/client.ts";
 
 async function main(): Promise<number> {
   const bin = resolveDiBin();
@@ -30,6 +38,9 @@ async function main(): Promise<number> {
   const client = new RpcClient({
     bin,
     args: ["--mode", "rpc"],
+    onReady: (meta) => {
+      state.setMeta(meta);
+    },
     onEvent: (event) => {
       state.applyEvent(event);
       view?.sync(state);
@@ -62,7 +73,14 @@ async function main(): Promise<number> {
   }
 
   const terminal = new ProcessTerminal();
-  const tui = new TuiMainScreen(terminal);
+  // 全屏视口（alt-screen）：输入框固定 dock 在终端底部；滚轮 / PgUp / PgDn 滚动 transcript；
+  // 用户上滚后中央浮现可点击的「↓ 最新消息」跳回底部。
+  const tui = new TuiAltScreen(terminal, undefined, undefined, {
+    mouse: true,
+    wheelScrollLines: "auto",
+    scrollToEndIndicator: () =>
+      styleText(" ↓ 最新消息 ", { fg: parseColor("#a0a0a0") }, getTerminalColorMode()),
+  });
 
   view = new ChatView(tui, (text) => {
     if (!state.isIdle) {
@@ -102,21 +120,52 @@ async function main(): Promise<number> {
 
   tui.terminal.setTitle("di — TUI");
   tui.start();
+  // 启动即同步一次视图：ready 握手已有元数据，右下角模型徽标 / 左下角状态无需等第一次对话。
+  view.sync(state);
   view.focusInput();
+
+  // ready 握手携带 skills/models 元数据已完成，这里再拉一次命令注册表，装配命令补全
+  //（失败只降级为无补全，不阻塞聊天）。
+  void loadAutocomplete();
+
+  /** 拉取命令注册表并装配命令补全（/ 弹菜单、/m 模糊、/model /skill 参数补全）。 */
+  async function loadAutocomplete(): Promise<void> {
+    try {
+      const commands = await client.listCommands();
+      view?.setAutocomplete(commands, state.skills, state.models);
+    } catch {
+      /* 补全数据不可用仅降级：无命令面板，其余功能照常 */
+    }
+  }
 
   /** 运行一条斜杠命令（同步应答，不流式）：成功显示输出行；exit=true 则优雅退出。 */
   async function runCommand(text: string): Promise<void> {
-    const space = text.indexOf(" ");
-    const name = space < 0 ? text.slice(1) : text.slice(1, space);
-    const args = space < 0 ? "" : text.slice(space + 1).trim();
+    const { name, args } = normalizeSlash(text);
     try {
       const result = await client.runCommand(name, args);
       if (result.exit) {
         await shutdown();
         return;
       }
+      // /model 切换后应答携带新模型/强度快照，状态栏据此更新（不依赖解析中文提示）。
+      if (result.model !== undefined) {
+        state.applyModel(result.model, result.effort ?? state.effort);
+      }
       state.finishCommand(result.lines.join("\n"));
     } catch (err: unknown) {
+      if (err instanceof CommandError && err.code === "turn_not_supported" && err.turnMessage) {
+        // 回合型命令（/skill <名> <参数>、用户命令）：协议规定 TUI 改用自身 prompt 机制跑回合。
+        state.commandInput = "";   // 不把它们当普通命令回显，避免后续命令 echo 出陈旧输入
+        state.startTurn(err.turnMessage);
+        view?.sync(state);
+        client
+          .prompt(err.turnMessage)
+          .catch((e: unknown) => {
+            state.abort(e instanceof Error ? e.message : String(e));
+            view?.sync(state);
+          });
+        return;
+      }
       state.abort(err instanceof Error ? err.message : String(err));
     }
     view?.sync(state);

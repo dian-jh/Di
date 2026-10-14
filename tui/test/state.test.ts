@@ -128,13 +128,40 @@ describe("TurnStateMachine：事件 → 视图模型", () => {
     assert.equal(s.state, "idle");
   });
 
-  it("finishTurn 累计 totalCost 并设置结果摘要", () => {
+  it("finishTurn 累计 totalCost 并设置回合统计摘要", () => {
     const s = new TurnStateMachine();
     s.startTurn("q");
     s.finishTurn(RESULT);
     assert.equal(s.totalCost, 0.001);
-    assert.equal(s.statusText, "✓ answer · $0.0010");
+    // 左下角摘要对齐 REPL（TokenUsage.ToString 同款：可空键缺省视作 0，total 兜底计费输入+输出；cost F6）。
+    assert.equal(s.statusText, "1 轮 · tokens: in=10 (cache_read=0) out=5 (reasoning=0) total=15 · cost:$0.001000");
     assert.equal(s.turns[0]?.result?.answer, "done");
+  });
+
+  it("finishTurn 记录完整 token/成本摘要（含缓存命中与推理 token）", () => {
+    const s = new TurnStateMachine();
+    s.startTurn("q");
+    s.finishTurn({
+      answer: "done",
+      stop_reason: "answer",
+      iterations: 1,
+      usage: {
+        input_tokens: 2316,
+        output_tokens: 116,
+        cache_read_tokens: 2176,
+        reasoning_tokens: 29,
+        total_tokens: 2432,
+      },
+      cost: 0.00085,
+    });
+    assert.equal(s.statusText, "1 轮 · tokens: in=2316 (cache_read=2176) out=116 (reasoning=29) total=2432 · cost:$0.000850");
+  });
+
+  it("finishTurn 取消回合显示已取消而非 0 轮统计", () => {
+    const s = new TurnStateMachine();
+    s.startTurn("q");
+    s.finishTurn({ ...RESULT, stop_reason: "cancelled" });
+    assert.equal(s.statusText, "已取消");
   });
 
   it("结果 stop_reason=error 且有 failure → 错误横幅", () => {
@@ -163,7 +190,7 @@ describe("TurnStateMachine：事件 → 视图模型", () => {
     assert.equal(s.turns.length, 0);
     assert.equal(s.state, "idle");
     assert.equal(s.totalCost, 0);
-    assert.equal(s.statusText, "idle");
+    assert.equal(s.statusText, "", "clear 后状态行清空（dock 中塌缩不显示）");
   });
 
   it("idle 时的 stray 事件被忽略", () => {
@@ -197,6 +224,46 @@ describe("TurnStateMachine：斜杠命令展示", () => {
 
     assert.equal(s.commandInput, "");
     assert.equal(s.commandSeq, 0);
+  });
+});
+
+describe("TurnStateMachine：元数据（模型/强度/补全数据）", () => {
+  it("setMeta 写入模型/强度/skills/models，modelLabel 拼接", () => {
+    const s = new TurnStateMachine();
+    s.setMeta({
+      type: "ready",
+      version: "0.1.0",
+      model: "deepseek-flash",
+      effort: "high",
+      skills: [{ name: "backend-tests", description: "跑后端测试" }],
+      models: [{ id: "deepseek-v4-pro", name: "DeepSeek Pro" }],
+    });
+    assert.equal(s.model, "deepseek-flash");
+    assert.equal(s.effort, "high");
+    assert.equal(s.skills.length, 1);
+    assert.equal(s.skills[0]?.name, "backend-tests");
+    assert.equal(s.models.length, 1);
+    assert.equal(s.modelLabel(), "deepseek-flash · high");
+  });
+
+  it("applyModel 更新模型/强度（/model 命令后）", () => {
+    const s = new TurnStateMachine();
+    s.setMeta({ type: "ready", version: "0.1.0", model: "deepseek-flash", effort: "high" });
+    s.applyModel("deepseek-v4-pro", "low");
+    assert.equal(s.model, "deepseek-v4-pro");
+    assert.equal(s.effort, "low");
+    assert.equal(s.modelLabel(), "deepseek-v4-pro · low");
+  });
+
+  it("无强度时 modelLabel 只显示模型名", () => {
+    const s = new TurnStateMachine();
+    s.setMeta({ type: "ready", version: "0.1.0", model: "deepseek-flash", effort: null });
+    assert.equal(s.modelLabel(), "deepseek-flash");
+  });
+
+  it("缺省元数据时 modelLabel 为空", () => {
+    const s = new TurnStateMachine();
+    assert.equal(s.modelLabel(), "");
   });
 });
 
