@@ -46,6 +46,10 @@ public sealed class FakeRunner : IAgentRunner
 
     public IInterruptSignal? InterruptSignal { get; set; }
 
+    /// <summary>模拟思考模式：先发 <see cref="AgentLoopEvent.ReasoningDelta"/> 再发文本增量。
+    /// 关闭（默认）保持原有纯 TextDelta 序列。</summary>
+    public bool EmitReasoning { get; set; }
+
     public List<string> Messages { get; } = [];
 
     public TokenUsage Usage { get; set; } = new(10, 20);
@@ -64,6 +68,9 @@ public sealed class FakeRunner : IAgentRunner
         // 模拟 ReAct 流式：先发文本增量，再发回合完成事件（headless 文本模式依赖事件流渲染）。
         if (Bus is not null)
         {
+            // 思考模式：推理内容在回答之前到达（DeepSeek 先流 reasoning_content 再流 content）。
+            if (EmitReasoning)
+                await Bus.PublishAsync(new AgentLoopEvent.ReasoningDelta("先想想为什么"));
             await Bus.PublishAsync(new AgentLoopEvent.TextDelta($"回答: {userMessage}"));
             await Bus.PublishAsync(new AgentLoopEvent.TurnCompleted(1, Usage, Cost: Cost, new FinishReason.Stop()));
         }

@@ -149,6 +149,9 @@ API Key 不在启动时要求 —— 凭据由模型层在**请求时**解析，
 
 事件流式渲染到 stdout（无 ANSI；TTY 下回合开始时先显示"正在请求模型…"状态行，首个输出到达后不再出现；
 管道/重定向时省略，保持捕获输出干净），结果脚注；`--no-ansi` 进一步禁控制序列。
+**思考渲染**：TTY 下模型思考期（DeepSeek 先流 ~1s reasoning 再流回答）以"── 思考中 ──"块实时渲染，
+消除"等好几秒无输出"的死屏（`EventRenderer.ReasoningDelta`，仅真实终端开启）；管道/重定向省略，
+推理全文在会话 JSONL；JSON 模式不渲染（单文档契约）。
 会话日志写入 `~/.di/sessions/`（`--no-session` 关闭）。
 **预算耗尽兜底**：`StopReason == MaxIterations` 时（`EventRenderer.RenderResult`）在脚注前补打印
 "已达迭代上限，任务可能未完成"与模型最后一段输出（`AgentResult.Answer`），避免"跑完没结果"；

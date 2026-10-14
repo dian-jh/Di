@@ -10,18 +10,23 @@ namespace Di.Cli;
 /// <see cref="AgentStopReason.MaxIterations"/>（预算耗尽）时补打印模型最后一段输出，
 /// 避免"跑完没结果"（历史教训：旧二进制 8 轮截断，headless 无任何收尾）。
 /// <see cref="AgentStopReason.Interrupted"/>（用户软停止）时补一行状态说明（文本已流式显示，不重复回显）。
+/// <see cref="AgentLoopEvent.ReasoningDelta"/> 仅在 <paramref name="renderReasoning"/> 开启时渲染
+/// （真实终端消除思考期死屏）；默认关闭，管道 / 重定向 / 既有调用方行为不变。
 /// </summary>
 public sealed class EventRenderer
 {
     private readonly TextWriter _output;
     private readonly bool _useAnsi;
+    private readonly bool _renderReasoning;
     private bool _lineOpen;   // 当前行是否有未换行的流式文本
     private bool _statusShown;   // 是否正在显示"进行中"状态行（等待首个内容将其擦除）
+    private bool _reasoningOpen;   // 是否正在流式输出思考区（回答/工具/脚注到达时先收尾换行）
 
-    public EventRenderer(TextWriter output, bool useAnsi = true)
+    public EventRenderer(TextWriter output, bool useAnsi = true, bool renderReasoning = false)
     {
         _output = output ?? throw new ArgumentNullException(nameof(output));
         _useAnsi = useAnsi;
+        _renderReasoning = renderReasoning;
     }
 
     /// <summary>
@@ -54,12 +59,27 @@ public sealed class EventRenderer
         ClearStatus();
         switch (evt)
         {
+            case AgentLoopEvent.ReasoningDelta r:
+                // 思考内容（先于回答流式到达）——仅在显式开启时渲染，消除思考期死屏；
+                // 默认关闭（管道 / 重定向捕获保持干净，完整推理已在会话 JSONL）。
+                if (!_renderReasoning)
+                    break;
+                if (!_reasoningOpen)
+                {
+                    _output.WriteLine("  ── 思考中 ──");
+                    _reasoningOpen = true;
+                }
+                _output.Write(r.Delta);
+                _output.Flush();
+                break;
             case AgentLoopEvent.TextDelta d:
+                CloseReasoning();
                 _output.Write(d.Delta);
                 _lineOpen = true;
                 _output.Flush();   // 实时渲染：立即推送到终端
                 break;
             case AgentLoopEvent.TurnCompleted t:
+                CloseReasoning();
                 CloseLine();
                 _output.Write($"  ── 第 {t.Iteration} 轮思考完成  in:{t.Usage.InputTokens} out:{t.Usage.OutputTokens}");
                 if (t.Cost is { } turnCost)
@@ -67,19 +87,23 @@ public sealed class EventRenderer
                 _output.WriteLine();
                 break;
             case AgentLoopEvent.ToolStarted s:
+                CloseReasoning();
                 CloseLine();
                 _output.WriteLine($"  → 调用工具 {s.Call.Name}({s.Call.Arguments})");
                 break;
             case AgentLoopEvent.ToolCompleted c:
+                CloseReasoning();
                 _output.WriteLine($"  ← {(c.IsError ? "ERROR" : "ok")}  {c.Observation}");
                 break;
             case AgentLoopEvent.RunFailed f:
+                CloseReasoning();
                 CloseLine();
                 _output.WriteLine($"  ✗ 失败: [{f.Failure.Code}] {f.Failure.Message}");
                 break;
             case AgentLoopEvent.Interrupted:
                 // 软停止请求已在某个相位边界生效：未开始的工作不再执行，回合即将正常收敛。
                 ClearStatus();
+                CloseReasoning();
                 CloseLine();
                 _output.WriteLine("  ⏹ 已收到中断，正在安全停下…");
                 break;
@@ -89,6 +113,7 @@ public sealed class EventRenderer
     public void RenderResult(AgentResult result)
     {
         ClearStatus();
+        CloseReasoning();
         CloseLine();
         _output.WriteLine();
 
@@ -116,6 +141,15 @@ public sealed class EventRenderer
         if (result.Cost is { } cost)
             _output.Write($" · cost:${cost.Total:F6}");
         _output.WriteLine("）");
+    }
+
+    /// <summary>若正在输出思考区，先补一个换行收尾，避免回答/工具/脚注贴着思考文本。</summary>
+    private void CloseReasoning()
+    {
+        if (!_reasoningOpen)
+            return;
+        _output.WriteLine();
+        _reasoningOpen = false;
     }
 
     /// <summary>若有未换行的流式文本，先补一个换行，避免后续行贴在一起。</summary>

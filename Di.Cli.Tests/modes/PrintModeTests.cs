@@ -123,6 +123,45 @@ public sealed class PrintModeTests
     }
 
     [Fact]
+    public async Task Print_StdoutTty_RendersReasoningBeforeAnswer()
+    {
+        var (host, runner) = Host();
+        runner.EmitReasoning = true;
+        var stdout = new StringWriter();
+
+        var code = await PrintMode.RunAsync(host, new CliArgs { Positionals = ["hi"] },
+            TextReader.Null, stdout, new StringWriter(), stdoutTty: true);
+
+        Assert.Equal(0, code);
+        var text = stdout.ToString();
+        // 思考期不再是死屏：推理内容（先于回答到达）应实时渲染，且明显标出"思考中"。
+        Assert.Contains("思考中", text);
+        Assert.Contains("先想想为什么", text);
+        Assert.True(
+            text.IndexOf("先想想为什么", StringComparison.Ordinal)
+                < text.IndexOf("回答: hi", StringComparison.Ordinal),
+            "思考增量应渲染在最终回答之前");
+    }
+
+    [Fact]
+    public async Task Print_StdoutRedirected_OmitsReasoning()
+    {
+        var (host, runner) = Host();
+        runner.EmitReasoning = true;
+        var stdout = new StringWriter();
+
+        // stdoutTty 缺省 false（管道 / 文件 / 脚本）：不得把推理内容混进捕获输出
+        // （与状态行同一原则；完整推理文本在会话日志 JSONL 里）。
+        var code = await PrintMode.RunAsync(host, new CliArgs { Positionals = ["hi"] },
+            TextReader.Null, stdout, new StringWriter());
+
+        Assert.Equal(0, code);
+        var text = stdout.ToString();
+        Assert.DoesNotContain("先想想为什么", text);
+        Assert.Contains("回答: hi", text);
+    }
+
+    [Fact]
     public async Task Print_RunnerThrows_ExitsOne_WritesErrorToStderr()
     {
         var bus = new InMemoryEventBus();

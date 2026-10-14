@@ -64,7 +64,9 @@ public static class PrintMode
     {
         using var consumer = host.Bus.CreateConsumer<AgentLoopEvent>();
         using var renderCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var renderer = new EventRenderer(stdout, useAnsi: false);
+        // 思考增量只在真实终端渲染（消除思考期死屏：模型先流 ~1s reasoning 再流回答）；
+        // 管道/重定向不渲染，保持捕获输出干净（与状态行同一原则）。
+        var renderer = new EventRenderer(stdout, useAnsi: false, renderReasoning: stdoutTty);
         var renderTask = RenderAsync(consumer, renderer, renderCts.Token);
 
         var startedAt = DateTimeOffset.UtcNow;
