@@ -7,6 +7,8 @@ namespace Core.Tools;
 /// <summary>
 /// Code Interpreter 工具（python）：在隔离沙盒（默认临时目录）中执行一段 Python 代码。
 /// 每次调用在独立进程中运行（MVP 的进程级隔离，见第五章），超时强杀并返回结构化错误，长输出自动截断。
+/// 进程 stdin 恒以 EOF 空管道启动（<c>redirectInput</c>）：代码读不到 di / 用户终端的 stdin，
+/// 也避开"继承孤儿管道导致子进程启动卡死"这类环境问题（见 ProcessRunner）。
 /// </summary>
 public sealed class PythonTool : ICoreTool
 {
@@ -57,7 +59,8 @@ public sealed class PythonTool : ICoreTool
             // 子进程 stdout/stderr 写 UTF-8，父进程按 UTF-8 解码 —— 与机器 locale 无关，行为确定。
             var result = await ProcessRunner.RunAsync(_pythonExecutable, ["-c", code!], workingDir, _timeout, cancellationToken,
                 outputEncoding: Encoding.UTF8,
-                environment: new Dictionary<string, string> { ["PYTHONIOENCODING"] = "utf-8" });
+                environment: new Dictionary<string, string> { ["PYTHONIOENCODING"] = "utf-8" },
+                redirectInput: true);
             return result.ToObservation();
         }
         catch (JsonException)

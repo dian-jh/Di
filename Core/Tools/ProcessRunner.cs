@@ -81,7 +81,8 @@ internal static class ProcessRunner
         CancellationToken cancellationToken,
         string? rawArguments = null,
         Encoding? outputEncoding = null,
-        IReadOnlyDictionary<string, string>? environment = null)
+        IReadOnlyDictionary<string, string>? environment = null,
+        bool redirectInput = false)
     {
         var psi = new ProcessStartInfo
         {
@@ -91,6 +92,9 @@ internal static class ProcessRunner
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
+            // 默认 stdin 不重定向（继承调用方）——python 工具的沙盒语义需要取消：代码不应摸到
+            // di 或用户终端的 stdin 句柄（继承的孤儿管道可能让子进程在启动阶段卡住）。见 RenderRedirectInput。
+            RedirectStandardInput = redirectInput,
             // 不设 StandardOutput/ErrorEncoding：按原始字节读取、命令结束时整段解码。默认用
             // ProcessEncoding.SmartDecode（UTF-8 严格优先、OEM 回退）——cmd 内建命令写系统
             // OEM/GBK 字节（中文文件名 dir），而 .NET CLI 重定向 stdout 时强制写 UTF-8（chcp 无效），
@@ -131,6 +135,15 @@ internal static class ProcessRunner
         {
             Diagnose($"proc: start_failed name={fileName} error={TruncateField(ex.Message)}");
             return new ProcessResult(-1, string.Empty, $"无法启动进程: {ex.Message}");
+        }
+
+        // redirectInput=true 时立即关掉父端写入：子进程 stdin 立即到 EOF，不继承调用方句柄。
+        // python 沙盒就该如此（代码不读 stdin，读了也得 EOF）；也避开"继承的孤儿管道让子进程
+        // 启动卡死"这类环境问题。Close 抛的 IO 异常忽略——子进程若已退出，关一个写端无妨。
+        if (redirectInput)
+        {
+            try { process.StandardInput.Close(); }
+            catch (Exception) { }
         }
 
         // 进程级诊断（proc: start / running / timeout / exited，经 ProcessDiagnostics 旁路钩子）：

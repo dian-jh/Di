@@ -82,7 +82,7 @@ schema 表达不了的**操作知识**（观察约定 / 行为偏好 / 协议）
 | grep | `Core/Tools/GrepTool.cs` | 正则内容搜索，`file:行号: 内容` 输出；limit/ignore_case/literal/context；超过 1 MiB 的文件跳过并**如实提示**（避免"跳过"伪装成"未找到匹配"） |
 | cmd / bash | `Core/Tools/BashTool.cs` | 平台默认 shell（Windows 展示为 `cmd`，其他平台为 `bash`）；一次性独立进程或共享持久化会话；超时强杀（默认 30s）；Windows 手工构造 `cmd /d /s /c`，模型侧保留 `bash` 兼容别名 |
 | powershell | `Core/Tools/PowerShellTool.cs` | 独立 PowerShell 持久化会话（不能与 shell 工具共用） |
-| python | `Core/Tools/PythonTool.cs` | 沙盒临时目录执行代码（计算 / 数据处理 / 图表） |
+| python | `Core/Tools/PythonTool.cs` | 沙盒临时目录执行代码（计算 / 数据处理 / 图表）；stdin 恒以 EOF 空管道启动（代码不继承 di/终端的 stdin 句柄，见 `ProcessRunner.redirectInput`） |
 
 ## 代码入口
 

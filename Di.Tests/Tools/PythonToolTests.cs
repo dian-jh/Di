@@ -137,6 +137,21 @@ public sealed class PythonToolTests : IDisposable
         Assert.StartsWith("exit: 7", result);
     }
 
+    // ---- 沙盒约束 ----
+
+    [Fact]
+    public async Task Execute_Stdin_IsClosedEofNotInherited()
+    {
+        // stdin 恒以 EOF 空管道启动（redirectInput）：代码读不到 di/终端的 stdin，
+        // 也避开"继承孤儿管道卡死启动"的环境问题。sys.stdin 应 isatty=False、read 立即 EOF。
+        if (!Py) return;
+        var result = await NewTool().ExecuteAsync(Args("import sys\nprint('isatty', sys.stdin.isatty())\nprint('eof', sys.stdin.read(1) == '')"));
+
+        Assert.StartsWith("exit: 0", result);
+        Assert.Contains("isatty False", result);
+        Assert.Contains("eof True", result);
+    }
+
     // ---- 失败路径 ----
 
     [Fact]
