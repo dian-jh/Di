@@ -151,6 +151,30 @@ public sealed class PythonToolTests : IDisposable
     }
 
     [Fact]
+    public async Task Execute_Timeout_EmitsProcessDiagnostics()
+    {
+        // 进程级诊断钩子（ProcessDiagnostics.Log）在超时时应有 proc: start 与 proc: timeout 行，
+        // 携带 pid / cpu / 部分输出——这是定位"工具神秘超时"（启动即卡死 vs 在跑但慢）的关键日志。
+        if (!Py) return;
+        var lines = new List<string>();
+        var previous = ProcessDiagnostics.Log;
+        ProcessDiagnostics.Log = lines.Add;
+        try
+        {
+            var result = await NewTool(timeout: TimeSpan.FromMilliseconds(300))
+                .ExecuteAsync(Args("import time; time.sleep(60)"));
+
+            Assert.StartsWith("error:", result);
+            Assert.Contains(lines, l => l.StartsWith("proc: start", StringComparison.Ordinal));
+            Assert.Contains(lines, l => l.StartsWith("proc: timeout", StringComparison.Ordinal));
+        }
+        finally
+        {
+            ProcessDiagnostics.Log = previous;
+        }
+    }
+
+    [Fact]
     public async Task Execute_MissingCodeArgument_ReturnsError()
     {
         var result = await new PythonTool().ExecuteAsync("""{}""");

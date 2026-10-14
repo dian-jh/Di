@@ -36,6 +36,19 @@ jcode 写法——每行 `[yyyy-MM-dd HH:mm:ss.fff] [LEVEL] message`（本地时
   | `Interrupted` | `run: interrupted` | INFO |
   | `TextDelta` / `ReasoningDelta` / `ToolCallDelta` | 跳过（逐字噪声；完整文本在会话 JSONL） | — |
 
+- **工具进程级诊断（非事件行，`proc:` 前缀）**：进程类工具（bash / cmd / powershell / python）经
+  `Core/Tools/ProcessRunner.cs` 在 spawn / 运行中 / 超时 / 退出时，通过 `ProcessDiagnostics.Log`
+  静态钩子（默认 no-op，宿主 `Di.Cli/CliHost.cs` 接 `DiLog.Log`）旁路写诊断行。事件总线订阅不到
+  工具内部（进程级细节不在回合生命周期事件里），钩子单向注入、异常隔离、绝不影响执行：
+
+  | 行 | 含义 |
+  |---|---|
+  | `proc: start name=python exe=C:\…\python.exe pid=123 timeout_s=30 cwd=… stdinRedirected=True cmd=<<…>>` | 进程启动：实际解析到的可执行文件（`MainModule`，可发现 WindowsApps 别名等解析漂移）、PID、超时、命令行 |
+  | `proc: running name=… pid=… elapsed_ms=… cpu_ms=…` | 心跳（超时 ≥3s 才开，每 5s 一条）：`cpu_ms` 判 busy（在跑）还是卡死（≈0） |
+  | `proc: timeout name=… pid=… elapsed_ms=… cpu_ms=… partial=<<…>>` | 超时强杀：超时点 CPU 用量 + 已收到的部分输出——**无输出且 cpu≈0 → 启动即卡死**；否则是"在跑但慢" |
+  | `proc: exited name=… pid=… exit=… elapsed_ms=… cpu_ms=…` | 慢速成功（≥2s）留证，可对照超时点判断是否本来就慢 |
+  | `proc: start_failed name=… reason/error=…` | 进程启动失败 |
+
 - **时长测量在日志侧**：sink 记最近一次 `ModelCallStarted` 的创建时刻（单槽；
   ReAct 同时只在途一次模型调用），`TurnCompleted` / `RunFailed` 时按事件时间戳差算 `duration_ms`——
   不扩 `TurnCompleted` 载荷，避免触碰 RPC 序列化。
@@ -51,6 +64,8 @@ jcode 写法——每行 `[yyyy-MM-dd HH:mm:ss.fff] [LEVEL] message`（本地时
 |---|---|
 | `Core/Logging/DiLog.cs` | sink：`DiLogOptions` 时钟/根目录、`Subscribe(IEventBus)`、`Log(level, message)`、事件→行映射、轮转 |
 | `Core/Logging/DiLogOptions.cs` | `DiLogOptions`（`RootDirectory` / `Clock`）+ `LogLevel`（Info/Warn/Error） |
+| `Core/Tools/ProcessDiagnostics.cs` | `proc:` 诊断行静态钩子（默认 no-op，宿主注入 `DiLog.Log`） |
+| `Core/Tools/ProcessRunner.cs` | 进程类工具 spawn / 心跳 / 超时 / 退出的 `proc:` 行产生点 |
 | `Core/AgentLoop/RunEvents.cs` | 日志生命周期事件：`RunStarted` / `ModelCallStarted`（**非** `AgentLoopEvent` 家族，见下） |
 | `Core/Configuration/DiHome.cs` | `DiHome.LogsDirectory`（`~/.di/logs` 唯一权威路径源） |
 | `Di.Cli/CliHost.cs` | 组合根：构造 `DiLog` → 订阅总线 → 写 `di starting` → 挂入释放链（Dispose 写 `di exiting`） |

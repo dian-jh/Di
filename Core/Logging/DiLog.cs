@@ -22,6 +22,7 @@ namespace Core.Logging;
 /// [INFO] llm: call_started iteration=1
 /// [INFO] llm: call_completed iteration=1 duration_ms=.. tokens_in=.. tokens_out=.. finish=stop
 /// [INFO] tool: started name=..
+/// [INFO] proc: start name=python exe=.. pid=.. timeout_s=..（工具进程级诊断，见 ProcessDiagnostics）
 /// [INFO] tool: completed name=..
 /// [ERROR] llm: run_failed code=.. error=.. duration_ms=..
 /// [INFO] di exiting

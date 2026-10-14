@@ -37,6 +37,12 @@ public sealed class CliHost : IDisposable
     /// <summary>REPL 展示配置（输出重定向时 UseAnsi 已被置 false）。</summary>
     public ReplOptions ReplOptions { get; }
 
+    /// <summary>
+    /// 当前生效的推理强度（模型强度，如 off/low/high/max；启动时由 --thinking / 配置固定）。
+    /// 快照语义：强度运行期不可切（预留），与可实时切换的 <see cref="IAgentRunner.CurrentModel"/> 分开存放。
+    /// </summary>
+    public string? ReasoningEffort { get; }
+
     /// <summary>会话持久化（headless 单发也写日志；--no-session 时跳过）。</summary>
     public SessionLog? SessionLog { get; }
 
@@ -48,13 +54,14 @@ public sealed class CliHost : IDisposable
 
     public CliHost(IAgentRunner runner, IEventBus bus, ILlmService llm, IReadOnlyList<Skill> skills,
         ReplOptions replOptions, SessionLog? sessionLog = null, IDisposable? disposer = null,
-        SlashCommandRegistry? commands = null)
+        SlashCommandRegistry? commands = null, string? reasoningEffort = null)
     {
         Runner = runner ?? throw new ArgumentNullException(nameof(runner));
         Bus = bus ?? throw new ArgumentNullException(nameof(bus));
         Llm = llm ?? throw new ArgumentNullException(nameof(llm));
         Skills = skills ?? throw new ArgumentNullException(nameof(skills));
         ReplOptions = replOptions ?? throw new ArgumentNullException(nameof(replOptions));
+        ReasoningEffort = reasoningEffort;
         SessionLog = sessionLog;
         _disposer = disposer;
         Commands = commands ?? BuiltinCommands.CreateRegistry();
@@ -128,16 +135,18 @@ public sealed class CliHost : IDisposable
             }
         };
 
+        // 推理强度启动时固定（--thinking 覆盖配置），快照挂到宿主供前端展示；运行期切换预留。
+        var loopOptions = new AgentLoopOptions
+        {
+            SystemPrompt = systemPrompt,
+            MaxIterations = agentLoop.MaxIterations,
+            HistoryBudgetRatio = agentLoop.HistoryBudgetRatio,
+            ReasoningEffort = !string.IsNullOrWhiteSpace(args.Thinking) ? args.Thinking : agentLoop.ReasoningEffort,
+        };
         var runner = new AgentRunner(
             modelFactory,
             executor,
-            new AgentLoopOptions
-            {
-                SystemPrompt = systemPrompt,
-                MaxIterations = agentLoop.MaxIterations,
-                HistoryBudgetRatio = agentLoop.HistoryBudgetRatio,
-                ReasoningEffort = !string.IsNullOrWhiteSpace(args.Thinking) ? args.Thinking : agentLoop.ReasoningEffort,
-            },
+            loopOptions,
             provider.GetRequiredService<IEventBus>(),
             CoreTools.Definitions(workspace),
             workingDirectory: workspace,
@@ -157,6 +166,10 @@ public sealed class CliHost : IDisposable
         diLog.Subscribe(provider.GetRequiredService<IEventBus>());
         diLog.Log(LogLevel.Info, $"di starting pid={Environment.ProcessId} version={CliInfo.Version} workspace={workspace}");
 
+        // 工具进程级诊断（proc: start / running / timeout / exited）接运行日志：事件总线订阅不到
+        // 工具内部，经 ProcessDiagnostics 静态钩子单向注入（默认 no-op）；与 DiLog 一样静默兜底。
+        ProcessDiagnostics.Log = msg => diLog.Log(LogLevel.Info, msg);
+
         // 输出重定向（管道/文件）时不写 ANSI 控制序列，避免污染捕获输出（--no-ansi 同样禁用）。
         if (!useAnsi)
             replOptions.UseAnsi = false;
@@ -174,7 +187,8 @@ public sealed class CliHost : IDisposable
             replOptions,
             sessionLog,
             disposer: new CompositeDisposer(executor, provider, diLog),
-            commands: commands);
+            commands: commands,
+            reasoningEffort: loopOptions.ReasoningEffort);
     }
 
     /// <summary>顺序释放多个资源（工具执行器 → DI 容器）。</summary>
