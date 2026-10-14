@@ -142,7 +142,8 @@ internal static class ProcessRunner
         {
             Diagnose($"proc: start name={Path.GetFileName(fileName)} exe={ResolveExecutable(process, fileName)}" +
                      $" pid={process.Id} timeout_s={timeout.TotalSeconds:0} cwd={TruncateField(workingDirectory)}" +
-                     $" stdinRedirected={Console.IsInputRedirected} cmd=<<{TruncateField(BuildCommandLine(process, fileName, arguments, rawArguments))}>>");
+                     $" stdinRedirected={Console.IsInputRedirected} cmd=<<{TruncateField(BuildCommandLine(process, fileName, arguments, rawArguments))}>>" +
+                     $" env={EnvironmentFingerprint()}");
             // 心跳监控（5s 一条，cpu_ms 判 busy vs 卡死）：超时 ≥3s 才值得开。
             if (timeout >= TimeSpan.FromSeconds(3))
                 _ = StartHeartbeatMonitorAsync(process, timeout, Path.GetFileName(fileName));
@@ -250,6 +251,20 @@ internal static class ProcessRunner
     {
         try { return (long)process.TotalProcessorTime.TotalMilliseconds; }
         catch { return 0; }
+    }
+
+    /// <summary>
+    /// 环境指纹：与子进程启动卡死相关性最高的少量变量，值截断、未设显示 <c>-</c>。
+    /// 定位"启动即卡死"时对照同机同构建的干净会话，直接看出差异（PYTHON* 指向坏路径 /
+    /// VIRTUAL_ENV 残留 / TMP 在慢盘等）。
+    /// </summary>
+    private static string EnvironmentFingerprint()
+    {
+        static string F(string key) =>
+            Environment.GetEnvironmentVariable(key) is { Length: > 0 } v ? TruncateField(v, 60) : "-";
+        return $"PYTHONPATH={F("PYTHONPATH")} PYTHONHOME={F("PYTHONHOME")} PYTHONSTARTUP={F("PYTHONSTARTUP")}" +
+               $" PYTHONUSERBASE={F("PYTHONUSERBASE")} VIRTUAL_ENV={F("VIRTUAL_ENV")}" +
+               $" PYTHONIOENCODING={F("PYTHONIOENCODING")} TMP={F("TMP")} TEMP={F("TEMP")}";
     }
 
     /// <summary>

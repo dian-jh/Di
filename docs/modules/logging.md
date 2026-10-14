@@ -43,7 +43,7 @@ jcode 写法——每行 `[yyyy-MM-dd HH:mm:ss.fff] [LEVEL] message`（本地时
 
   | 行 | 含义 |
   |---|---|
-  | `proc: start name=python exe=C:\…\python.exe pid=123 timeout_s=30 cwd=… stdinRedirected=True cmd=<<…>>` | 进程启动：实际解析到的可执行文件（`MainModule`，可发现 WindowsApps 别名等解析漂移）、PID、超时、命令行 |
+  | `proc: start name=python exe=C:\…\python.exe pid=123 timeout_s=30 cwd=… stdinRedirected=True cmd=<<…>> env=PYTHONPATH=- PYTHONHOME=- … TMP=…` | 进程启动：实际解析到的可执行文件（`MainModule`，可发现 WindowsApps 别名等解析漂移）、PID、超时、命令行、环境指纹（`PYTHONPATH`/`PYTHONHOME`/`PYTHONSTARTUP`/`PYTHONUSERBASE`/`VIRTUAL_ENV`/`PYTHONIOENCODING`/`TMP`/`TEMP`，未设显示 `-`，值截断）。卡死时对照同机干净会话，直接看出环境差异 |
   | `proc: running name=… pid=… elapsed_ms=… cpu_ms=…` | 心跳（超时 ≥3s 才开，每 5s 一条）：`cpu_ms` 判 busy（在跑）还是卡死（≈0） |
   | `proc: timeout name=… pid=… elapsed_ms=… cpu_ms=… partial=<<…>>` | 超时强杀：超时点 CPU 用量 + 已收到的部分输出——**无输出且 cpu≈0 → 启动即卡死**；否则是"在跑但慢" |
   | `proc: exited name=… pid=… exit=… elapsed_ms=… cpu_ms=…` | 慢速成功（≥2s）留证，可对照超时点判断是否本来就慢 |

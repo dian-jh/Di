@@ -167,6 +167,8 @@ public sealed class PythonToolTests : IDisposable
             Assert.StartsWith("error:", result);
             Assert.Contains(lines, l => l.StartsWith("proc: start", StringComparison.Ordinal));
             Assert.Contains(lines, l => l.StartsWith("proc: timeout", StringComparison.Ordinal));
+            // 启动行须携带环境指纹（PYTHONPATH 等）——定位启动卡死靠它对照干净会话。
+            Assert.Contains(lines, l => l.StartsWith("proc: start", StringComparison.Ordinal) && l.Contains(" env=PYTHONPATH=", StringComparison.Ordinal));
         }
         finally
         {
