@@ -28,6 +28,8 @@
 ├── sessions/              # 会话记录（SessionLog 写入，追加式 JSONL）
 │   └── YYYY/MM/DD/
 │       └── session-*.jsonl
+├── logs/                  # 运行日志（DiLog 写入，jcode 格式文本，按日一个文件）
+│   └── di-YYYY-MM-DD.log  # 每行 [yyyy-MM-dd HH:mm:ss.fff] [LEVEL] message
 ├── skills/                # 用户 skills（已实现；解析/匹配/披露见 docs/modules/skills.md）
 │   ├── <name>/SKILL.md    # 目录式（MS 规范）
 │   └── <name>.md          # 扁平式（对齐 Pi 的 .pi/skills/*.md，二选一）
@@ -55,6 +57,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 |---|---|---|---|
 | `config.json` | 用户 | 程序（分层配置源 #2） | ✅ 已实现（用户级） |
 | `sessions/YYYY/MM/DD/*.jsonl` | 程序（SessionLog） | 用户/重放工具 | ✅ 已实现 |
+| `logs/di-YYYY-MM-DD.log` | 程序（DiLog） | 用户/排障 | ✅ 已实现 |
 | `skills/<name>/SKILL.md` 或 `skills/<name>.md` | 用户 | SkillRepository（多源合并 + `/skill` 激活） | ✅ MVP |
 | `commands/<name>.md` | 用户 | `Di.Cli/Commands/CommandLoader`（内置 + 用户命令 → `SlashCommandRegistry`） | ✅ 已实现 |
 | `agents/<name>.md` | 用户 | 将来子代理加载器 | 🔜 格式已预留 |
@@ -111,8 +114,8 @@ export Model__DefaultModel=deepseek-flash
 
 ## 4. 所有权规则
 
-- **程序写**：`sessions/`（会话记录，追加式 JSONL，进程中断不损坏）；`~/.di` 根目录本身
-  在首次写会话时隐式创建。
+- **程序写**：`sessions/`（会话记录，追加式 JSONL，进程中断不损坏）与 `logs/`（运行日志，
+  jcode 格式文本，按日一个文件）；`~/.di` 根目录本身在首次写会话 / 日志时隐式创建。
 - **程序只读**：`config.json`、`skills/`、`commands/`、`agents/`、`mcp.json`。
 - 程序**绝不**覆盖已存在的配置文件；也不因「配置文件缺失」而报错——所有配置源都是可选的。
 

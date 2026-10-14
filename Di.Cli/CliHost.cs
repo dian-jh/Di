@@ -2,6 +2,7 @@ using Common.Events;
 using Core.AgentLoop;
 using Core.Configuration;
 using Core.Llm;
+using Core.Logging;
 using Core.Sessions;
 using Core.Skills;
 using Core.Tools;
@@ -149,6 +150,13 @@ public sealed class CliHost : IDisposable
 
         var sessionLog = new SessionLog(new SessionLogOptions { RootDirectory = diHome.RootDirectory });
 
+        // 运行日志（jcode 格式，~/.di/logs/di-YYYY-MM-DD.log）：事件总线旁路订阅回合生命周期事件。
+        // DiLog 内部静默兜底（IO 失败只丢行、绝不抛），这里无需 try/catch；跟随宿主 Dispose 写
+        // di exiting 并关闭文件。--help/--version/--info/--stats 等短路径不建宿主，故不产生日志。
+        var diLog = new DiLog(new DiLogOptions { RootDirectory = diHome.RootDirectory });
+        diLog.Subscribe(provider.GetRequiredService<IEventBus>());
+        diLog.Log(LogLevel.Info, $"di starting pid={Environment.ProcessId} version={CliInfo.Version} workspace={workspace}");
+
         // 输出重定向（管道/文件）时不写 ANSI 控制序列，避免污染捕获输出（--no-ansi 同样禁用）。
         if (!useAnsi)
             replOptions.UseAnsi = false;
@@ -165,7 +173,7 @@ public sealed class CliHost : IDisposable
             skills,
             replOptions,
             sessionLog,
-            disposer: new CompositeDisposer(executor, provider),
+            disposer: new CompositeDisposer(executor, provider, diLog),
             commands: commands);
     }
 

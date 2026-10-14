@@ -51,6 +51,11 @@ ReAct 只**发布**事件、不渲染；CLI 从总线**消费**并流式渲染�
 | `RunFailed` | `LlmFailure` | 循环层失败（不可重试） |
 | `Interrupted` | 无 | 软停止已生效：回合将在相位边界收敛（见 `docs/interrupt.md`） |
 
+> **生命周期事件不在上表**：`RunStarted` / `ModelCallStarted`（`Core/AgentLoop/RunEvents.cs`）
+> 只继承 `Event`、**不继承 AgentLoopEvent**——RPC 的 `EventPayload` 与 TUI codec 对未知类型/
+> kind 是总开关抛错（防静默结构错误），这两个事件只被日志消费，不应扩进线协议。
+> 映射与原因见 `docs/modules/logging.md`（§关键约束）。
+
 ## 调用关系（数据流）
 
 ```

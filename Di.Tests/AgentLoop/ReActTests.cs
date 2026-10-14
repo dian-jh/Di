@@ -531,6 +531,25 @@ public sealed class ReActTests
     }
 
     [Fact]
+    public async Task RunAsync_PublishesModelCallStartedBeforeTurnCompleted()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("ok"));
+        var bus = new InMemoryEventBus();
+        var observer = new RecordingEventObserver();
+        bus.Subscribe(observer);
+        var loop = new ReAct(model, Options(), bus);
+
+        await loop.RunAsync(Request());
+
+        var started = Assert.Single(observer.Events.OfType<ModelCallStarted>());
+        Assert.Equal(1, started.Iteration);
+        var completed = Assert.Single(observer.Events.OfType<AgentLoopEvent.TurnCompleted>());
+        Assert.True(observer.Events.IndexOf(started) < observer.Events.IndexOf(completed),
+            "模型调用发起事件必须先于返回事件发布");
+    }
+
+    [Fact]
     public async Task RunStreamingAsync_EmitsTextDeltaEventsAndReturnsAnswer()
     {
         var model = new FakeChatModel();

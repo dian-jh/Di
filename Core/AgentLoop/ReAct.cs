@@ -91,6 +91,10 @@ public sealed class ReAct
 
             iterations++;
 
+            // 模型调用发起（日志时间线的"发起"点）：在同一模型 await 前发布，
+            // 返回时由 TurnCompleted 事件承载（日志侧据此算 duration_ms）。
+            Emit(new ModelCallStarted(iterations));
+
             ModelResponse response;
             try
             {
@@ -297,6 +301,9 @@ public sealed class ReAct
             .Select(ChatMessageExtensions.GetText)
             .LastOrDefault() ?? string.Empty;
 
-    /// <summary>发布观察事件到总线（旁路、fire-and-forget；不阻塞循环，也不等待订阅者完成）。</summary>
-    private void Emit(AgentLoopEvent evt) => _ = _eventBus?.PublishAsync(evt);
+    /// <summary>发布观察事件到总线（旁路、fire-and-forget；不阻塞循环，也不等待订阅者完成）。
+    /// 泛型保留调用点的<b>具体静态类型</b>——总线沿继承链向上派发以静态类型为天花板，
+    /// 若收窄为 <see cref="IEvent"/>，AgentLoopEvent 订阅者将收不到任何事件。故除 AgentLoopEvent
+    /// 家族外，这里也能发布日志生命周期事件（<see cref="ModelCallStarted"/>，见 RunEvents.cs）。</summary>
+    private void Emit<TEvent>(TEvent evt) where TEvent : IEvent => _ = _eventBus?.PublishAsync(evt);
 }

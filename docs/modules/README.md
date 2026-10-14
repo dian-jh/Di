@@ -18,6 +18,7 @@
 | Core.Tools | `tools.md` | `Core/Tools/` | `Di.Tests/Tools/` | 8 个内置编码工具 + 注册表 + 执行器 |
 | Core.Skills | `skills.md` | `Core/Skills/` | `Di.Tests/Skills/` | SKILL.md 解析 / 发现合并 / 词法匹配 / 渐进式披露 / 评估 |
 | Core.Sessions | `sessions.md` | `Core/Sessions/` | `Di.Tests/Sessions/` | 会话 JSONL 落盘（对齐 codex 格式） |
+| Core.Logging | `logging.md` | `Core/Logging/` | `Di.Tests/Logging/` | 运行日志（jcode 格式，~/.di/logs 按日一个文件，EventBus 旁路订阅） |
 
 > `Core.Configuration`（家目录单一来源 / 分层配置）没有独立模块文档，其规范统一维护在顶层设计
 > 文档 `../di-home.md`。Common / Core 其它基础设施目录如无专门文档，则不在此列出。
@@ -35,7 +36,7 @@
 
 ## 索引的渐进式扩展
 
-- 当前 7 篇模块文档 + 1 张唯一权威表，导航前置**保持扁平**，尚不需要子分类。
+- 当前 8 篇模块文档 + 1 张唯一权威表，导航前置**保持扁平**，尚不需要子分类。
 - 将来模块 / 专题增多时再拆分（进入子分类 `docs/modules/<分类>/README.md`），触发与改造规则见
   `docs/standards/documentation.md` §索引的渐进式扩展。
 - 单个模块文档长大到需一拆多时（如 `tools.md`），该命名空间退化为子目录

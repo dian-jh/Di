@@ -79,6 +79,11 @@ public sealed class AgentRunner : IAgentRunner
 
     public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
     {
+        // 用户输入的日志记录点（与 ReAct.Emit 同款旁路、fire-and-forget）：REPL / headless / RPC
+        // 所有前端都经本方法进入，在此一处发布 RunStarted 即全覆盖。事件不属于 AgentLoopEvent
+        // 家族（避免扩进 RPC 线协议，见 RunEvents.cs），日志订阅者据此记 run: started。
+        _ = _eventBus.PublishAsync(new RunStarted(userMessage));
+
         var model = _modelFactory(CurrentModel);
         var react = new ReAct(model, _options, _eventBus, InterruptSignal);
 

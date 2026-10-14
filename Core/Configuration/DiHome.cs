@@ -35,6 +35,9 @@ public sealed class DiHome
     /// <summary>会话记录目录（SessionLog 写入，程序创建）。</summary>
     public string SessionsDirectory => Path.Combine(RootDirectory, "sessions");
 
+    /// <summary>运行日志目录（DiLog 写入，jcode 格式文本日志，程序创建）。</summary>
+    public string LogsDirectory => Path.Combine(RootDirectory, "logs");
+
     /// <summary>用户 skills 目录（将来：<c>skills/&lt;name&gt;/SKILL.md</c>）。</summary>
     public string SkillsDirectory => Path.Combine(RootDirectory, "skills");
 

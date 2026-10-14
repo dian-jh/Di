@@ -24,7 +24,7 @@ AgentRunner ──► ReAct 循环 ◄── IChatModel（ChatModelClient → Re
    │              ▼
    │        AgentLoopEvent（事件总线）
    ▼
-EventRenderer（流式渲染） / SessionLog（JSONL 落盘）
+EventRenderer（流式渲染） / SessionLog（JSONL 落盘） / DiLog（jcode 文本日志，旁路订阅）
 ```
 
 ## 2. 项目结构与分层
@@ -41,6 +41,7 @@ E:\Agent\Di\
 │   ├── Tools/         # 八个内置编码工具 + 注册表/进程/会话执行器
 │   ├── Skills/        # SKILL.md 解析、发现合并、词法自动匹配、load_skill 工具、评估
 │   ├── Sessions/      # 会话 JSONL 落盘（SessionLog）
+│   ├── Logging/       # 运行日志（DiLog，jcode 格式，~/.di/logs 按日一个文件，事件总线旁路订阅）
 │   └── Configuration/ # 家目录（~/.di）单一来源
 ├── Di.Cli/            # 终端宿主：组合根、REPL、AgentRunner、事件渲染、--mode rpc 后端
 ├── tui/               # TS 终端前端（Node）：spawn `di --mode rpc`，只依赖 RPC 协议（见 docs/tui.md）
@@ -96,7 +97,8 @@ Repl.RunTurnAsync
   │           ├─ IChatModel.StreamAsync
   │           │   └─ RetryingChatModel → ChatModelClient → LlmRuntime → DeepSeekAdapter
   │           │       └─ SSE chunk → StreamChunk → ChatAssembler
-  │           ├─ 每个流事件 → AgentLoopEvent（总线）→ 渲染任务实时输出
+  │           ├─ 每个流事件 → AgentLoopEvent（总线）→ 渲染任务实时输出；DiLog 旁路订阅写 ~/.di/logs
+  │           │       （用户输入 run: started → llm: call_started → call_completed，见 docs/modules/logging.md）
   │           ├─ TurnCompleted（累计 usage）→ 事件总线
   │           ├─ 有工具调用 → IToolExecutor 执行 → 观察回填轨迹 → 下一轮
   │           └─ 无工具调用 → 返回 AgentResult（Answer/轨迹/用量/停止原因）
@@ -114,7 +116,7 @@ Repl.RunTurnAsync
 4. **缓存是字节精确前缀匹配**：请求里"稳定内容在前、易变内容在后 / 不入历史"；
    未设置的集合绝不序列化成空数组 —— 一切为 byte-identical prefix 服务（见 `docs/modules/agent-loop.md`）。
 5. **事件总线解耦循环与 UI**：ReAct 只发事件不渲染，CLI 从总线消费；日志 / 遥测走同一总线
-   （见 `docs/modules/events.md`）。
+   （见 `docs/modules/events.md` / `docs/modules/logging.md`）。
 6. **跨回合记忆由宿主管理**：ReAct 只拼装，AgentRunner 负责累加 / 裁剪 / 快照去重，
    loop 层保持无状态、可独立复用。
 7. **失败是观察不是崩溃**：工具失败 → 错误观察文本回填模型；不可重试模型错误 → 干净结局。

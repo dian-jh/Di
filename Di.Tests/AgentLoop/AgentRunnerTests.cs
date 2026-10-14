@@ -52,6 +52,23 @@ public sealed class AgentRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_PublishesRunStartedWithUserMessage()
+    {
+        // 用户输入的日志记录点：所有前端（REPL / headless / RPC）都经 Runner.RunAsync 进入，
+        // 在此一处发布 RunStarted 即全覆盖。注意它不属于 AgentLoopEvent 家族（避免扩进 RPC 线协议），
+        // 观察者需订阅 IEvent 才能收到。
+        var bus = new InMemoryEventBus();
+        var observer = new RecordingEventObserver();
+        bus.Subscribe(observer);
+        var runner = new AgentRunner(_ => new FakeChatModel(), new FakeToolExecutor(), new AgentLoopOptions(), bus);
+
+        await runner.RunAsync("你好");
+
+        var started = Assert.Single(observer.Events.OfType<RunStarted>());
+        Assert.Equal("你好", started.UserMessage);
+    }
+
+    [Fact]
     public async Task RunAsync_AccumulatesHistoryAcrossTurns()
     {
         var model = new FakeChatModel();

@@ -98,3 +98,18 @@ internal sealed class RecordingObserver : IEventHandler<AgentLoopEvent>
         return Task.CompletedTask;
     }
 }
+
+/// <summary>
+/// 订阅事件总线并记录<b>全部 IEvent</b> 的观察者：能看到 AgentLoopEvent 之外的
+/// 日志生命周期事件（<see cref="RunStarted"/> / <see cref="ModelCallStarted"/>，见 Core/AgentLoop/RunEvents.cs）。
+/// </summary>
+internal sealed class RecordingEventObserver : IEventHandler<IEvent>
+{
+    public List<IEvent> Events { get; } = [];
+
+    public Task HandleAsync(IEvent evt, CancellationToken cancellationToken = default)
+    {
+        Events.Add(evt);
+        return Task.CompletedTask;
+    }
+}
