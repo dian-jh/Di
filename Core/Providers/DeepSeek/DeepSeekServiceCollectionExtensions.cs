@@ -1,3 +1,4 @@
+using System.Net.Http;
 using Core.Llm;
 using Core.Providers.DeepSeek;
 using Microsoft.Extensions.DependencyInjection;
@@ -25,7 +26,16 @@ public static class DeepSeekServiceCollectionExtensions
         // （历史 bug：报 "The response ended prematurely." 且不可重试）。响应头等待 / 流式空闲超时
         // 由适配器在请求内自行控制（见 DeepSeekAdapter.StreamAsync / SendAsync）。
         services.AddHttpClient(DeepSeekDefaults.ProviderId)
-            .ConfigureHttpClient((_, client) => client.Timeout = Timeout.InfiniteTimeSpan);
+            .ConfigureHttpClient((_, client) => client.Timeout = Timeout.InfiniteTimeSpan)
+            // 主处理器默认绕过系统代理：.NET 默认 UseProxy=true 会读 IE/WinINET 系统代理
+            // （本机 FlClash 指向 127.0.0.1:10005），把 api 请求二次转发拖慢首 token 1.5-3.8s；
+            // 直连（UseProxy=false）与 pi/Bun（只读 env 代理）行为一致。需要走系统代理的
+            // 部署在 appsettings.json 设 DeepSeek:UseSystemProxy=true。
+            .ConfigurePrimaryHttpMessageHandler(sp =>
+            {
+                var config = sp.GetRequiredService<IOptions<DeepSeekAdapterConfig>>().Value;
+                return new SocketsHttpHandler { UseProxy = config.UseSystemProxy };
+            });
 
         // API Key 不再在装配时解析/抛错：缺省读环境变量，由 LlmRuntime 在<b>请求时</b>经凭证存储解析
         // （宿主无密钥也能启动，UI 显示"未配置"）。

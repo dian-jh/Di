@@ -86,7 +86,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 | `Model` | `ModelOptions` | `Provider`、`DefaultModel` |
 | `Repl` | `ReplOptions` | `Prompt`、`WorkingStatusText`、`UseAnsi` |
 | `Retry` | `RetryPolicyOptions` | `MaxAttempts`、`InitialBackoff` 等 |
-| `DeepSeek` | `DeepSeekAdapterConfig` | `ApiKey`、`BaseUrl`、`DefaultReasoningEffort`、`StrictTools` |
+| `DeepSeek` | `DeepSeekAdapterConfig` | `ApiKey`、`BaseUrl`、`DefaultReasoningEffort`、`StrictTools`、`UseSystemProxy` |
 
 示例——用户个人配置 `~/.di/config.json`：
 

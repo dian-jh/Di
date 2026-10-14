@@ -23,6 +23,14 @@ public sealed class DeepSeekAdapterConfig
     /// <summary>是否启用严格工具模式（需要 beta 端点）。</summary>
     public bool StrictTools { get; set; }
 
+    /// <summary>
+    /// 是否走 Windows 系统代理（IE/WinINET 注册表配置）。默认 false：绕过系统代理直连。
+    /// .NET HttpClient 默认 <c>UseProxy=true</c> 会读系统代理（本机常被 FlClash 等指向
+    /// 127.0.0.1:10005），把 api.deepseek.com 请求二次转发，光响应头就慢 1.5-3.8s
+    /// （2026-10-14 实测根因；pi/Bun 只读 env 代理天然直连）。确有代理需求的部署设 true。
+    /// </summary>
+    public bool UseSystemProxy { get; set; }
+
     /// <summary>响应头等待超时（秒）。默认 <see cref="DeepSeekDefaults.RequestTimeoutSeconds"/>。</summary>
     public double TimeoutSeconds { get; set; } = DeepSeekDefaults.RequestTimeoutSeconds;
 

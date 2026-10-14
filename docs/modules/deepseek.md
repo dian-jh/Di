@@ -59,7 +59,7 @@ DeepSeek 提供方的**线格式适配器**：HTTP/SSE 传输、chunk 归一化�
 | `Core/Providers/DeepSeek/DeepSeekTranslator.cs` | Core 词汇 ↔ DeepSeek 线格式（5 条怪癖唯一居所） |
 | `Core/Providers/DeepSeek/DeepSeekChatRequest.cs` / `Core/Providers/DeepSeek/DeepSeekChatResponse.cs` | 线格式 DTO（私有，不对外） |
 | `Core/Providers/DeepSeek/DeepSeekDefaults.cs` | 默认值（baseUrl 等） |
-| `Core/Providers/DeepSeek/DeepSeekAdapterConfig.cs` | 配置段绑定（`ApiKey` / `BaseUrl` / `DefaultReasoningEffort` / `StrictTools` / `TimeoutSeconds` / `StreamIdleTimeoutSeconds`） |
+| `Core/Providers/DeepSeek/DeepSeekAdapterConfig.cs` | 配置段绑定（`ApiKey` / `BaseUrl` / `DefaultReasoningEffort` / `StrictTools` / `UseSystemProxy` / `TimeoutSeconds` / `StreamIdleTimeoutSeconds`） |
 | `Core/Providers/DeepSeek/DeepSeekServiceCollectionExtensions.cs` | DI 注册扩展（`AddDeepSeek`） |
 
 ## 关键符号
