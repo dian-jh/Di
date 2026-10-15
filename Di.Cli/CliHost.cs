@@ -1,6 +1,7 @@
 using Common.Events;
 using Core.AgentLoop;
 using Core.Configuration;
+using Core.ContextManagement;
 using Core.Llm;
 using Core.Logging;
 using Core.Sessions;
@@ -135,6 +136,26 @@ public sealed class CliHost : IDisposable
             }
         };
 
+        // L1 上下文压缩（阶段一，docs/context-compression.md §9）：组合根把执行器包一层
+        // CompactingExecutor（执行后预算控制：白名单工具大输出落盘 artifacts + 摘要进上下文）。
+        // 控制开关 = 配置段 ContextManagement（分层配置，docs/di-home.md §3.1）；默认模型的窗口
+        // 解析失败（模型不在目录 / provider 异常）→ 不包装，回退压缩前行为（headless 同路径）。
+        var defaultModelName = args.Model ?? modelOptions.DefaultModel;
+        IToolExecutor toolExecutor = executor;
+        var contextOptions = provider.GetRequiredService<IOptions<ContextManagementOptions>>().Value;
+        if (contextOptions.Enabled && ResolveContextWindow(llm, effectiveProvider, defaultModelName) is { } window && window > 0)
+        {
+            var policy = new BudgetPolicy(
+                window,
+                marginRatio: contextOptions.MarginRatio,
+                outputReserveTokens: contextOptions.OutputReserveTokens,
+                nextOutputReserveTokens: contextOptions.NextOutputReserveTokens,
+                softRatio: contextOptions.SoftRatio,
+                hardRatio: contextOptions.HardRatio,
+                blockingRatio: contextOptions.BlockingRatio);
+            toolExecutor = new CompactingExecutor(toolExecutor, policy, new ArtifactStore(diHome.RootDirectory));
+        }
+
         // 推理强度启动时固定（--thinking 覆盖配置），快照挂到宿主供前端展示；运行期切换预留。
         var loopOptions = new AgentLoopOptions
         {
@@ -145,7 +166,7 @@ public sealed class CliHost : IDisposable
         };
         var runner = new AgentRunner(
             modelFactory,
-            executor,
+            toolExecutor,
             loopOptions,
             provider.GetRequiredService<IEventBus>(),
             CoreTools.Definitions(workspace),
@@ -154,7 +175,7 @@ public sealed class CliHost : IDisposable
             skills: skills)
         {
             // --model 覆盖配置默认模型（启动后交互模式仍可 /model 切换）。
-            CurrentModel = args.Model ?? modelOptions.DefaultModel,
+            CurrentModel = defaultModelName,
         };
 
         var sessionLog = new SessionLog(new SessionLogOptions { RootDirectory = diHome.RootDirectory });
@@ -189,6 +210,22 @@ public sealed class CliHost : IDisposable
             disposer: new CompositeDisposer(executor, provider, diLog),
             commands: commands,
             reasoningEffort: loopOptions.ReasoningEffort);
+    }
+
+    /// <summary>
+    /// 解析某模型的上下文窗口（咨询性目录查询，DeepSeek 为纯内存查询）。
+    /// 失败 / 模型不在目录 → null（组合根据此不包装执行器，回退压缩前行为）。
+    /// </summary>
+    private static int? ResolveContextWindow(ILlmService llm, string provider, string modelName)
+    {
+        try
+        {
+            return llm.ResolveModelAsync(provider, modelName).GetAwaiter().GetResult()?.Context?.ContextWindow;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>顺序释放多个资源（工具执行器 → DI 容器）。</summary>

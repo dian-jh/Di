@@ -102,8 +102,11 @@ MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会�
 把"够用"变成"长会话不崩、跨会话有记忆"。
 
 - **token 预算管理**：✅ 基础版已实现（§3 缺口 #4）——跨回合记忆按窗口比例丢最旧整回合。
-  **上下文压缩系统已有完整设计**（分层 / 五层压缩 / 软硬阈值 / 缓存一致性 / 分阶段落地，
-  见 `docs/context-compression.md`）；基础版的"丢最旧整回合"按该设计升级为压缩体系为后续实现。
+  **上下文压缩系统**（分层 / 五层压缩 / 软硬阈值 / 缓存一致性 / 分阶段落地，
+  见 `docs/context-compression.md`）：阶段一已落地——`BudgetPolicy`（B_input 公式 + 70/80/90%
+  三级水位线 + B_predicted）+ L1 工具结果预算控制（白名单大输出落盘 artifacts + 摘要进上下文，
+  见 `docs/modules/context-management.md`）；基础版的"丢最旧整回合"按该设计升级（AgentRunner
+  预算化改造）为阶段二第一步。L2-L5 随阶段二/三/四上线。
 - **`/resume` 会话恢复**：`SessionLog` 已可重放，接回 UI（`--resume [session-id]`）。
 - **项目记忆与 AGENTS.md**：`~/.di/memory/<project>.md` 长期事实（跨会话）；项目级
   `AGENTS.md` 作为指令注入（当前是代码内默认 `CoreTools.BuildInstructions` 的输出）。

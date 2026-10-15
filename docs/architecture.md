@@ -72,6 +72,8 @@ Di.Cli（docs/cli.md）
   │     │     └─ Core.Providers.DeepSeek（docs/modules/deepseek.md） ← 唯一已实现厂商
   │     ├─ Core.Tools（docs/modules/tools.md）       ← IToolExecutor
   │     ├─ Core.Skills（docs/modules/skills.md）     ← ActiveSkills / load_skill
+  │     ├─ Core.ContextManagement（docs/modules/context-management.md） ← L1 工具结果预算控制
+  │     │       （组合根把执行器包一层 CompactingExecutor；BudgetPolicy / ArtifactStore）
   │     └─ Common.Events（docs/modules/events.md）   ← AgentLoopEvent 事件流
   └─ Core.Sessions（docs/modules/sessions.md）       ← SessionLog 落盘
        · 中断信号 IInterruptSignal 的实现（docs/interrupt.md）← 依赖倒置：Core.AgentLoop 只读信号，
@@ -80,6 +82,10 @@ Di.Cli（docs/cli.md）
 
 - 适配器只依赖 Core 抽象，宿主不认识任何具体厂商。
 - 中断同理：`Core.AgentLoop` 依赖 `IInterruptSignal` 抽象，具体实现（`InterruptCoordinator`）在前端。
+- 上下文压缩（阶段一）：`Di.Cli → Core.ContextManagement → Core.Llm（TokenEstimator）/ Core.Tools
+  （CoreTools / OutputBuffer）`，持久化经 `Core.Configuration.DiHome` 解析 `~/.di` 根目录；
+  `Core.AgentLoop → Core.ContextManagement` 的接线（AgentRunner 预算化改造，用 ContextManager 替代
+  每轮丢最旧）随阶段二落地，见 `docs/modules/context-management.md`。
 - 各模块的源码 / 测试目录见 `docs/modules/README.md`；一次回合的**运行时数据流时序**见下节 §4。
 
 ## 4. 一次回合的数据流（时序）

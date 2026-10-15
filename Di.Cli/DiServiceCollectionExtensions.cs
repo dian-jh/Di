@@ -1,6 +1,7 @@
 using Common.Events;
 using Core.AgentLoop;
 using Core.Configuration;
+using Core.ContextManagement;
 using Core.Llm;
 using Core.Providers.DeepSeek;
 using Di.Cli;
@@ -35,6 +36,7 @@ public static class DiServiceCollectionExtensions
 
         // 配置段绑定（缺省值见各类本身，用户/项目配置只做覆盖）。
         services.AddOptions<AgentLoopOptions>().BindConfiguration("AgentLoop");
+        services.AddOptions<ContextManagementOptions>().BindConfiguration("ContextManagement");
         services.AddOptions<ModelOptions>().BindConfiguration("Model");
         services.AddOptions<ReplOptions>().BindConfiguration("Repl");
         services.AddOptions<RetryPolicyOptions>().BindConfiguration("Retry");

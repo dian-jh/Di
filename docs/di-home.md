@@ -27,7 +27,8 @@
 ├── config.json            # 用户全局配置（可选；用户自己写，程序只读）
 ├── sessions/              # 会话记录（SessionLog 写入，追加式 JSONL）
 │   └── YYYY/MM/DD/
-│       └── session-*.jsonl
+│       ├── session-*.jsonl
+│       └── artifacts/     # L1 大输出落盘（Core.ContextManagement 写入，阶段一按天落盘，会话目录随阶段二迁入）
 ├── logs/                  # 运行日志（DiLog 写入，jcode 格式文本，按日一个文件）
 │   └── di-YYYY-MM-DD.log  # 每行 [yyyy-MM-dd HH:mm:ss.fff] [LEVEL] message
 ├── skills/                # 用户 skills（已实现；解析/匹配/披露见 docs/modules/skills.md）
@@ -57,6 +58,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 |---|---|---|---|
 | `config.json` | 用户 | 程序（分层配置源 #2） | ✅ 已实现（用户级） |
 | `sessions/YYYY/MM/DD/*.jsonl` | 程序（SessionLog） | 用户/重放工具 | ✅ 已实现 |
+| `sessions/YYYY/MM/DD/artifacts/*.txt` | 程序（`Core.ContextManagement` ArtifactStore，L1 大输出落盘） | 用户/`read_file` | ✅ 阶段一（会话目录随阶段二迁入） |
 | `logs/di-YYYY-MM-DD.log` | 程序（DiLog） | 用户/排障 | ✅ 已实现 |
 | `skills/<name>/SKILL.md` 或 `skills/<name>.md` | 用户 | SkillRepository（多源合并 + `/skill` 激活） | ✅ MVP |
 | `commands/<name>.md` | 用户 | `Di.Cli/Commands/CommandLoader`（内置 + 用户命令 → `SlashCommandRegistry`） | ✅ 已实现 |
@@ -83,6 +85,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 | 段 | 绑定到 | 主要键 |
 |---|---|---|
 | `AgentLoop` | `AgentLoopOptions` | `SystemPrompt`、`MaxIterations`、`HistoryBudgetRatio` |
+| `ContextManagement` | `ContextManagementOptions`（`Core.ContextManagement`） | `Enabled`、`MarginRatio`、`OutputReserveTokens`、`NextOutputReserveTokens`、`SoftRatio` / `HardRatio` / `BlockingRatio`（详见 `docs/modules/context-management.md`） |
 | `Model` | `ModelOptions` | `Provider`、`DefaultModel` |
 | `Repl` | `ReplOptions` | `Prompt`、`WorkingStatusText`、`UseAnsi` |
 | `Retry` | `RetryPolicyOptions` | `MaxAttempts`、`InitialBackoff` 等 |

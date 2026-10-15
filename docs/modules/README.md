@@ -13,6 +13,7 @@
 |---|---|---|---|---|
 | Common.Events | `events.md` | `Common/Events/` | `Di.Tests/Events/` | 进程内事件总线：ReAct 只发事件不渲染，CLI 拉流渲染 |
 | Core.AgentLoop | `agent-loop.md` | `Core/AgentLoop/` | `Di.Tests/AgentLoop/` | ReAct 循环 + 跨回合宿主（历史 / 快照 / skills） |
+| Core.ContextManagement | `context-management.md` | `Core/ContextManagement/` | `Di.Tests/ContextManagement/` | 上下文压缩：BudgetPolicy 预算/水位线 + L1 工具结果预算控制（大输出落盘 + 摘要） |
 | Core.Llm | `llm.md` | `Core/Llm/` | `Di.Tests/Llm/` | 模型层抽象：路由 / 流式协议 / 重试 / 计量 / 成本 / 目录 / 认证 |
 | Core.Providers.DeepSeek | `deepseek.md` | `Core/Providers/DeepSeek/` | `Di.Tests/Providers/` | DeepSeek 适配器：厂商怪癖唯一居所 |
 | Core.Tools | `tools.md` | `Core/Tools/` | `Di.Tests/Tools/` | 8 个内置编码工具 + 注册表 + 执行器 |
