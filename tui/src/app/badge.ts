@@ -1,14 +1,16 @@
 /**
- * 带右下角徽标的输入框包装：把模型徽标（模型 · 强度）合成到 Editor 底部边框线的右下角。
+ * 带徽标的输入框包装：把模型徽标（模型 · 强度）渲染在输入框下方独立一行、右对齐。
+ *
+ * 早期版本把徽标合成进 Editor 底部边框线，模型名与对话框同处一行视觉冲突；
+ * 改为追加独立行后输入框自然上移一行，徽标独占 dock 最底部。
  *
  * pi-tui 的鼠标事件按屏幕位置沿组件树分发（见 tui.js dispatchMouseEvent / Container.handleMouse），
  * 因此包装组件必须把 handleMouse 委托给内层 Editor；键盘输入直接走聚焦的内层 Editor
  * （ChatView.focusInput 聚焦的是 editor 本身），绕开包装，无需转发。
- * 自动补全菜单展开时底部行是菜单项，此时跳过合成（菜单收起后徽标恢复）。
+ * 自动补全菜单展开时跳过徽标行（菜单收起后恢复，避免徽标悬在菜单项下方）。
  */
 
 import {
-  compositeTuiLine,
   getTerminalColorMode,
   parseColor,
   styleText,
@@ -51,22 +53,13 @@ export class BadgedEditor implements Component {
     if (!badge || lines.length === 0 || this.target.isShowingAutocomplete()) {
       return lines;
     }
-    const last = lines[lines.length - 1] ?? "";
-    const visible = visibleWidth(last);
+    // 徽标独占一行：右对齐、与输入框（含其边框）分行；窄终端放不下则整行放弃。
     const badgeWidth = visibleWidth(badge);
-    if (badgeWidth + 2 > visible) {
-      // 终端太窄：放弃合成，避免徽标挤占内容。
+    if (badgeWidth + 2 > width) {
       return lines;
     }
-    const composited = compositeTuiLine(
-      last,
-      styleText(badge, { fg: badgeColor }, colorMode),
-      visible - badgeWidth,
-      badgeWidth,
-      visible,
-    );
     const out = [...lines];
-    out[out.length - 1] = composited;
+    out.push(" ".repeat(Math.max(0, width - badgeWidth)) + styleText(badge, { fg: badgeColor }, colorMode));
     return out;
   }
 
