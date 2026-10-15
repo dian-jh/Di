@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Container, ScrollView, Text, VStack } from "@earendil-works/pi-tui";
 
-import { createChatLayout, type ChatLayoutParts } from "../src/app/chat-layout.ts";
+import { createChatLayout, createMainScreenLayout, type ChatLayoutParts } from "../src/app/chat-layout.ts";
 
 function build(parts?: Partial<ChatLayoutParts>) {
   const transcript = new Container();
@@ -24,13 +24,13 @@ function build(parts?: Partial<ChatLayoutParts>) {
 }
 
 describe("createChatLayout：全屏视口 + 底部固定 dock", () => {
-  it("transcript 包进 follow-end 主滚动视口（primary、链式 overscroll、auto 滚动条）", () => {
+  it("transcript 包进 follow-end 主滚动视口（primary、链式 overscroll、无滚动条）", () => {
     const { transcriptScroll } = build();
     assert.ok(transcriptScroll instanceof ScrollView);
     assert.equal(transcriptScroll.followEnd, true, "新内容到达后应自动跟随到底部");
     assert.equal(transcriptScroll.primary, true, "作为 alt-screen 主滚动视图（滚轮/翻页落到它）");
     assert.equal(transcriptScroll.overscroll, "chain");
-    assert.equal(transcriptScroll.scrollbar, "auto");
+    assert.equal(transcriptScroll.scrollbar, "hidden", "无滚动条：不占右缘一列、不显示轨道/滑块");
   });
 
   it("根 VStack：transcript 滚动区在上，dock 在下", () => {
@@ -66,5 +66,35 @@ describe("createChatLayout：全屏视口 + 底部固定 dock", () => {
     transcript.addChild(new Text("hello", 1, 0));
     const lines = transcriptScroll.render(10);
     assert.ok(lines.some((l) => l.includes("hello")), "文档内容应能透过滚动视口渲染出");
+  });
+});
+
+describe("createMainScreenLayout：经典 conhost 主缓冲布局", () => {
+  function build() {
+    const transcript = new Container();
+    const banner = new Text("", 1, 0);
+    const status = new Text("", 1, 0);
+    const editor = new Text("", 1, 0);
+    const layout = createMainScreenLayout({ transcript, banner, status, editor });
+    return { transcript, banner, status, editor, ...layout };
+  }
+
+  it("root 是纯 Container（无 ScrollView——conhost 原生 scrollback 负责滚动；无布局引擎分配）", () => {
+    const { root } = build();
+    assert.ok(root instanceof Container, "根组件应为 Container，TuiMainScreen.addChild 挂载");
+    assert.ok(!(root instanceof ScrollView), "不应再包 ScrollView：cmd 下滚轮由 conhost 原生处理");
+  });
+
+  it("children 顺序 = [transcript, banner, status, editor]，输入框在文档末尾", () => {
+    const { root, transcript, banner, status, editor } = build();
+    assert.deepEqual(root.children, [transcript, banner, status, editor]);
+  });
+
+  it("文档渲染按序拼接：transcript 内容在上、空 Text 不占行", () => {
+    const { root, transcript } = build();
+    transcript.addChild(new Text("答复内容", 1, 0));
+    const lines = root.render(20);
+    assert.ok(lines.some((l) => l.includes("答复内容")), "transcript 内容应出现在文档中");
+    assert.equal(lines.filter((l) => l.includes("答复内容")).length, 1, "插一条消息渲染一行");
   });
 });

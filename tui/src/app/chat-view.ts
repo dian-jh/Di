@@ -1,12 +1,18 @@
 /**
- * 聊天视口（全屏 alt-screen 视口模式）：transcript ScrollView + 底部固定 dock。
+ * 聊天视口：支持两种终端渲染模式。
  *
- * 布局（createChatLayout）：root = VStack[transcript(ScrollView, follow end, grow) + dock(basis auto)]，
- * dock = [空则塌缩的错误横幅, 状态行, 输入框] —— 输入框永远贴着终端底部，内容再多也不会被顶走
- * （对齐 Pi coding-agent 的 createChatViewport）。滚轮 / PgUp / PgDn 滚动由 TuiAltScreen 内置处理。
+ * 1. 现代终端（Windows Terminal / mintty / VS Code 等，SGR 滚轮可用）：
+ *    TuiAltScreen 全屏视口 —— transcript ScrollView + 底部固定 dock（createChatLayout），
+ *    输入框永远贴着终端底部；滚轮 / PgUp / PgDn 由 TuiAltScreen 内置处理。
+ *
+ * 2. 经典 conhost（cmd 窗口）：SGR 鼠标事件到不了 Node 进程（pi 同方案的铁证），
+ *    应用内捕获滚轮在 cmd 里是死路 —— 改用 TuiMainScreen 渲染进主缓冲
+ *    （createMainScreenLayout）：conhost 自己的 scrollback 累积整份文档，
+ *    滚轮由控制台原生滚动历史；输入框位于文档末尾，跟随光标停在视口底部。
+ *    由 main.ts 按 isClassicConhost() 选择模式。
  *
  * M3 增量：消息与输入框统一浅灰框线；用户输入自带浅灰条形框（区分非用户输入）；
- * 模型徽标（模型 · 强度）固定在输入框底部边框的右下角，终端一开即显示；状态行左下角
+ * 模型徽标（模型 · 强度）固定在输入框下方独立一行、右对齐，终端一开即显示；状态行
  * 记录最近一回合的 token/成本统计；命令模式（Editor 内置斜杠菜单 + 模糊补全）。
  */
 
@@ -22,11 +28,12 @@ import {
   type SlashCommand,
   styleText,
   Text,
-  type TuiAltScreen,
+  TuiAltScreen,
+  type TuiMainScreen,
 } from "@earendil-works/pi-tui";
 import { AssistantMessage, SystemMessage, UserMessage } from "./message.ts";
 import { BadgedEditor } from "./badge.ts";
-import { createChatLayout } from "./chat-layout.ts";
+import { createChatLayout, createMainScreenLayout } from "./chat-layout.ts";
 import type { CommandDescriptor, ModelInfo, SkillInfo } from "../rpc/protocol.ts";
 import { Rule } from "./rule.ts";
 import type { TurnStateMachine } from "./state.ts";
@@ -51,13 +58,15 @@ const editorTheme: EditorTheme = {
   },
 };
 
+export type ChatTui = TuiAltScreen | TuiMainScreen;
+
 export class ChatView {
-  private readonly tui: TuiAltScreen;
+  private readonly tui: ChatTui;
   private readonly transcript: Container;
   private readonly banner: Text;
   private readonly status: Text;
   private readonly editor: Editor;
-  /** 带右下角模型徽标的输入框（挂载到组件树，键盘/鼠标委托给内层 editor）。 */
+  /** 带下方独立徽标行的输入框包装（挂载到组件树，键盘/鼠标委托给内层 editor）。 */
   private readonly badgedEditor: BadgedEditor;
   private readonly onSubmit: (text: string) => void;
 
@@ -65,7 +74,7 @@ export class ChatView {
   private renderedTurnId = 0;
   private renderedCommandSeq = 0;
 
-  constructor(tui: TuiAltScreen, onSubmit: (text: string) => void) {
+  constructor(tui: ChatTui, onSubmit: (text: string) => void) {
     this.tui = tui;
     this.onSubmit = onSubmit;
 
@@ -82,14 +91,21 @@ export class ChatView {
       this.onSubmit(text);
     };
 
-    // 全屏视口布局：transcript 滚动区在上、dock（横幅/状态行/输入框）固定在底部。
-    const { root } = createChatLayout({
+    const parts = {
       transcript: this.transcript,
       banner: this.banner,
       status: this.status,
       editor: this.badgedEditor,
-    });
-    this.tui.setLayoutRoot(root);
+    };
+    if (tui instanceof TuiAltScreen) {
+      // 现代终端：全屏 alt-screen 视口 —— transcript 滚动区在上、dock 固定在底部。
+      const { root } = createChatLayout(parts);
+      tui.setLayoutRoot(root);
+    } else {
+      // 经典 conhost（cmd）：主缓冲 + conhost 原生 scrollback，滚轮由控制台处理。
+      const { root } = createMainScreenLayout(parts);
+      tui.addChild(root);
+    }
   }
 
   /** 聚焦输入框（内层 Editor；键盘输入直接走聚焦组件，不经包装）。 */

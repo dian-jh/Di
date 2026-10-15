@@ -8,6 +8,7 @@
  *   终端最后一行。
  * - 滚轮 / PgUp / PgDn / Ctrl+Home / Ctrl+End 等视口滚动由 TuiAltScreen 内置处理
  *   （tui.altScreen.* 键位 + parseWheelEvent/routeWheel），落到 primary ScrollView（本布局）。
+ * - 无滚动条（scrollbar "hidden"）：不占右缘一列、不显示轨道/滑块，滚动只靠滚轮与翻页键。
  *
  * 纯函数装配：不持有终端、不注册事件，可脱离 TUI 单测（见 chat-layout.test.ts）。
  */
@@ -39,7 +40,7 @@ export function createChatLayout(parts: ChatLayoutParts): ChatLayout {
     follow: "end",
     primary: true,
     overscroll: "chain",
-    scrollbar: "auto",
+    scrollbar: "hidden",
   });
   // dock 按固有高度占位（basis auto）；终端变矮时 shrink 收紧凑、minSize 保护输入框可见。
   const dock = new VStack([
@@ -52,4 +53,28 @@ export function createChatLayout(parts: ChatLayoutParts): ChatLayout {
     { component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
   ]);
   return { transcriptScroll, dock, root };
+}
+
+/**
+ * 主屏幕（TuiMainScreen）布局：非 alt-screen，渲染进 conhost 自己的主缓冲 + scrollback。
+ *
+ * 经典 conhost（cmd）不把滚轮转成 SGR 鼠标事件交给 Node（pi 同方案的铁证），应用内捕获
+ * 滚轮在 cmd 里是死路；唯一能让用户用滚轮看历史的方式是退回主缓冲渲染，让 conhost 原生
+ * 滚动 scrollback。因此这里不用 ScrollView（无应用内视口滚动），而是把 transcript /
+ * banner / status / editor 顺序堆叠成整份文档：内容超过终端高度后旧行进入 conhost 的
+ * scrollback，滚轮由控制台原生滚动；输入框位于文档末尾，跟随光标停在视口底部。
+ *
+ * 挂载：TuiMainScreen 本身是 Container（无 setLayoutRoot），调用方用 addChild(root)。
+ */
+export interface MainScreenLayout {
+  root: Container;
+}
+
+export function createMainScreenLayout(parts: ChatLayoutParts): MainScreenLayout {
+  const root = new Container();
+  root.addChild(parts.transcript);
+  root.addChild(parts.banner);
+  root.addChild(parts.status);
+  root.addChild(parts.editor);
+  return { root };
 }
