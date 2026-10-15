@@ -15,9 +15,6 @@ namespace Core.AgentLoop;
 /// </summary>
 public sealed class AgentRunner : IAgentRunner
 {
-    /// <summary>跨回合记忆默认保留的最近回合数（超出丢最旧整回合，控制上下文膨胀）。</summary>
-    public const int DefaultMaxHistoryTurns = 10;
-
     private readonly Func<string, IChatModel> _modelFactory;
     private readonly AgentLoopOptions _options;
     private readonly IEventBus _eventBus;
@@ -42,7 +39,7 @@ public sealed class AgentRunner : IAgentRunner
         IEventBus eventBus,
         IReadOnlyList<ChatTool>? tools = null,
         string? workingDirectory = null,
-        int maxHistoryTurns = DefaultMaxHistoryTurns,
+        int maxHistoryTurns = 0,
         Func<string, int?>? contextWindowProvider = null,
         IReadOnlyList<Skill>? skills = null,
         BudgetPolicy? budgetPolicy = null,
@@ -138,12 +135,12 @@ public sealed class AgentRunner : IAgentRunner
             SystemContext = systemContext,
         }, cancellationToken).ConfigureAwait(false);
 
-        // 累加本回合轨迹作为下一回合的记忆，按整回合（user 消息为界）裁剪：
-        // 先按 token 预算丢最旧（roadmap §3 缺口 #4），再按最大轮数兜底。
-        // 预算来源（阶段一预算制，docs/context-compression.md §9）：注入 BudgetPolicy 时以 soft
-        // 水位线（B_input × SoftRatio）为历史预算——B_input 已扣输出/安全预留，比旧的
-        // "窗口 × HistoryBudgetRatio(0.5)" 更贴近真实可输入量，且与 L1 同源（同一窗口口径）。
-        // 未注入政策时退回旧口径（窗口 × ratio）；窗口未知（provider 返回 null）时退化为纯轮数启发式。
+        // 累加本回合轨迹作为下一回合的记忆，按整回合（user 消息为界）裁剪（预算独占）：
+        // - token 预算非 null（注入 BudgetPolicy 或窗口 × ratio）→ 预算裁剪独占，轮数裁剪完全不参与
+        //   （阶段一预算制，docs/context-compression.md §9：注入 BudgetPolicy 时以 soft 水位线
+        //   B_input × SoftRatio 为预算——B_input 已扣输出/安全预留；未注入时退回窗口 × HistoryBudgetRatio）。
+        // - token 预算 null（窗口解析失败，唯一可能无界的降级路径）→ 仅当调用方显式传
+        //   maxHistoryTurns &gt; 0 时按轮数裁剪兜底；0 / 不传 = 无轮数上限（历史原样保留）。
         // 最后对尾部做工具良构化：封顶/最终输出工具回合会留下"未执行的 tool_calls"，必须剔除。
         int? tokenBudget = null;
         if (_budgetPolicy is not null)
@@ -160,10 +157,13 @@ public sealed class AgentRunner : IAgentRunner
             }
             catch
             {
-                // 目录/窗口解析失败（第三方 provider 异常等）：退回轮数启发式，绝不让预算查询拖垮回合。
+                // 目录/窗口解析失败（第三方 provider 异常等）：tokenBudget 保持 null → 走显式轮数兜底。
             }
         }
-        _history = SanitizeHistory(TrimHistoryByTokens(TrimHistory(result.Trajectory, _maxHistoryTurns), tokenBudget));
+        var trimmed = tokenBudget is not null
+            ? TrimHistoryByTokens(result.Trajectory, tokenBudget)   // 预算独占
+            : TrimHistory(result.Trajectory, _maxHistoryTurns);     // 显式 maxHistoryTurns 兜底（0 = 无上限）
+        _history = SanitizeHistory(trimmed);
         // 裁剪可能把最早注入的快照裁出历史：重置标记，让下一回合重新注入（否则长期会话会失去环境上下文）。
         if (_lastSnapshotText is not null && !_history.OfType<SystemMessage>().Any(m => m.Text == _lastSnapshotText))
             _lastSnapshotText = null;
@@ -174,11 +174,15 @@ public sealed class AgentRunner : IAgentRunner
         return result;
     }
 
-    /// <summary>保留最近 <paramref name="maxTurns"/> 轮整回合（每个回合以 user 消息为起点）。</summary>
+    /// <summary>
+    /// 按显式 <paramref name="maxTurns"/> 保留最近 N 轮整回合（每个回合以 user 消息为起点）。
+    /// 仅作为"无预算降级路径"的显式兜底（<see cref="RunAsync"/> 里 tokenBudget 为 null 时才调用，
+    /// 调用方显式传 &gt; 0 才启用）；&le; 0 / 不传 = 不启用轮数上限，原样返回轨迹（不裁剪、绝不清空历史）。
+    /// </summary>
     private static IReadOnlyList<ChatMessage> TrimHistory(IReadOnlyList<ChatMessage> trajectory, int maxTurns)
     {
         if (maxTurns <= 0)
-            return [];
+            return trajectory;
         var userCount = trajectory.Count(m => m is UserMessage);
         if (userCount <= maxTurns)
             return trajectory;

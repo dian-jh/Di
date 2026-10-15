@@ -20,23 +20,27 @@
 跨回合记忆由宿主 `Core/AgentLoop/AgentRunner.cs` 管理。每回合结束后：
 
 ```csharp
-_history = SanitizeHistory(TrimHistoryByTokens(TrimHistory(result.Trajectory, _maxHistoryTurns), tokenBudget));
+// token 预算非 null（注入 BudgetPolicy 或窗口 × ratio）→ 预算裁剪独占；null → 仅显式 maxHistoryTurns 兜底（0 = 无上限）
+var trimmed = tokenBudget is not null
+    ? TrimHistoryByTokens(result.Trajectory, tokenBudget)
+    : TrimHistory(result.Trajectory, _maxHistoryTurns);
+_history = SanitizeHistory(trimmed);
 ```
 
-两条裁剪规则叠加（详见 `docs/modules/agent-loop.md`）：
+裁剪走"预算独占 + 显式轮数兜底"（详见 `docs/modules/agent-loop.md`）：
 
-- **轮数兜底**：`TrimHistory` 保留最近 `_maxHistoryTurns`（默认 10，`DefaultMaxHistoryTurns`）轮整回合，
-  超出丢最旧整回合；
-- **token 预算**：`TrimHistoryByTokens` 按预算估算历史 token（`TokenEstimator`，~4 字符/token），
-  超限从最旧开始逐轮丢，至少保留最近 1 轮。预算来源（阶段一预算制，见 §9）：宿主注入
-  `BudgetPolicy` 时取 soft 水位线（`B_input × SoftRatio`，B_input 已扣输出/安全预留，见 §6.1）；
-  未注入时退回 `ContextWindow × HistoryBudgetRatio`（默认 0.5）。
+- **token 预算（独占）**：`TrimHistoryByTokens` 按预算估算历史 token（`TokenEstimator`，~4 字符/token），
+  超限从最旧开始逐轮丢，至少保留最近 1 轮；预算非 null 时轮数裁剪完全不参与。预算来源
+  （阶段一预算制，见 §9）：宿主注入 `BudgetPolicy` 时取 soft 水位线（`B_input × SoftRatio`，
+  B_input 已扣输出/安全预留，见 §6.1）；未注入时退回 `ContextWindow × HistoryBudgetRatio`（默认 0.5）。
+- **轮数兜底（仅降级路径）**：预算为 null（窗口解析失败）时，`TrimHistory` 仅在调用方**显式**传
+  `maxHistoryTurns > 0` 时保留最近 N 轮整回合，超出丢最旧整回合；0 / 不传 = 无轮数上限，历史原样保留。
 
 ### 1.2 三个致命问题
 
 1. **纯丢弃式裁剪 = 不是压缩**。丢最旧整回合 = 把"移除旧记忆"当成压缩的全部。没有任何"产出"
    —— 既不保留关键结论（Task State），也不形成高密度知识表示。长会话后期，模型能"记得"的只剩
-   最近 10 轮，早期的重要决策 / 失败根因全部丢失。
+   预算内最近一段轨迹，早期的重要决策 / 失败根因全部丢失。
 2. **裁剪根本不考虑 KV 缓存命中**。丢最旧 = 删的是请求前段（system prompt 之后）的轨迹消息：
    字节前缀从删除点起整体错位，**删除点之后的整段缓存全部失效**（包括增量累积的近期历史与尾部）
    —— 恰好把"该保护的前缀"与"该重传的尾部"一起打穿。当前仓库对 DeepSeek 前缀缓存依赖极重

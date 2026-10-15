@@ -160,6 +160,31 @@ public sealed class AgentRunnerBudgetTrimmingTests
     }
 
     [Fact]
+    public async Task NoBudgetAndNoMaxHistoryTurns_KeepsFullHistory()
+    {
+        // 产品决策（docs/context-compression.md §9）：删除"默认保留最近 10 轮"轮数启发式。
+        // 无预算（未注入 BudgetPolicy、窗口解析失败）时仅当显式传 maxHistoryTurns > 0 才轮数兜底；
+        // 不传（默认 0）= 无轮数上限，历史原样保留。跑 12 轮超过旧默认 10，可判别启发式已移除。
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model, new FakeToolExecutor(_ => ""),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus());   // 无 budgetPolicy、无 contextWindowProvider、maxHistoryTurns 默认 0
+
+        var expected = new string[12];
+        for (var i = 0; i < 12; i++)
+        {
+            expected[i] = $"问{i + 1}";
+            EnqueueTinyTurn(model);
+            await runner.RunAsync(expected[i]);
+        }
+
+        var last = model.Requests[^1];
+        var userTexts = last.Messages.OfType<UserMessage>().Select(ChatMessageExtensions.GetText).ToArray();
+        Assert.Equal(expected, userTexts);   // 12 轮全部保留（旧默认 10 会裁掉最旧 2 轮）
+    }
+
+    [Fact]
     public async Task Runner_ReportsEstimatedHistoryToTracker_AndResets()
     {
         var tracker = new InputBudgetTracker();

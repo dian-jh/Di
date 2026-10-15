@@ -55,7 +55,7 @@ MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会�
 | 1 | **全局命令与分发** | ✅ 已实现：`di.exe`（win-x64 自包含单文件）+ `install.cmd` / `install.ps1` 入 PATH，幂等 | 一个不能被"安装并运行"的 harness 不是 MVP | `Di.Cli/Properties/PublishProfiles/di.pubxml` + 仓库根安装脚本 |
 | 2 | **非交互单发模式** | ✅ 已实现：`di "prompt"`、`di --mode json`、stdin 管道、`-m/--provider/--no-session/--no-ansi` | 脚本化、CI、自动化测试都需要 headless | `Di.Cli/CliApp.cs` 分派 + `Di.Cli/modes/PrintMode.cs`；契约见 `cli.md` §4 |
 | 3 | **回合级中断（Ctrl+C）** | ✅ 已实现：`Di.Cli/InterruptCoordinator.cs` + `Program.cs` 注册 `CancelKeyPress`；**递进式**——第一次 Ctrl+C **软停止**（在相位边界优雅收敛，正常返回 `StopReason.Interrupted`，保留已写入会话），第二次才硬取消当前回合（杀在途模型流 / 子进程），无回合时退出进程 | 长回合中断应只取消当前回合，保留已写入会话 | `InterruptCoordinator`（实现 `Core.AgentLoop.IInterruptSignal`）+ `ReAct` 的两处相位边界检查；语义见 `docs/interrupt.md` |
-| 4 | **上下文 token 预算** | ✅ 已实现：注入 `BudgetPolicy` 时以 soft 水位线（B_input × 70%）为跨回合历史预算（阶段一预算制），未注入退回 `HistoryBudgetRatio`（默认 0.5）× `ContextWindow`，超限丢最旧整回合；未知窗口退回轮数启发式 | 读大文件 / 跑测试可瞬间超窗，10 轮启发式防不住 | `AgentRunner.TrimHistoryByTokens` + `CliHost` 注入的 `contextWindowProvider`（经 `ILlmService.ResolveModelAsync` 取目录窗口）+ `Core.ContextManagement.BudgetPolicy` |
+| 4 | **上下文 token 预算** | ✅ 已实现：注入 `BudgetPolicy` 时以 soft 水位线（B_input × 70%）为跨回合历史预算（阶段一预算制），未注入退回 `HistoryBudgetRatio`（默认 0.5）× `ContextWindow`，超限丢最旧整回合（预算裁剪独占）；未知窗口（预算 null）仅按**显式** `maxHistoryTurns` 兜底（默认 0 = 无轮数上限） | 读大文件 / 跑测试可瞬间超窗，仅靠轮数上限防不住 | `AgentRunner.TrimHistoryByTokens` + `CliHost` 注入的 `contextWindowProvider`（经 `ILlmService.ResolveModelAsync` 取目录窗口）+ `Core.ContextManagement.BudgetPolicy` |
 | 5 | **README 与上手文档** | ✅ 已实现：README 安装 / 用法 / 配置 + `docs/cli.md` 契约 | 一个要被用的项目必须有"装什么 / 怎么跑 / 怎么配" | 仓库根 `README.md` + `docs/cli.md` |
 
 > 其余未实现项（`/resume`、MCP、子代理、权限审批流、遥测、多 provider、登录命令）

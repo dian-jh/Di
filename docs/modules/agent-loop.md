@@ -39,12 +39,13 @@ harness 的核心执行引擎：
   （分支/改动/提交）改为模型需要时用 bash `git status` / `git log` 自助查询，避免为低频易变信息
   每回合支付 git 进程与 token（Windows 上每次 git spawn ≈100ms+，且注入内容拉高 TTFT）。
   `_lastSnapshotText` 去重：内容恒定 → 首次追加后留在缓存前缀零重复支付；被历史裁剪裁掉后自动重置重新注入。
-- **跨回合记忆裁剪（轮数 + token 预算）**：先按 token 预算丢最旧整回合
-  （`TrimHistoryByTokens`，估算见 `TokenEstimator`，至少保留最近 1 轮），再按最大轮数兜底
-  （默认 10，`maxHistoryTurns`）。预算来源（预算制，di 上下文压缩阶段一已落地）：宿主注入
-  `Core.ContextManagement.BudgetPolicy` 时取 soft 水位线（`B_input × SoftRatio`，B_input 已扣
-  输出/安全预留）；未注入时退回 `ContextWindow × AgentLoopOptions.HistoryBudgetRatio`（默认 0.5）；
-  未知上下文窗口（`contextWindowProvider` 返回 null）时退回纯轮数启发式（roadmap §3 缺口 #4）。
+- **跨回合记忆裁剪（预算独占 + 显式轮数兜底）**：token 预算非 null 时**只有预算裁剪**
+  （`TrimHistoryByTokens`，估算见 `TokenEstimator`，至少保留最近 1 轮），轮数裁剪完全不参与；
+  预算来源（预算制，di 上下文压缩阶段一已落地）：宿主注入 `Core.ContextManagement.BudgetPolicy`
+  时取 soft 水位线（`B_input × SoftRatio`，B_input 已扣输出/安全预留）；未注入时退回
+  `ContextWindow × AgentLoopOptions.HistoryBudgetRatio`（默认 0.5）。**降级路径**：token 预算为
+  null（未知上下文窗口，`contextWindowProvider` 返回 null 或解析失败）时，仅当调用方**显式**传
+  `maxHistoryTurns > 0` 才按轮数兜底（`TrimHistory`，默认 0 / 不传 = 无轮数上限，历史原样保留）。
   每回合裁剪完，累计输入 token 估算写入共享 holder `InputBudgetTracker`（B_current，
   §6.3），供 L1 工具结果预算控制的预测判定读取。`ResetHistory()` 同时重置快照标记与 holder。
 - **Skills 注入**：有 skill 时追加 `load_skill` 工具、执行器包一层 `SkillAwareExecutor`；
