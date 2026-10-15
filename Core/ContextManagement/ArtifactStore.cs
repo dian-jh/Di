@@ -4,9 +4,9 @@ namespace Core.ContextManagement;
 
 /// <summary>
 /// L1 工具结果落盘：完整输出写入
-/// <c>&lt;diHome&gt;/sessions/YYYY/MM/DD/artifacts/tool-&lt;tool&gt;-&lt;ts&gt;.txt</c>（docs/context-compression.md §7.1）。
-/// 阶段一尚未有"每会话目录"（session 子目录随阶段二迁入），artifacts 先按天落盘；
-/// 文件名带进程内自增序号，保证同一毫秒内多次落盘不互相覆盖。
+/// <c>&lt;diHome&gt;/sessions/YYYY/MM/DD/artifacts/tool-&lt;tool&gt;-&lt;ts&gt;-p&lt;pid&gt;-&lt;seq&gt;.txt</c>
+/// （docs/context-compression.md §7.1）。阶段一尚未有"每会话目录"（session 子目录随阶段二迁入），
+/// artifacts 先按天落盘；文件名带进程 id + 进程内自增序号，保证跨进程 / 同一毫秒多次落盘不互相覆盖。
 /// </summary>
 public sealed class ArtifactStore : IArtifactStore
 {
@@ -35,7 +35,7 @@ public sealed class ArtifactStore : IArtifactStore
         var safeName = Sanitize(toolName);
         var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmssfff",
             System.Globalization.CultureInfo.InvariantCulture);
-        var name = $"tool-{safeName}-{stamp}-{Interlocked.Increment(ref _sequence):D3}.txt";
+        var name = $"tool-{safeName}-{stamp}-p{Environment.ProcessId}-{Interlocked.Increment(ref _sequence):D4}.txt";
         var path = Path.Combine(ArtifactsDirectory, name);
         File.WriteAllText(path, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         return path;

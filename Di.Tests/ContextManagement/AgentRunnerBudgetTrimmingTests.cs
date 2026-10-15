@@ -1,0 +1,181 @@
+using Common.Events;
+using Core.AgentLoop;
+using Core.ContextManagement;
+using Core.Llm;
+
+namespace Di.Tests.ContextManagement;
+
+/// <summary>
+/// M2 验收（验收场景 2，docs/context-compression.md §9）：AgentRunner 跨回合记忆
+/// 从"每轮丢最旧"升级为预算制——注入 BudgetPolicy 后以 soft 水位线（B_input × SoftRatio，
+/// 已扣输出/安全预留）为历史预算，与 L1 同源同一窗口口径；未注入时退回旧
+/// "窗口 × HistoryBudgetRatio" 路径（现有行为不变）。同时验证 InputBudgetTracker
+/// （B_current 共享 holder）被 AgentRunner 每回合写入估算。
+/// </summary>
+public sealed class AgentRunnerBudgetTrimmingTests
+{
+    private const int Window = 1_000;
+
+    private static BudgetPolicy Policy() => new(Window, marginRatio: 0, outputReserveTokens: 0);
+
+    /// <summary>单回合成本 = 1(user) + 99(assistant 396 字符) = 100 token。</summary>
+    private static void EnqueueHundredTokenTurn(FakeChatModel model) =>
+        model.Enqueue(_ => new ModelResponse
+        {
+            Message = ChatMessage.Assistant(new string('x', 396)),
+            FinishReason = new FinishReason.Stop(),
+            Usage = TokenUsage.Zero,
+        });
+
+    /// <summary>默认回答（1 token）入队，供对话回合消耗。</summary>
+    private static void EnqueueTinyTurn(FakeChatModel model) =>
+        model.Enqueue(_ => new ModelResponse
+        {
+            Message = ChatMessage.Assistant("hi"),
+            FinishReason = new FinishReason.Stop(),
+            Usage = TokenUsage.Zero,
+        });
+
+    [Fact]
+    public async Task BudgetPolicy_TrimsHistoryBySoftThreshold()
+    {
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model, new FakeToolExecutor(_ => ""),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus(),
+            budgetPolicy: Policy());
+
+        // 甲 200t + 乙 300t + 丙 400t + 3 个 user ≈ 903t > 700 soft → 丢最旧直到 ≤700（仅剩丙）。
+        model.Enqueue(_ => new ModelResponse { Message = ChatMessage.Assistant(new string('x', 800)), FinishReason = new FinishReason.Stop(), Usage = TokenUsage.Zero });
+        await runner.RunAsync("甲");
+        model.Enqueue(_ => new ModelResponse { Message = ChatMessage.Assistant(new string('x', 1200)), FinishReason = new FinishReason.Stop(), Usage = TokenUsage.Zero });
+        await runner.RunAsync("乙");
+        model.Enqueue(_ => new ModelResponse { Message = ChatMessage.Assistant(new string('x', 1600)), FinishReason = new FinishReason.Stop(), Usage = TokenUsage.Zero });
+        await runner.RunAsync("丙");
+        EnqueueTinyTurn(model);
+        await runner.RunAsync("丁");
+
+        var last = model.Requests[^1];
+        var userTexts = last.Messages.OfType<UserMessage>().Select(ChatMessageExtensions.GetText).ToArray();
+        Assert.Equal(["丙", "丁"], userTexts);
+    }
+
+    [Fact]
+    public async Task BudgetPolicy_KeepsHistory_WhileUnderSoft()
+    {
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model, new FakeToolExecutor(_ => ""),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus(),
+            budgetPolicy: Policy());
+
+        EnqueueTinyTurn(model);
+        await runner.RunAsync("甲");
+        EnqueueTinyTurn(model);
+        await runner.RunAsync("乙");
+        EnqueueTinyTurn(model);
+        await runner.RunAsync("丙");
+        EnqueueTinyTurn(model);
+        await runner.RunAsync("丁");
+
+        var last = model.Requests[^1];
+        var userTexts = last.Messages.OfType<UserMessage>().Select(ChatMessageExtensions.GetText).ToArray();
+        Assert.Equal(["甲", "乙", "丙", "丁"], userTexts);   // 少数字 token ≪ 700 → 不裁剪
+    }
+
+    [Fact]
+    public async Task BudgetPolicy_KeepsAtLeastMostRecentTurn_WhenSingleTurnOverBudget()
+    {
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model, new FakeToolExecutor(_ => ""),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus(),
+            budgetPolicy: Policy());
+
+        model.Enqueue(_ => new ModelResponse { Message = ChatMessage.Assistant(new string('X', 10_000)), FinishReason = new FinishReason.Stop(), Usage = TokenUsage.Zero });
+        await runner.RunAsync("甲");   // 单回合 ≈ 2501t > 700，但 userCount=1 → 全保留
+        EnqueueTinyTurn(model);
+        await runner.RunAsync("乙");
+
+        var second = model.Requests[1];
+        var userTexts = second.Messages.OfType<UserMessage>().Select(ChatMessageExtensions.GetText).ToArray();
+        Assert.Equal(["甲", "乙"], userTexts);   // 超预算也不全丢
+    }
+
+    [Fact]
+    public async Task BudgetPolicy_TrimsLessAggressively_ThanFlatRatioPath()
+    {
+        // 预算制（soft 700）比旧"窗口 × 0.5"（500）保留更多回合：B_input 把可输入量定在
+        // 更贴近真实的位置，且预留被显式扣出（不压榨输出/安全空间）。
+        var budgeted = new FakeChatModel();
+        var policyRunner = new AgentRunner(
+            _ => budgeted, new FakeToolExecutor(_ => ""),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus(),
+            budgetPolicy: Policy());
+        for (var i = 1; i <= 7; i++)
+        {
+            EnqueueHundredTokenTurn(budgeted);
+            await policyRunner.RunAsync($"a{i}");   // 7 回合 = 700 ≤ 700 soft → 不裁
+        }
+        Assert.Equal(7, budgeted.Requests[^1].Messages.OfType<UserMessage>().Count());
+
+        var flat = new FakeChatModel();
+        var legacyRunner = new AgentRunner(
+            _ => flat, new FakeToolExecutor(_ => ""),
+            new AgentLoopOptions { SystemPrompt = "sys", HistoryBudgetRatio = 0.5 },
+            new InMemoryEventBus(),
+            maxHistoryTurns: 99,
+            contextWindowProvider: _ => Window);   // 旧路径预算 = 0.5 × 1000 = 500
+        for (var i = 1; i <= 7; i++)
+        {
+            EnqueueHundredTokenTurn(flat);
+            await legacyRunner.RunAsync($"a{i}");   // 7 回合 = 700 > 500 → 历史丢 2 最旧
+        }
+        // 请求 = 裁剪后的历史(最近 5 轮) + 当前回合 = 6 个 user。
+        Assert.Equal(6, flat.Requests[^1].Messages.OfType<UserMessage>().Count());
+    }
+
+    [Fact]
+    public async Task NoPolicy_FallsBackToLegacyRatioPath_AndStillTrims()
+    {
+        // 未注入 BudgetPolicy → 旧路径（窗口 × ratio）照常工作：现有 AgentRunnerTests 契约不变。
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model, new FakeToolExecutor(_ => ""),
+            new AgentLoopOptions { SystemPrompt = "sys", HistoryBudgetRatio = 0.5 },
+            new InMemoryEventBus(),
+            maxHistoryTurns: 99,
+            contextWindowProvider: _ => Window);
+        for (var i = 1; i <= 7; i++)
+        {
+            EnqueueHundredTokenTurn(model);
+            await runner.RunAsync($"a{i}");
+        }
+        // 请求 = 裁剪后的历史(最近 5 轮) + 当前回合 = 6 个 user（旧路径契约未变）。
+        Assert.Equal(6, model.Requests[^1].Messages.OfType<UserMessage>().Count());
+    }
+
+    [Fact]
+    public async Task Runner_ReportsEstimatedHistoryToTracker_AndResets()
+    {
+        var tracker = new InputBudgetTracker();
+        var model = new FakeChatModel();
+        var runner = new AgentRunner(
+            _ => model, new FakeToolExecutor(_ => ""),
+            new AgentLoopOptions { SystemPrompt = "sys" },
+            new InMemoryEventBus(),
+            budgetTracker: tracker);
+
+        model.Enqueue(_ => new ModelResponse { Message = ChatMessage.Assistant(new string('X', 800)), FinishReason = new FinishReason.Stop(), Usage = TokenUsage.Zero });
+        await runner.RunAsync("甲");
+
+        Assert.Equal(201, tracker.CurrentTokens);   // user 甲(1) + assistant 800 字符(200)
+
+        runner.ResetHistory();
+        Assert.Equal(0, tracker.CurrentTokens);     // 重置记忆 → holder 归零
+    }
+}

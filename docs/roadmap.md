@@ -55,7 +55,7 @@ MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会�
 | 1 | **全局命令与分发** | ✅ 已实现：`di.exe`（win-x64 自包含单文件）+ `install.cmd` / `install.ps1` 入 PATH，幂等 | 一个不能被"安装并运行"的 harness 不是 MVP | `Di.Cli/Properties/PublishProfiles/di.pubxml` + 仓库根安装脚本 |
 | 2 | **非交互单发模式** | ✅ 已实现：`di "prompt"`、`di --mode json`、stdin 管道、`-m/--provider/--no-session/--no-ansi` | 脚本化、CI、自动化测试都需要 headless | `Di.Cli/CliApp.cs` 分派 + `Di.Cli/modes/PrintMode.cs`；契约见 `cli.md` §4 |
 | 3 | **回合级中断（Ctrl+C）** | ✅ 已实现：`Di.Cli/InterruptCoordinator.cs` + `Program.cs` 注册 `CancelKeyPress`；**递进式**——第一次 Ctrl+C **软停止**（在相位边界优雅收敛，正常返回 `StopReason.Interrupted`，保留已写入会话），第二次才硬取消当前回合（杀在途模型流 / 子进程），无回合时退出进程 | 长回合中断应只取消当前回合，保留已写入会话 | `InterruptCoordinator`（实现 `Core.AgentLoop.IInterruptSignal`）+ `ReAct` 的两处相位边界检查；语义见 `docs/interrupt.md` |
-| 4 | **上下文 token 预算** | ✅ 已实现：`AgentLoopOptions.HistoryBudgetRatio`（默认 0.5）按当前模型 `ContextWindow` × 比例做跨回合记忆预算，超限丢最旧整回合；未知窗口退回轮数启发式 | 读大文件 / 跑测试可瞬间超窗，10 轮启发式防不住 | `AgentRunner.TrimHistoryByTokens` + `CliHost` 注入的 `contextWindowProvider`（经 `ILlmService.ResolveModelAsync` 取目录窗口） |
+| 4 | **上下文 token 预算** | ✅ 已实现：注入 `BudgetPolicy` 时以 soft 水位线（B_input × 70%）为跨回合历史预算（阶段一预算制），未注入退回 `HistoryBudgetRatio`（默认 0.5）× `ContextWindow`，超限丢最旧整回合；未知窗口退回轮数启发式 | 读大文件 / 跑测试可瞬间超窗，10 轮启发式防不住 | `AgentRunner.TrimHistoryByTokens` + `CliHost` 注入的 `contextWindowProvider`（经 `ILlmService.ResolveModelAsync` 取目录窗口）+ `Core.ContextManagement.BudgetPolicy` |
 | 5 | **README 与上手文档** | ✅ 已实现：README 安装 / 用法 / 配置 + `docs/cli.md` 契约 | 一个要被用的项目必须有"装什么 / 怎么跑 / 怎么配" | 仓库根 `README.md` + `docs/cli.md` |
 
 > 其余未实现项（`/resume`、MCP、子代理、权限审批流、遥测、多 provider、登录命令）
@@ -105,8 +105,9 @@ MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会�
   **上下文压缩系统**（分层 / 五层压缩 / 软硬阈值 / 缓存一致性 / 分阶段落地，
   见 `docs/context-compression.md`）：阶段一已落地——`BudgetPolicy`（B_input 公式 + 70/80/90%
   三级水位线 + B_predicted）+ L1 工具结果预算控制（白名单大输出落盘 artifacts + 摘要进上下文，
-  见 `docs/modules/context-management.md`）；基础版的"丢最旧整回合"按该设计升级（AgentRunner
-  预算化改造）为阶段二第一步。L2-L5 随阶段二/三/四上线。
+  见 `docs/modules/context-management.md`）；基础版的"丢最旧整回合"已按该设计升级为预算制
+  （AgentRunner 注入 BudgetPolicy 以 soft 水位线为历史预算 + B_current 经 InputBudgetTracker
+  接入 L1 预测判定）。L2-L5 随阶段二/三/四上线。
 - **`/resume` 会话恢复**：`SessionLog` 已可重放，接回 UI（`--resume [session-id]`）。
 - **项目记忆与 AGENTS.md**：`~/.di/memory/<project>.md` 长期事实（跨会话）；项目级
   `AGENTS.md` 作为指令注入（当前是代码内默认 `CoreTools.BuildInstructions` 的输出）。
@@ -150,7 +151,7 @@ MVP（已达成，5 个缺口全补齐）    工业级
 ───────────────             ──────────────
 循环/流式/工具/skills/会话   A 分发与 UX（分发/headless/Ctrl+C ✅，TS TUI M1 ✅ + 默认交互前端 M4 ✅，readline 补全等后续）
 成本/目录/认证/元数据        B 安全与可信（权限审批/撤销/注入防御）★
-事件总线/分层配置/779 测试    C 上下文与记忆（token 预算基础版 ✅，压缩/resume 后续）
+事件总线/分层配置/838 测试    C 上下文与记忆（token 预算阶段一 ✅，压缩/resume 后续）
                             D 生态（MCP/子代理/第二 provider/命令注册表）
                             E 可观测与产品化（遥测/评估/运维命令）
 ```

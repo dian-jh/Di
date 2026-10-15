@@ -39,11 +39,14 @@ harness 的核心执行引擎：
   （分支/改动/提交）改为模型需要时用 bash `git status` / `git log` 自助查询，避免为低频易变信息
   每回合支付 git 进程与 token（Windows 上每次 git spawn ≈100ms+，且注入内容拉高 TTFT）。
   `_lastSnapshotText` 去重：内容恒定 → 首次追加后留在缓存前缀零重复支付；被历史裁剪裁掉后自动重置重新注入。
-- **跨回合记忆裁剪（轮数 + token 预算）**：先按当前模型的上下文 token 预算
-  （`ContextWindow × AgentLoopOptions.HistoryBudgetRatio`，默认 0.5）丢最旧整回合
+- **跨回合记忆裁剪（轮数 + token 预算）**：先按 token 预算丢最旧整回合
   （`TrimHistoryByTokens`，估算见 `TokenEstimator`，至少保留最近 1 轮），再按最大轮数兜底
-  （默认 10，`maxHistoryTurns`）；未知上下文窗口（`contextWindowProvider` 返回 null）时
-  退回纯轮数启发式（roadmap §3 缺口 #4）。`ResetHistory()` 同时重置快照标记。
+  （默认 10，`maxHistoryTurns`）。预算来源（预算制，di 上下文压缩阶段一已落地）：宿主注入
+  `Core.ContextManagement.BudgetPolicy` 时取 soft 水位线（`B_input × SoftRatio`，B_input 已扣
+  输出/安全预留）；未注入时退回 `ContextWindow × AgentLoopOptions.HistoryBudgetRatio`（默认 0.5）；
+  未知上下文窗口（`contextWindowProvider` 返回 null）时退回纯轮数启发式（roadmap §3 缺口 #4）。
+  每回合裁剪完，累计输入 token 估算写入共享 holder `InputBudgetTracker`（B_current，
+  §6.3），供 L1 工具结果预算控制的预测判定读取。`ResetHistory()` 同时重置快照标记与 holder。
 - **Skills 注入**：有 skill 时追加 `load_skill` 工具、执行器包一层 `SkillAwareExecutor`；
   `ActiveSkills`（固定 `/skill` + 每回合自动匹配）逐回合构建 SystemContext（见 `docs/modules/skills.md`）。
 
@@ -69,6 +72,7 @@ harness 的核心执行引擎：
 - `IInterruptSignal`（`IsStopRequested`）、`ReAct.StopInterrupted`、`IAgentRunner.InterruptSignal`
 - `AgentLoopOptions`（含 `HistoryBudgetRatio`）、`EnvironmentSnapshot`
 - `AgentRunner.TrimHistoryByTokens`（token 预算裁剪）、`Core.Llm.TokenEstimator`（估算口径 ~4 字符/token）
+- `Core.ContextManagement.BudgetPolicy`（预算制裁剪：soft 水位线为预算）、`InputBudgetTracker`（B_current 共享 holder）
 - `IToolExecutor`、`IToolValidator`
 
 ## 调用关系
@@ -95,6 +99,7 @@ Di.Cli/Repl.cs ── IAgentRunner.RunAsync ──► AgentRunner
 | 工具失败 = 观察，不是崩溃 | `ReAct.ExecuteToolAsync` | `Di.Tests/AgentLoop/ReActTests.cs` |
 | 不可重试模型错误 → 干净结局 | `ReAct.RunCoreAsync` | `Di.Tests/AgentLoop/ReActTests.cs` |
 | 跨回合记忆 + 整回合裁剪（轮数 + token 预算） | `AgentRunner` | `Di.Tests/AgentLoop/AgentRunnerTests.cs` |
+| 预算制裁剪（soft 水位线 / 退回旧口径 / B_current 上报） | `AgentRunner` + `Core.ContextManagement` | `Di.Tests/ContextManagement/AgentRunnerBudgetTrimmingTests.cs` |
 | 环境快照（最小化注入 + 工具自取） | `Core/AgentLoop/EnvironmentSnapshot.cs` | `Di.Tests/AgentLoop/EnvironmentSnapshotTests.cs` |
 | 最终输出工具 | `AgentLoopOptions.FinalOutputTool` | `Di.Tests/AgentLoop/ReActTests.cs` |
 | 工具校验缝 | `IToolValidator`（MVP 传 null） | —（预留） |

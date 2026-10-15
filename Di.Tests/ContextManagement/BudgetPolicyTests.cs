@@ -64,6 +64,15 @@ public sealed class BudgetPolicyTests
         Assert.Equal(0, policy.InputBudget);
     }
 
+    [Fact]
+    public void OutputReserveTokens_Negative_ClampedToZero()
+    {
+        var policy = new BudgetPolicy(10_000, marginRatio: 0, outputReserveTokens: -5_000);
+
+        Assert.Equal(0, policy.OutputReserveTokens);   // 负预留不得拉低/扭曲预算
+        Assert.Equal(10_000, policy.InputBudget);
+    }
+
     // ---- 三级水位线（§6.2）：相对 B_input 的比例，随窗口缩放 ----
 
     [Fact]

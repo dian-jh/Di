@@ -93,6 +93,48 @@ public sealed class CompactingExecutorTests
         Assert.Empty(store.Written);
     }
 
+    // ---- 内层异常必须原样上抛（不是"落盘失败"的 fail-safe 兜底）----
+
+    [Fact]
+    public async Task InnerExecutorException_Propagates_NotSwallowedAsDiskFailure()
+    {
+        var executor = new CompactingExecutor(
+            new FakeInner(_ => throw new InvalidOperationException("boom")), Policy(), new FakeStore());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => executor.ExecuteAsync(Call("read_file")));
+    }
+
+    // ---- CancellationToken 透传给内层执行器 ----
+
+    [Fact]
+    public async Task CancellationToken_IsForwardedToInnerExecutor()
+    {
+        var inner = new FakeInner(_ => "ok");
+        var executor = new CompactingExecutor(inner, Policy(), new FakeStore());
+        using var cts = new CancellationTokenSource();
+
+        await executor.ExecuteAsync(Call("read_file"), cts.Token);
+
+        Assert.Equal(cts.Token, inner.LastCancellationToken);
+    }
+
+    // ---- 摘要上界不变式：摘要+引用行不小于原文 → 不落盘 ----
+
+    [Fact]
+    public async Task Output_AtPreviewBudget_SummaryNotStrictlySmaller_IsNotSpilled()
+    {
+        // full = 头 6000 + 尾 18000 = 24000 字符：摘要体 = 全文，"摘要 + 引用行"必然更大 →
+        // 完整文本进上下文，不落盘（否则上下文膨胀 + 白写文件）。
+        var store = new FakeStore();
+        var atPreviewBudget = new string('D', 24_000);
+        var executor = new CompactingExecutor(new FakeInner(_ => atPreviewBudget), Policy(), store);
+
+        var result = await executor.ExecuteAsync(Call("read_file"));
+
+        Assert.Equal(atPreviewBudget, result);
+        Assert.Empty(store.Written);
+    }
+
     // ---- 落盘失败 → fail-safe 回退完整文本，绝不打断回合 ----
 
     [Fact]
@@ -118,13 +160,20 @@ public sealed class CompactingExecutorTests
             currentInputTokens: () => 650);
         Assert.Equal(small, await near.ExecuteAsync(Call("read_file")));
 
-        // current 651 + 49 = 700 ≥ 700 → 落盘摘要。
+        // current 651 + 12500（50k 字符大输出）= 13151 ≥ 700 → 落盘摘要。
         var store = new FakeStore();
-        var over = new CompactingExecutor(new FakeInner(_ => small), Policy(), store,
+        var over = new CompactingExecutor(new FakeInner(_ => BigOutput()), Policy(), store,
             currentInputTokens: () => 651);
         var result = await over.ExecuteAsync(Call("read_file"));
-        Assert.NotEqual(small, result);
+        Assert.NotEqual(BigOutput(), result);
         Assert.Single(store.Written);
+
+        // 越线但输出太小（摘要不严格更小，上界不变式）→ 全文进上下文，不落盘。
+        var tinyStore = new FakeStore();
+        var tiny = new CompactingExecutor(new FakeInner(_ => small), Policy(), tinyStore,
+            currentInputTokens: () => 651);   // 651 + 49 = 700 ≥ 700 已越线
+        Assert.Equal(small, await tiny.ExecuteAsync(Call("read_file")));
+        Assert.Empty(tinyStore.Written);
     }
 
     // ---- artifact 文件往返可读（真实文件系统）----
@@ -163,11 +212,13 @@ public sealed class CompactingExecutorTests
     {
         private readonly Func<ToolCallBlock, string> _handler;
         public List<ToolCallBlock> Calls { get; } = [];
+        public CancellationToken LastCancellationToken { get; private set; }
         public FakeInner(Func<ToolCallBlock, string> handler) => _handler = handler;
 
         public Task<string> ExecuteAsync(ToolCallBlock call, CancellationToken cancellationToken = default)
         {
             Calls.Add(call);
+            LastCancellationToken = cancellationToken;
             return Task.FromResult(_handler(call));
         }
     }

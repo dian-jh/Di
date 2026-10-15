@@ -6,7 +6,7 @@
 > 唯一权威：本模块（`Core.ContextManagement`）的设计、触发时机、持久化布局一律以本文为准；
 > 架构快照 / 依赖方向 / 数据流时序唯一权威仍为 `docs/architecture.md`，模块 ↔ 文档来源映射为
 > `docs/modules/README.md`，功能全景与路线图见 `docs/roadmap.md`。
-> 现状描述与源码锚点核对于 2026-10-15（`dotnet test` 779 用例全绿基线）。
+> 现状描述与源码锚点核对于 2026-10-15（`dotnet test` 838 用例全绿基线）。
 > 设计参考：Claude Code 上下文压缩机制（5 层防御体系，github: ForceInjection/AI-fundamentals
 > `08_agentic_system/context/claude-code-context-compression.md`）——本文借鉴其
 > **渐进式降级 / 缓存优先 / 配对安全 / 全量可观测** 四哲学，对标对照表见 §10。
@@ -27,8 +27,10 @@ _history = SanitizeHistory(TrimHistoryByTokens(TrimHistory(result.Trajectory, _m
 
 - **轮数兜底**：`TrimHistory` 保留最近 `_maxHistoryTurns`（默认 10，`DefaultMaxHistoryTurns`）轮整回合，
   超出丢最旧整回合；
-- **token 预算**：`TrimHistoryByTokens` 按当前模型 `ContextWindow × HistoryBudgetRatio`（默认 0.5）
-  估算历史 token（`TokenEstimator`，~4 字符/token），超限从最旧开始逐轮丢，至少保留最近 1 轮。
+- **token 预算**：`TrimHistoryByTokens` 按预算估算历史 token（`TokenEstimator`，~4 字符/token），
+  超限从最旧开始逐轮丢，至少保留最近 1 轮。预算来源（阶段一预算制，见 §9）：宿主注入
+  `BudgetPolicy` 时取 soft 水位线（`B_input × SoftRatio`，B_input 已扣输出/安全预留，见 §6.1）；
+  未注入时退回 `ContextWindow × HistoryBudgetRatio`（默认 0.5）。
 
 ### 1.2 三个致命问题
 
@@ -480,6 +482,9 @@ B_{\text{next-output-reserve}}
 
 **估算口径**：优先用对应模型的 tokenizer 精确计数；当前只有 `TokenEstimator`（~4 字符/token）
 估算时，误差由 §6.1 的 `B_margin` 吸收——margin 须按实测误差校准，而非拍定。
+`B_current`（本回合已累计输入 token）：AgentRunner 每回合裁剪完持久记忆后，把估算写入共享
+holder `InputBudgetTracker`，组合根以闭包注入 L1 执行器（§9 阶段一已落地）——只估算持久记忆，
+系统提示 / 工具定义等稳定前缀留归 `B_margin` 覆盖（阶段四校准）。
 路径：本回合已累计 `B_current` + 本工具结果长度 > soft → 该结果**改用摘要 + 落盘**（L1），
 而不是先把 3 万 token 灌进上下文再压。
 
@@ -661,7 +666,7 @@ B_{\text{next-output-reserve}}
 
 | 阶段 | 内容 | 说明 | 阶段验收（§8） |
 |---|---|---|---|
-| **阶段一：Token 预算 + 工具结果控制** | 给 `read_file` / `grep` / `glob` / 平台 shell 工具 / `powershell` / `python` 等工具设置输出预算（白名单见 §3.1），完整结果归档到文件；实现 70% / 80% 水位线触发机制（本阶段触发动作限 L1 预算控制 + L2 噪声清理，L4 归档随阶段二上线）+ 超限保护 | 把现有"每轮丢最旧"改为预算制 + L1 | 场景：连续工具调用 / 输出暴增不超限 |
+| **阶段一：Token 预算 + 工具结果控制** | 给 `read_file` / `grep` / `glob` / 平台 shell 工具 / `powershell` / `python` 等工具设置输出预算（白名单见 §3.1），完整结果归档到文件；实现 70% / 80% 水位线触发机制（本阶段触发动作限 L1 预算控制 + L2 噪声清理，L4 归档随阶段二上线）+ 超限保护 | 把现有"每轮丢最旧"改为预算制 + L1（**阶段一已落地 ✅**：AgentRunner 注入 `BudgetPolicy` 以 soft 水位线为历史预算 + `InputBudgetTracker` 上报 B_current 供 L1 预测判定，见 `docs/modules/context-management.md`） | 场景：连续工具调用 / 输出暴增不超限 |
 | **阶段二：归档式摘要 + Task State** | 实现事件序号、独立归档、结构化任务状态和引用回溯；压缩只修改发送给模型的上下文视图，不删除原始轨迹。Task State 先走确定性路径（§3.4）；LLM 提炼路径依赖 Phase D 子代理，落地前不阻塞 | 核心层 L4 | 场景：压缩后继续执行 / 跨边界协议完整 / 归档幂等 |
 | **阶段三：全量压缩与故障恢复** | 候选摘要校验、压缩事务幂等与原子提交（§7.4）、失败熔断、状态版本管理和中断恢复 + 响应式压缩 | L5 | 场景：无效摘要不覆盖 / 连续失败熔断 / 中断恢复 |
 | **阶段四：缓存与成本优化** | 用实际数据调整触发阈值与水位线；比较不同批次大小对 Token 成本、缓存命中和任务成功率的影响；仅当 API 确实支持服务端上下文编辑时，才加入 L3 微压缩适配器 | 数据驱动调优 | §8.3 优化指标全部进入目标带 |

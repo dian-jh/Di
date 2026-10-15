@@ -57,11 +57,23 @@ public sealed class CompactingExecutor : IToolExecutor
         if (!_policy.PredictsOverSoft(_currentInputTokens(), resultTokens, _policy.NextOutputReserveTokens))
             return result;
 
+        // 摘要上界不变式：输出不超过头+尾预览预算（24000 字符）时，摘要体 = 全文，
+        // "摘要 + artifactRef 引用行"必然不小于原文 → 不落盘，完整文本进上下文。
+        //（否则"落盘 + 引用行"反而让上下文膨胀，还要白写一个文件。）
+        if (result.Length <= OutputBuffer.MaxChars)
+            return result;
+
         // 控制点 = 执行后、进轨迹前：完整输出落盘，上下文只留摘要 + artifactRef。
         try
         {
             var path = _artifacts.Write(call.Name, result);
-            return Summarize(result, path);
+            var summary = Summarize(result, path);
+            if (summary.Length >= result.Length)
+            {
+                TryReclaim(path);   // 输出恰在预览预算边缘：摘要不严格更小，回收已写文件
+                return result;
+            }
+            return summary;
         }
         catch
         {
@@ -70,20 +82,27 @@ public sealed class CompactingExecutor : IToolExecutor
     }
 
     /// <summary>
-    /// 确定性摘要（不调 LLM，§3.1）：头部 + 省略提示 + 尾部（复用 OutputBuffer 头/尾预算口径）
-    /// + 开头一行 artifactRef 引用（完整输出落盘路径，模型可用 read_file 读取）。
-    /// 未超预览预算时保留全文，仅加引用行。
+    /// 确定性摘要（不调 LLM，§3.1）：开头一行 artifactRef 引用（完整输出落盘路径，
+    /// 模型可用 read_file 读取）+ 头部 + 省略提示 + 尾部（复用 OutputBuffer 头/尾预算口径）。
+    /// 仅当 full &gt; 预览预算（24000 字符）时被调用——此时摘要体必然小于全文。
     /// </summary>
     private static string Summarize(string full, string path)
     {
-        var refLine = $"[工具结果输出过大：完整 {full.Length} 字符（约 {TokenEstimator.Estimate(full)} token）" +
-            $"已保存到 {path}，可用 read_file 读取]\n";
-        if (full.Length <= OutputBuffer.HeadChars + OutputBuffer.TailChars)
-            return refLine + full;
-
         var head = full[..OutputBuffer.HeadChars];
         var tail = full[^OutputBuffer.TailChars..];
         var dropped = full.Length - head.Length - tail.Length;
-        return refLine + head + $"\n…[省略中间 {dropped} 字符]…\n" + tail;
+        return RefLine(full, path) + head + $"\n…[省略中间 {dropped} 字符]…\n" + tail;
+    }
+
+    /// <summary>artifactRef 引用行：完整输出落盘路径 + 体量说明。</summary>
+    private static string RefLine(string full, string path) =>
+        $"[工具结果输出过大：完整 {full.Length} 字符（约 {TokenEstimator.Estimate(full)} token）" +
+        $"已保存到 {path}，可用 read_file 读取]\n";
+
+    /// <summary>回收因"摘要不严格更小"而不被上下文引用的已写文件；失败不致命（孤儿文件无害）。</summary>
+    private static void TryReclaim(string path)
+    {
+        try { File.Delete(path); }
+        catch { /* 回收失败不致命：孤儿文件无害，上下文仍用全文 */ }
     }
 }

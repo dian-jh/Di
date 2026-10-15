@@ -1,4 +1,5 @@
 using Common.Events;
+using Core.ContextManagement;
 using Core.Llm;
 using Core.Skills;
 
@@ -26,6 +27,8 @@ public sealed class AgentRunner : IAgentRunner
     private readonly string? _workingDirectory;
     private readonly int _maxHistoryTurns;
     private readonly Func<string, int?>? _contextWindowProvider;
+    private readonly BudgetPolicy? _budgetPolicy;
+    private readonly InputBudgetTracker? _budgetTracker;
     private IReadOnlyList<ChatMessage> _history = [];
 
     /// <summary>最近一次追加进历史的快照文本。快照只在内容变化时追加（见 <see cref="RunAsync"/>），
@@ -41,7 +44,9 @@ public sealed class AgentRunner : IAgentRunner
         string? workingDirectory = null,
         int maxHistoryTurns = DefaultMaxHistoryTurns,
         Func<string, int?>? contextWindowProvider = null,
-        IReadOnlyList<Skill>? skills = null)
+        IReadOnlyList<Skill>? skills = null,
+        BudgetPolicy? budgetPolicy = null,
+        InputBudgetTracker? budgetTracker = null)
     {
         _modelFactory = modelFactory ?? throw new ArgumentNullException(nameof(modelFactory));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -58,6 +63,8 @@ public sealed class AgentRunner : IAgentRunner
         _workingDirectory = workingDirectory;
         _maxHistoryTurns = Math.Max(0, maxHistoryTurns);
         _contextWindowProvider = contextWindowProvider;
+        _budgetPolicy = budgetPolicy;
+        _budgetTracker = budgetTracker;
     }
 
     public string CurrentModel { get; set; } = "deepseek-flash";
@@ -75,6 +82,7 @@ public sealed class AgentRunner : IAgentRunner
     {
         _history = [];
         _lastSnapshotText = null;   // 重置后快照应重新注入
+        _budgetTracker?.Update(0);  // B_current holder 同步归零（见 RunAsync 末尾的写入点）
     }
 
     public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
@@ -131,24 +139,38 @@ public sealed class AgentRunner : IAgentRunner
         }, cancellationToken).ConfigureAwait(false);
 
         // 累加本回合轨迹作为下一回合的记忆，按整回合（user 消息为界）裁剪：
-        // 先按当前模型的上下文 token 预算丢最旧（roadmap §3 缺口 #4），再按最大轮数兜底。
-        // 未知上下文窗口（provider 返回 null）时 token 预算裁剪自动退化为纯轮数启发式。
+        // 先按 token 预算丢最旧（roadmap §3 缺口 #4），再按最大轮数兜底。
+        // 预算来源（阶段一预算制，docs/context-compression.md §9）：注入 BudgetPolicy 时以 soft
+        // 水位线（B_input × SoftRatio）为历史预算——B_input 已扣输出/安全预留，比旧的
+        // "窗口 × HistoryBudgetRatio(0.5)" 更贴近真实可输入量，且与 L1 同源（同一窗口口径）。
+        // 未注入政策时退回旧口径（窗口 × ratio）；窗口未知（provider 返回 null）时退化为纯轮数启发式。
         // 最后对尾部做工具良构化：封顶/最终输出工具回合会留下"未执行的 tool_calls"，必须剔除。
         int? tokenBudget = null;
-        try
+        if (_budgetPolicy is not null)
         {
-            tokenBudget = _contextWindowProvider?.Invoke(CurrentModel) is { } window
-                ? (int?)Math.Max(1, window * _options.HistoryBudgetRatio)
-                : null;
+            tokenBudget = _budgetPolicy.SoftThreshold;
         }
-        catch
+        else
         {
-            // 目录/窗口解析失败（第三方 provider 异常等）：退回轮数启发式，绝不让预算查询拖垮回合。
+            try
+            {
+                tokenBudget = _contextWindowProvider?.Invoke(CurrentModel) is { } window
+                    ? (int?)Math.Max(1, window * _options.HistoryBudgetRatio)
+                    : null;
+            }
+            catch
+            {
+                // 目录/窗口解析失败（第三方 provider 异常等）：退回轮数启发式，绝不让预算查询拖垮回合。
+            }
         }
         _history = SanitizeHistory(TrimHistoryByTokens(TrimHistory(result.Trajectory, _maxHistoryTurns), tokenBudget));
         // 裁剪可能把最早注入的快照裁出历史：重置标记，让下一回合重新注入（否则长期会话会失去环境上下文）。
         if (_lastSnapshotText is not null && !_history.OfType<SystemMessage>().Any(m => m.Text == _lastSnapshotText))
             _lastSnapshotText = null;
+        // B_current（跨回合累计输入 token 估算）写入共享 holder：组合根把它以闭包注入
+        // CompactingExecutor 的预测判定（docs/context-compression.md §6.3）。只估算持久记忆，
+        // 系统提示/工具定义等稳定前缀留归 B_margin 覆盖（阶段四校准）。
+        _budgetTracker?.Update(EstimateTokens(_history));
         return result;
     }
 

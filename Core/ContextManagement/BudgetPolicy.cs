@@ -86,7 +86,7 @@ public sealed class BudgetPolicy
                 $"水位线序必须 soft ≤ hard ≤ blocking（当前 {SoftRatio:F2}/{HardRatio:F2}/{BlockingRatio:F2}）");
 
         MarginTokens = (int)Math.Round(Window * Clamp01(marginRatio ?? DefaultMarginRatio));
-        OutputReserveTokens = outputReserveTokens ?? DefaultOutputReserveTokens;
+        OutputReserveTokens = Math.Max(0, outputReserveTokens ?? DefaultOutputReserveTokens);
         NextOutputReserveTokens = Math.Max(0, nextOutputReserveTokens ?? 0);
         InputBudget = Math.Max(0, Window - OutputReserveTokens - MarginTokens);
 

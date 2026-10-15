@@ -137,15 +137,20 @@ public sealed class CliHost : IDisposable
         };
 
         // L1 上下文压缩（阶段一，docs/context-compression.md §9）：组合根把执行器包一层
-        // CompactingExecutor（执行后预算控制：白名单工具大输出落盘 artifacts + 摘要进上下文）。
+        // CompactingExecutor（执行后预算控制：白名单工具大输出落盘 artifacts + 摘要进上下文），
+        // 并把同一 BudgetPolicy + B_current 共享 holder（InputBudgetTracker）接进 AgentRunner：
+        // 跨回合记忆按 soft 水位线预算化裁剪（§9 验收场景 2），每回合估算的累计输入 token
+        // 经闭包喂给 L1 预测判定（§6.3，验收场景 1——长会话靠近水位线时工具输出暴增单点触发）。
         // 控制开关 = 配置段 ContextManagement（分层配置，docs/di-home.md §3.1）；默认模型的窗口
         // 解析失败（模型不在目录 / provider 异常）→ 不包装，回退压缩前行为（headless 同路径）。
         var defaultModelName = args.Model ?? modelOptions.DefaultModel;
         IToolExecutor toolExecutor = executor;
+        BudgetPolicy? budgetPolicy = null;
+        InputBudgetTracker? budgetTracker = null;
         var contextOptions = provider.GetRequiredService<IOptions<ContextManagementOptions>>().Value;
         if (contextOptions.Enabled && ResolveContextWindow(llm, effectiveProvider, defaultModelName) is { } window && window > 0)
         {
-            var policy = new BudgetPolicy(
+            budgetPolicy = new BudgetPolicy(
                 window,
                 marginRatio: contextOptions.MarginRatio,
                 outputReserveTokens: contextOptions.OutputReserveTokens,
@@ -153,7 +158,9 @@ public sealed class CliHost : IDisposable
                 softRatio: contextOptions.SoftRatio,
                 hardRatio: contextOptions.HardRatio,
                 blockingRatio: contextOptions.BlockingRatio);
-            toolExecutor = new CompactingExecutor(toolExecutor, policy, new ArtifactStore(diHome.RootDirectory));
+            budgetTracker = new InputBudgetTracker();
+            toolExecutor = new CompactingExecutor(toolExecutor, budgetPolicy, new ArtifactStore(diHome.RootDirectory),
+                currentInputTokens: () => budgetTracker.CurrentTokens);
         }
 
         // 推理强度启动时固定（--thinking 覆盖配置），快照挂到宿主供前端展示；运行期切换预留。
@@ -172,7 +179,9 @@ public sealed class CliHost : IDisposable
             CoreTools.Definitions(workspace),
             workingDirectory: workspace,
             contextWindowProvider: contextWindowProvider,
-            skills: skills)
+            skills: skills,
+            budgetPolicy: budgetPolicy,
+            budgetTracker: budgetTracker)
         {
             // --model 覆盖配置默认模型（启动后交互模式仍可 /model 切换）。
             CurrentModel = defaultModelName,
