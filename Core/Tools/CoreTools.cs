@@ -75,6 +75,9 @@ public static class CoreTools
     {
         /// <summary>最多返回的匹配条数（默认 <see cref="GlobTool.MaxResults"/>）。</summary>
         public int? MaxResults { get; init; }
+
+        /// <summary>扫描墙钟预算（默认 <see cref="GlobTool.DefaultScanBudgetSeconds"/> 秒）。</summary>
+        public TimeSpan? ScanBudget { get; init; }
     }
 
     public sealed class GrepOptions
@@ -84,6 +87,9 @@ public static class CoreTools
 
         /// <summary>跳过大于该字节数的文件（默认 <see cref="GrepTool.MaxFileBytes"/>）。</summary>
         public long? MaxFileBytes { get; init; }
+
+        /// <summary>扫描墙钟预算（默认 <see cref="GrepTool.DefaultScanBudgetSeconds"/> 秒）。</summary>
+        public TimeSpan? ScanBudget { get; init; }
     }
 
     public sealed class BashOptions
@@ -141,8 +147,9 @@ public static class CoreTools
             ToolNames.ReadFile => new ReadFileTool(baseDirectory, options?.ReadFile?.MaxBytes),
             ToolNames.WriteFile => new WriteFileTool(baseDirectory),
             ToolNames.EditFile => new EditFileTool(baseDirectory),
-            ToolNames.Glob => new GlobTool(baseDirectory, options?.Glob?.MaxResults),
-            ToolNames.Grep => new GrepTool(baseDirectory, options?.Grep?.MaxResults, options?.Grep?.MaxFileBytes),
+            ToolNames.Glob => new GlobTool(baseDirectory, options?.Glob?.MaxResults, options?.Glob?.ScanBudget),
+            ToolNames.Grep => new GrepTool(baseDirectory, options?.Grep?.MaxResults, options?.Grep?.MaxFileBytes,
+                options?.Grep?.ScanBudget),
             ToolNames.Bash => new BashTool(baseDirectory, shell: options?.Bash?.Shell, timeout: options?.Bash?.Timeout, session: session),
             ToolNames.PowerShell => new PowerShellTool(baseDirectory, timeout: options?.PowerShell?.Timeout, session: powerShellSession),
             ToolNames.Python => new PythonTool(

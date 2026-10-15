@@ -79,7 +79,16 @@ schema 表达不了的**操作知识**（观察约定 / 行为偏好 / 协议）
 | write_file | `Core/Tools/WriteFileTool.cs` | 整体覆盖写入（非追加），自动建父目录 |
 | edit_file | `Core/Tools/EditFileTool.cs` | old_string 唯一性校验的精准替换 |
 | glob | `Core/Tools/GlobTool.cs` + `Core/Tools/GlobMatcher.cs` | 文件名模式搜索（`* ? **`）；匹配器独立可单测 |
-| grep | `Core/Tools/GrepTool.cs` | 正则内容搜索，`file:行号: 内容` 输出；limit/ignore_case/literal/context；超过 1 MiB 的文件跳过并**如实提示**（避免"跳过"伪装成"未找到匹配"） |
+| grep | `Core/Tools/GrepTool.cs` | 正则内容搜索，`file:行号: 内容` 输出；limit/ignore_case/literal/context；超过 1 MiB 的文件跳过并**如实提示**（避免"跳过"伪装成"未找到匹配"）；扫描带墙钟预算与取消支持（见下"搜索边界"） |
+
+## 搜索边界
+
+`grep` / `glob` 都递归扫描目录树，为防把整个主目录（如 `C:\Users\<user>` 当工作区）这类超大范围当搜索起点而长时间卡死，二者共用两道防线：
+
+- **扫描预算**（`GrepTool.DefaultScanBudgetSeconds` / `GlobTool.DefaultScanBudgetSeconds`，默认 60 秒）：超预算返回已找到的部分结果 + `[扫描超过 … 秒预算…]` 续查提示，并**不谎报"未找到匹配"**（截断 ≠ 无匹配，模型据此缩小 path/glob 范围重试）。可通过 `CoreTools.Options` 的 `Grep.ScanBudget` / `Glob.ScanBudget` 覆盖。
+- **取消自检**：同步实现每文件轮询 `CancellationToken`，Ctrl+C / RPC `interrupt` 的取消信号能落地打断扫描（此前在途扫描不可打断，只能干等扫完）。
+
+枚举（`ToolHelpers.EnumerateFiles`）除构建/依赖/版本控制目录（obj、bin、node_modules、.git 等）外，还按名跳过**缓存/配置宿主目录**：`AppData`、`Temp`、`cache`、`Caches`、`.cache`——它们是可再生目录，跳过不影响"搜代码"语义（2026-10-15 事故回归：grep 直扫 `C:\Users\52143` 含 AppData 卡死 10+ 分钟）。
 | cmd / bash | `Core/Tools/BashTool.cs` | 平台默认 shell（Windows 展示为 `cmd`，其他平台为 `bash`）；一次性独立进程或共享持久化会话；超时强杀（默认 30s）；Windows 手工构造 `cmd /d /s /c`，模型侧保留 `bash` 兼容别名 |
 | powershell | `Core/Tools/PowerShellTool.cs` | 独立 PowerShell 持久化会话（不能与 shell 工具共用） |
 | python | `Core/Tools/PythonTool.cs` | 沙盒临时目录执行代码（计算 / 数据处理 / 图表）；stdin 恒以 EOF 空管道启动（代码不继承 di/终端的 stdin 句柄，见 `ProcessRunner.redirectInput`） |

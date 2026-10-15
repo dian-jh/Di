@@ -155,10 +155,16 @@ internal static class ToolHelpers
         }
     }
 
-    /// <summary>按目录名排除的构建产物/依赖/版本控制目录（大小写不敏感）。</summary>
+    /// <summary>
+    /// 按目录名排除的目录（大小写不敏感）：构建产物/依赖/版本控制 + 缓存/配置宿主目录。
+    /// 2026-10-15 事故回归：把用户主目录（C:\Users\&lt;user&gt;）当工作区时，grep/glob 会全量下钻
+    /// AppData/Temp/各类 cache，读文件内容+正则匹配可卡死 10+ 分钟。缓存目录与 obj/node_modules
+    /// 同级按名跳过——它们是可再生的，丢了不影响"搜代码"语义。
+    /// </summary>
     private static readonly HashSet<string> ExcludedDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "obj", "bin", "node_modules", ".git", ".hg", ".svn", ".vs", ".idea", "__pycache__", ".venv", "venv",
+        "AppData", "Temp", "cache", "Caches", ".cache",
     };
 
     private static bool IsExcludedDirectory(string dir) =>

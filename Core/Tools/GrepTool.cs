@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Core.Llm;
@@ -19,19 +20,26 @@ public sealed class GrepTool : ICoreTool
     public const int MaxResults = 100;
     public const long MaxFileBytes = 1 << 20;
 
+    /// <summary>单次扫描的墙钟预算（秒）：超预算返回已找到的部分结果并提示缩范围——防止直扫超大目录
+    /// （如把用户主目录当工作区）时长时间卡死、且 Ctrl+C 之外无其它出路（2026-10-15 事故回归）。</summary>
+    public const int DefaultScanBudgetSeconds = 60;
+
     /// <summary>单条匹配行输出的最大字符数，超出按此截断（防止超宽行撑爆输出）。</summary>
     public const int MaxMatchLineChars = 500;
 
     private readonly string _baseDirectory;
     private readonly int _maxResults;
     private readonly long _maxFileBytes;
+    private readonly TimeSpan _scanBudget;
 
-    public GrepTool(string baseDirectory, int? maxResults = null, long? maxFileBytes = null)
+    public GrepTool(string baseDirectory, int? maxResults = null, long? maxFileBytes = null,
+        TimeSpan? scanBudget = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseDirectory);
         _baseDirectory = baseDirectory;
         _maxResults = maxResults ?? MaxResults;
         _maxFileBytes = maxFileBytes ?? MaxFileBytes;
+        _scanBudget = scanBudget ?? TimeSpan.FromSeconds(DefaultScanBudgetSeconds);
     }
 
     public string Name => "grep";
@@ -109,8 +117,19 @@ public sealed class GrepTool : ICoreTool
             var skippedOverSizeTotal = 0;
             var results = new List<string>();
 
+            var sw = Stopwatch.StartNew();
+            var scanBudgetExceeded = false;
+
             foreach (var file in ToolHelpers.EnumerateFiles(searchRoot))
             {
+                // 同步实现必须自检取消：Ctrl+C / RPC interrupt 的取消信号靠这里落地，
+                // 否则扫描会在途无打断地跑完整个目录树。
+                cancellationToken.ThrowIfCancellationRequested();
+                if (sw.Elapsed > _scanBudget)
+                {
+                    scanBudgetExceeded = true;
+                    break;   // 超预算：返回已找到的部分结果 + 续查提示
+                }
                 if (matchCount >= effectiveLimit)
                     break;
                 var rel = Path.GetRelativePath(searchRoot, file).Replace('\\', '/');
@@ -156,10 +175,13 @@ public sealed class GrepTool : ICoreTool
             }
 
             // 有超限文件被跳过时不输出"（未找到匹配）"，避免与"确实没有匹配"混淆；跳过提示作主输出。
-            var output = results.Count == 0 && skippedOverSizeTotal == 0
+            // 同理：扫描超预算被截断也不算"无匹配"——只说明没搜完。
+            var output = results.Count == 0 && skippedOverSizeTotal == 0 && !scanBudgetExceeded
                 ? "（未找到匹配）"
                 : string.Join('\n', results);
             var notices = new List<string>();
+            if (scanBudgetExceeded)
+                notices.Add($"扫描超过 {_scanBudget.TotalSeconds.ToString("0.#")} 秒预算，已返回部分结果。请缩小 path/glob 范围，或换更具体的 pattern 后重试");
             if (skippedOverSizeTotal > 0)
             {
                 // 前 3 个文件名作样本（超出只列样本）；前面的数字就是被跳过的总数。

@@ -58,6 +58,8 @@ public sealed class ReadFileTool : ICoreTool
     {
         try
         {
+            // 读文件是同步实现：在重 IO 边界自检取消（Ctrl+C / RPC interrupt 落地），不干等。
+            cancellationToken.ThrowIfCancellationRequested();
             using var doc = JsonDocument.Parse(argumentsJson);
             if (!ToolHelpers.TryGetString(doc.RootElement, "path", out var path, out var error))
                 return Task.FromResult(error!);
@@ -77,6 +79,7 @@ public sealed class ReadFileTool : ICoreTool
                 return Task.FromResult($"error: 文件过大（{info.Length} 字节，上限 {_maxBytes} 字节），请用 start_line/end_line 分段读取");
 
             var lines = File.ReadAllLines(full);
+            cancellationToken.ThrowIfCancellationRequested();   // 整读（最大 1 MiB）后再确认一次取消
             if (lines.Length == 0)
                 return Task.FromResult(string.Empty);
 

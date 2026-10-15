@@ -176,4 +176,25 @@ public sealed class ToolHelpersTests : IDisposable
         Assert.Single(files);
         Assert.Contains(files, f => f.EndsWith("data.txt", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void EnumerateFiles_SkipsCacheAndProfileDirectories()
+    {
+        // 2026-10-15 事故回归：用户主目录当工作区时，grep/glob 会全量下钻缓存/配置宿主目录
+        // （AppData、Temp、各类 cache）长达数分钟。与 obj/node_modules 同级按名跳过。
+        Directory.CreateDirectory(Path.Combine(_base, "AppData"));
+        Directory.CreateDirectory(Path.Combine(_base, "Temp"));
+        Directory.CreateDirectory(Path.Combine(_base, "cache"));
+        Directory.CreateDirectory(Path.Combine(_base, ".cache"));
+        File.WriteAllText(Path.Combine(_base, "AppData", "x.txt"), "x");
+        File.WriteAllText(Path.Combine(_base, "Temp", "y.txt"), "x");
+        File.WriteAllText(Path.Combine(_base, "cache", "z.txt"), "x");
+        File.WriteAllText(Path.Combine(_base, ".cache", "w.txt"), "x");
+        File.WriteAllText(Path.Combine(_base, "keep.txt"), "x");
+
+        var files = ToolHelpers.EnumerateFiles(_base).ToList();
+
+        Assert.Single(files);
+        Assert.Contains(files, f => f.EndsWith("keep.txt", StringComparison.Ordinal));
+    }
 }

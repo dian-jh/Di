@@ -272,4 +272,31 @@ public sealed class GlobToolTests : IDisposable
 
         Assert.Contains("未找到", result);   // 目录本身不是文件，不命中；也不报错
     }
+
+    // ---- 扫描预算与取消（对齐 grep 的防大范围扫描卡死，2026-10-15 事故回归）----
+
+    [Fact]
+    public void Execute_CancellationRequested_ThrowsOperationCanceled()
+    {
+        Write("a.cs");
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var ex = Assert.Throws<OperationCanceledException>(() =>
+            NewTool().ExecuteAsync("""{"pattern":"**/*.cs"}""", cts.Token).GetAwaiter().GetResult());
+
+        Assert.Equal(cts.Token, ex.CancellationToken);
+    }
+
+    [Fact]
+    public void Execute_ScanBudgetExceeded_ReturnsPartialWithNotice()
+    {
+        for (var i = 0; i < 2000; i++)
+            File.WriteAllText(Path.Combine(_base, $"f{i:0000}.txt"), "x");
+
+        var tool = new GlobTool(_base, scanBudget: TimeSpan.FromMilliseconds(1));
+        var result = tool.ExecuteAsync("""{"pattern":"**/*.txt"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("扫描超过", result);   // 超预算 → 明确提示，不静默
+    }
 }

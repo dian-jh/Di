@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Core.Llm;
 
@@ -12,14 +13,20 @@ public sealed class GlobTool : ICoreTool
 {
     public const int MaxResults = 200;
 
+    /// <summary>单次扫描的墙钟预算（秒）：超预算返回已找到的部分结果并提示缩范围——与 grep 同级防超大目录卡死
+    /// （对齐 <see cref="GrepTool.DefaultScanBudgetSeconds"/>，2026-10-15 事故回归）。</summary>
+    public const int DefaultScanBudgetSeconds = 60;
+
     private readonly string _baseDirectory;
     private readonly int _maxResults;
+    private readonly TimeSpan _scanBudget;
 
-    public GlobTool(string baseDirectory, int? maxResults = null)
+    public GlobTool(string baseDirectory, int? maxResults = null, TimeSpan? scanBudget = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseDirectory);
         _baseDirectory = baseDirectory;
         _maxResults = maxResults ?? MaxResults;
+        _scanBudget = scanBudget ?? TimeSpan.FromSeconds(DefaultScanBudgetSeconds);
     }
 
     public string Name => "glob";
@@ -61,8 +68,18 @@ public sealed class GlobTool : ICoreTool
             var effectiveLimit = Math.Max(1, limit ?? _maxResults);
             var regex = GlobMatcher.ToRegex(pattern!, ignoreCase: OperatingSystem.IsWindows());
             var results = new List<string>();
+
+            var sw = Stopwatch.StartNew();
+            var scanBudgetExceeded = false;
             foreach (var file in ToolHelpers.EnumerateFiles(searchRoot))
             {
+                // 同步实现必须自检取消（Ctrl+C / RPC interrupt 靠它落地）与扫描预算（防超大目录卡死）。
+                cancellationToken.ThrowIfCancellationRequested();
+                if (sw.Elapsed > _scanBudget)
+                {
+                    scanBudgetExceeded = true;
+                    break;
+                }
                 var rel = Path.GetRelativePath(searchRoot, file).Replace('\\', '/');
                 if (regex.IsMatch(rel))
                 {
@@ -72,9 +89,12 @@ public sealed class GlobTool : ICoreTool
                 }
             }
 
-            var output = results.Count == 0 ? "（未找到匹配文件）" : string.Join('\n', results);
+            // 扫描超预算被截断 ≠ "无匹配"：只说明没搜完，给续查提示而不是谎报。
+            var output = results.Count == 0 && !scanBudgetExceeded ? "（未找到匹配文件）" : string.Join('\n', results);
             if (results.Count >= effectiveLimit)
                 output += $"\n\n[{effectiveLimit} 条结果上限已到。用 limit={effectiveLimit * 2} 查看更多，或缩小 pattern]";
+            if (scanBudgetExceeded)
+                output += $"\n\n[扫描超过 {_scanBudget.TotalSeconds.ToString("0.#")} 秒预算，已返回部分结果。请缩小 path/glob 范围后重试]";
 
             return Task.FromResult(output);
         }

@@ -344,4 +344,51 @@ public sealed class GrepToolTests : IDisposable
         Assert.Contains("a.txt:3: gamma", lines);
         Assert.DoesNotContain("beta", result);
     }
+
+    // ---- 扫描预算与取消（2026-10-15 事故回归：grep 直扫 C:\Users\52143 全主目录卡死 10+ 分钟）----
+
+    [Fact]
+    public void Execute_CancellationRequested_ThrowsOperationCanceled()
+    {
+        Write("a.txt", "hit\n");
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();   // 已取消的 token：扫描尚未开始即应被打断
+
+        var ex = Assert.Throws<OperationCanceledException>(() =>
+            NewTool().ExecuteAsync("""{"pattern":"hit"}""", cts.Token).GetAwaiter().GetResult());
+
+        Assert.Equal(cts.Token, ex.CancellationToken);
+    }
+
+    [Fact]
+    public void Execute_CancelDuringScan_ThrowsInsteadOfCompleting()
+    {
+        // 数据集大到扫描必然超过取消延迟（20ms）：中途取消必须打断扫描，而不是干等到扫完。
+        var filler = string.Concat(Enumerable.Repeat("filler line to slow the scan\n", 200));
+        for (var i = 0; i < 3000; i++)
+            File.WriteAllText(Path.Combine(_base, $"f{i:0000}.txt"), filler + $"hit {i}\n");
+
+        using var cts = new CancellationTokenSource();
+        var task = Task.Run(() => NewTool().ExecuteAsync("""{"pattern":"hit"}""", cts.Token));
+        Thread.Sleep(20);
+        cts.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() => task.GetAwaiter().GetResult());
+    }
+
+    [Fact]
+    public void Execute_ScanBudgetExceeded_ReturnsNoticeInsteadOfNoMatch()
+    {
+        // 预算极小 + 大量小文件 → 扫描被截断。契约：必须如实上报"超预算已截断"+ 续查提示，
+        // 而不是谎报"（未找到匹配）"——截断 ≠ 无匹配（1ms 预算可能连首个文件都没扫到，故不假定有部分结果）。
+        for (var i = 0; i < 2000; i++)
+            File.WriteAllText(Path.Combine(_base, $"f{i:0000}.txt"), $"hit {i}\n");
+
+        var tool = new GrepTool(_base, scanBudget: TimeSpan.FromMilliseconds(1));
+        var result = tool.ExecuteAsync("""{"pattern":"hit"}""").GetAwaiter().GetResult();
+
+        Assert.Contains("扫描超过", result);
+        Assert.Contains("缩小 path/glob 范围", result);   // 续查提示
+        Assert.DoesNotContain("未找到", result);            // 截断 ≠ 无匹配
+    }
 }
