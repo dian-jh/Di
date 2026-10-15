@@ -18,7 +18,7 @@ Di 是一个**无外部框架依赖的 ReAct coding-agent harness**：模型层�
 （REPL + 会话 JSONL + 分层配置）。核心思想：**一切厂商怪癖收敛在适配器翻译层、模型是纯数据、
 认证是声明、循环只发事件不渲染**。
 
-> 规模快照（2026-10-13 复核，`dotnet test`）：**779 个用例全绿**（Di.Tests 563 + Di.Cli.Tests 216；
+> 规模快照（2026-10-15 复核，`dotnet test Di.slnx`）：**838 个用例全绿**（Di.Tests 617 + Di.Cli.Tests 221；
 > 另有 2 个真实 DeepSeek 集成测试 `Di.Tests/Integration/DeepSeekReActIntegrationTests.cs`，
 > `SkippableFact`，无 `DEEPSEEK_API_KEY` 时自动跳过）。此统计是**易变快照**，不要当作接口契约。
 
