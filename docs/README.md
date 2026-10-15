@@ -11,6 +11,7 @@
 |---|---|
 | `docs/architecture.md` | 架构总览：分层 / 依赖方向 / 数据流时序 / 关键设计决策 |
 | `docs/cli.md` | CLI 层契约：参数 / 模式 / headless / 换语言重写 |
+| `docs/context-compression.md` | 上下文压缩系统设计：分层 / 五层压缩 / 预算阈值 / 缓存一致性 |
 | `docs/di-home.md` | `~/.di` 家目录与分层配置规范 |
 | `docs/interrupt.md` | 回合中断（软停止／硬取消／退出）语义、相位边界状态机与各前端接线 |
 | `docs/tui.md` | TS TUI 设计：分层 / 决策 / 里程碑（M1–M4） |
@@ -29,6 +30,7 @@
 |---|---|
 | 了解整体架构 / 依赖方向 / 数据流 / 设计决策 | `docs/architecture.md` |
 | 定位某个核心模块 | `docs/modules/README.md` → 对应模块文档 |
+| 上下文压缩 / 长会话不崩 / 预算阈值 | `docs/context-compression.md` |
 | 配置优先级 / 家目录 / 所有权 | `docs/di-home.md` |
 | CLI 参数 / headless JSON / 退出码 / 换语言重写 | `docs/cli.md` |
 | TS TUI 设计 / RPC 协议契约 | `docs/tui.md` / `docs/tui-rpc.md` |
