@@ -599,6 +599,30 @@ public sealed class RpcModeTests
 
     // ---- 工具 ----
 
+    [Fact]
+    public async Task Rpc_Prompt_RecomputesAutoSkills_AndPreservesExplicitSkills()
+    {
+        var bus = new InMemoryEventBus();
+        var runner = new ClearHistoryRunner();
+        var auto = new Skill { Name = "python", Description = "python", Instructions = "use python" };
+        var pinned = new Skill { Name = "fixed", Description = "fixed", Instructions = "fixed" };
+        var host = new CliHost(runner, bus, new FakeLlm([]), [auto, pinned], new ReplOptions(), null);
+        await RunAsync(host, new CliArgs { NoSession = true },
+            """
+            {"method":"set_skills","params":{"names":["fixed"]}}
+            {"method":"prompt","params":{"message":"python"}}
+            {"method":"prompt","params":{"message":"hello"}}
+            {"method":"command","params":{"name":"skill","args":"fixed"}}
+            {"method":"prompt","params":{"message":"hello"}}
+            {"method":"command","params":{"name":"skill","args":"fixed"}}
+            {"method":"prompt","params":{"message":"hello"}}
+            """);
+        Assert.Equal([pinned, auto], runner.SkillSnapshots[0]);
+        Assert.Equal([pinned], runner.SkillSnapshots[1]);
+        Assert.Empty(runner.SkillSnapshots[2]);
+        Assert.Equal([pinned], runner.SkillSnapshots[3]);
+    }
+
     private static (CliHost Host, FakeRunner Runner) Host(UsageCost? cost = null)
     {
         var bus = new InMemoryEventBus();
@@ -699,17 +723,21 @@ public sealed class RpcModeTests
         public IReadOnlyList<Skill> ActiveSkills { get; set; } = [];
 
         public IInterruptSignal? InterruptSignal { get; set; }
+        public List<Skill[]> SkillSnapshots { get; } = [];
         public int ResetCalls { get; private set; }
         public void ResetHistory() => ResetCalls++;
 
         public Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
-            => Task.FromResult(new AgentResult
+        {
+            SkillSnapshots.Add(ActiveSkills.ToArray());
+            return Task.FromResult(new AgentResult
             {
                 Answer = "",
                 Trajectory = [],
                 Iterations = 0,
                 StopReason = AgentStopReason.Answer,
             });
+        }
     }
 
     /// <summary>以 Interrupted 收敛并发布 Interrupted 事件（验证软停止的线格式：事件 + stop_reason）。</summary>

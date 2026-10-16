@@ -126,7 +126,7 @@
 | `prompt` | `{message: string}` | 运行一回合（等价 `IAgentRunner.RunAsync`）；事件流 + `result` |
 | `interrupt` | `{}` | **硬取消**当前回合 → 对应 `result.stop_reason:"cancelled"`（软停止尚未接线到本协议，见 `docs/interrupt.md` §7） |
 | `set_model` | `{model: string}` | `AgentRunner.CurrentModel` |
-| `set_skills` | `{names: string[]}` | `AgentRunner.ActiveSkills` |
+| `set_skills` | `{names: string[]}` | 替换会话固定 skill 集，未知名称忽略；每个 `prompt` 通过 `SkillActivation.Compute` 叠加自动匹配并重算 `AgentRunner.ActiveSkills` |
 | `clear_history` | `{}` | `AgentRunner.ResetHistory()` |
 | `command` | `{list?: true}` 或 `{name: string, args?: string}` | 列出（`list: true`）或运行（`name`，可选 `args`）斜杠命令；应答见 §2.5。回合型命令返回 `command_error: turn_not_supported` |
 | `ping` | `{}` | 心跳，无应答 |

@@ -109,7 +109,10 @@ public static class RpcMode
                         // 回合级取消源（对齐 InterruptCoordinator 的 per-turn CTS 模式）：
                         // interrupt 请求只取消它，不取消整个进程生命周期。
                         turnCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                        turnTask = RunTurnAsync(host, args, msg.GetValue<string>(), stdout, stderr, writeLock, turnCts.Token);
+                        var message = msg.GetValue<string>();
+                        host.Runner.ActiveSkills = SkillActivation.Compute(message, host.Skills, pinnedSkills,
+                            new LexicalSkillMatcher()).Active;
+                        turnTask = RunTurnAsync(host, args, message, stdout, stderr, writeLock, turnCts.Token);
                         break;
 
                     case "interrupt":
@@ -138,7 +141,9 @@ public static class RpcMode
                             .Select(n => n!.GetValue<string>())
                             .ToHashSet(StringComparer.Ordinal);
                         // 只接受宿主已发现的 skill（未知名静默忽略，避免把任意字符串塞给 runner）。
-                        host.Runner.ActiveSkills = host.Skills.Where(s => wanted.Contains(s.Name)).ToArray();
+                        pinnedSkills.Clear();
+                        pinnedSkills.AddRange(host.Skills.Where(s => wanted.Contains(s.Name)));
+                        host.Runner.ActiveSkills = pinnedSkills.ToArray();
                         break;
 
                     case "clear_history":
