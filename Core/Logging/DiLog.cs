@@ -6,28 +6,8 @@ using Core.AgentLoop;
 namespace Core.Logging;
 
 /// <summary>
-/// jcode 风格文本运行日志（参考 C:\Users\52143\.jcode\logs）：
-/// 每行 <c>[yyyy-MM-dd HH:mm:ss.fff] [LEVEL] message</c>，按日一个文件
-/// <c>~/.di/logs/di-YYYY-MM-DD.log</c>（本地时间，与 jcode 一致）。
-///
-/// 写法：<see cref="Subscribe"/> 在事件总线旁路订阅 <see cref="IEvent"/>（push 模式，fan-out，
-/// 一次订阅恰好每事件一次），把回合生命周期事件翻译成日志行；<see cref="Log"/> 供宿主写
-/// <c>di starting</c> 等非事件行。全程<b>静默兜底</b>：IO 失败（目录不可写 / 磁盘满 / 被删）
-/// 只丢弃当行，绝不抛异常、绝不影响主流程（日志是旁路观察，见 docs/modules/events.md）。
-///
-/// 时间线（用户输入 → 模型发起 → 模型返回）：
-/// <code>
-/// [INFO] di starting pid=.. version=.. workspace=..
-/// [INFO] run: started user_input=&lt;折叠&gt;
-/// [INFO] llm: call_started iteration=1
-/// [INFO] llm: call_completed iteration=1 duration_ms=.. tokens_in=.. tokens_out=.. finish=stop
-/// [INFO] tool: started name=..
-/// [INFO] proc: start name=python exe=.. pid=.. timeout_s=..（工具进程级诊断，见 ProcessDiagnostics）
-/// [INFO] tool: completed name=..
-/// [ERROR] llm: run_failed code=.. error=.. duration_ms=..
-/// [INFO] di exiting
-/// </code>
-/// 设计文档见 docs/modules/logging.md。
+/// 按日记录生命周期事件，I/O 失败不影响主流程。
+/// 格式与事件映射见 docs/modules/logging.md。
 /// </summary>
 public sealed class DiLog : IDisposable
 {
@@ -210,8 +190,8 @@ public sealed class DiLog : IDisposable
 
         try
         {
-            _writer.WriteLine(line);
-            _writer.Flush();
+            _writer?.WriteLine(line);
+            _writer?.Flush();
         }
         catch (Exception)
         {
