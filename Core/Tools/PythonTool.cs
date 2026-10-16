@@ -5,10 +5,8 @@ using Core.Llm;
 namespace Core.Tools;
 
 /// <summary>
-/// Code Interpreter 工具（python）：在隔离沙盒（默认临时目录）中执行一段 Python 代码。
-/// 每次调用在独立进程中运行（MVP 的进程级隔离，见第五章），超时强杀并返回结构化错误，长输出自动截断。
-/// 进程 stdin 恒以 EOF 空管道启动（<c>redirectInput</c>）：代码读不到 di / 用户终端的 stdin，
-/// 也避开"继承孤儿管道导致子进程启动卡死"这类环境问题（见 ProcessRunner）。
+/// 独立 Python 进程执行代码，默认工作目录为系统临时目录，不提供 OS 沙盒。
+/// stdin 以 EOF 启动，超时强杀，输出有界。
 /// </summary>
 public sealed class PythonTool : ICoreTool
 {
@@ -28,13 +26,19 @@ public sealed class PythonTool : ICoreTool
 
     public string Name => "python";
 
-    public ChatTool Definition => ChatTool.Create("python",
-        "执行一段 Python 代码，返回退出码与合并后的输出（stdout + stderr）。代码在沙盒临时目录中运行（进程级隔离）。超时（30 秒）会被终止并返回 error。长输出自动截断头尾。",
-        ToolHelpers.Schema(
-            ("code", "string", "要执行的 Python 代码"),
-            ("working_dir", "string", "可选：工作目录（默认沙盒临时目录）")));
+    public ChatTool Definition
+    {
+        get
+        {
+            var schema = ToolHelpers.Schema(("code", "string", "要执行的 Python 代码"));
+            ToolHelpers.AddOptionalProperty(schema, "working_dir", "string", "可选：工作目录（默认系统临时目录）");
+            return ChatTool.Create("python",
+                "执行一段 Python 代码，返回退出码与合并后的输出（stdout + stderr）。独立进程的默认工作目录为系统临时目录（不限制文件访问）。超时（30 秒）会被终止并返回 error。长输出自动截断头尾。",
+                schema);
+        }
+    }
 
-    public string PromptSnippet => "在沙盒临时目录中执行一段 Python 代码";
+    public string PromptSnippet => "在独立进程中执行一段 Python 代码";
 
     public IReadOnlyList<string> PromptGuidelines =>
     [

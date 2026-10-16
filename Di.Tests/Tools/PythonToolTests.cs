@@ -3,10 +3,8 @@ using Core.Tools;
 namespace Di.Tests.Tools;
 
 /// <summary>
-/// 针对 <see cref="PythonTool"/>（Code Interpreter）的悲观测试。
-/// 覆盖：执行输出、stderr、工作目录、默认沙盒（临时目录）、超时、缺解释器、参数/JSON/路径错误、
-/// 中文输出、含引号代码、多行缩进、沙盒内写文件、非零退出码。
-/// 逻辑用例统一用 TestEnvironment.FindPython() 找到的解释器（testhost PATH 不含 python 时也能真跑）。
+/// 验证 <see cref="PythonTool"/> 的代码执行、输出编码、临时工作目录与文件写入。
+/// 覆盖超时、取消、参数校验与解释器缺失；使用 TestEnvironment.FindPython() 定位解释器。
 /// </summary>
 public sealed class PythonToolTests : IDisposable
 {
@@ -253,5 +251,7 @@ public sealed class PythonToolTests : IDisposable
         var def = new PythonTool().Definition;
         Assert.Equal("python", def.Name);
         Assert.True(def.Parameters["properties"]!["code"] is not null);
+        Assert.True(def.Parameters["properties"]!["working_dir"] is not null);
+        Assert.Equal("[\"code\"]", def.Parameters["required"]!.ToJsonString());
     }
 }
