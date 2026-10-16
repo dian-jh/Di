@@ -61,6 +61,62 @@ public sealed class ModelCatalogTests
     // ---- LlmRuntime 统一目录门面 ----
 
     [Fact]
+    public void RegisterAdapter_Conflict_DoesNotLeavePartialRoutes()
+    {
+        var runtime = new LlmRuntime();
+        runtime.RegisterAdapter(["occupied"], new CatalogAdapter("occupied", [Alpha]));
+        Assert.Throws<LlmException>(() => runtime.RegisterAdapter(
+            ["new", "occupied"], new CatalogAdapter("new", [Beta])));
+        Assert.Empty(runtime.ListModels("new"));
+    }
+
+    [Fact]
+    public void Replace_AnotherRegistrationOfSameAdapter_CannotTakeOwnership()
+    {
+        var runtime = new LlmRuntime();
+        var adapter = new CatalogAdapter("test", [Alpha]);
+        using var first = runtime.RegisterAdapter(["first"], adapter);
+        using var second = runtime.RegisterAdapter(["second"], adapter);
+        Assert.Throws<LlmException>(() => first.Replace(["first", "second"]));
+        first.Dispose();
+        Assert.Single(runtime.ListModels("second"));
+    }
+
+    [Fact]
+    public void Registration_CallerMutatesArrays_DisposeStillRemovesOwnedRoutes()
+    {
+        var runtime = new LlmRuntime();
+        string[] providers = ["initial"];
+        var handle = runtime.RegisterAdapter(providers, new CatalogAdapter("test", [Alpha]));
+        providers[0] = "mutated";
+        handle.Dispose();
+        Assert.Empty(runtime.ListProviders());
+
+        handle = runtime.RegisterAdapter(["initial"], new CatalogAdapter("test", [Alpha]));
+        providers = ["replacement"];
+        handle.Replace(providers);
+        providers[0] = "mutated";
+        handle.Dispose();
+        Assert.Empty(runtime.ListProviders());
+    }
+
+    [Fact]
+    public async Task Replace_ConcurrentDispose_NeverLeavesRoutesBehind()
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            var runtime = new LlmRuntime();
+            var handle = runtime.RegisterAdapter(["initial"], new CatalogAdapter("test", [Alpha]));
+            await Task.WhenAll(Task.Run(() =>
+            {
+                try { handle.Replace(["replacement"]); }
+                catch (ObjectDisposedException) { }
+            }), Task.Run(handle.Dispose));
+            Assert.Empty(runtime.ListProviders());
+        }
+    }
+
+    [Fact]
     public void ListModels_AggregatesAcrossAdapters()
     {
         var runtime = new LlmRuntime();

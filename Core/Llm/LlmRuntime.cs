@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using System.Collections.Immutable;
 
 namespace Core.Llm;
 
@@ -9,8 +9,9 @@ namespace Core.Llm;
 public sealed class LlmRuntime : ILlmService
 {
     // provider 路由 → (adapter, registration)。同一路由只允许一个适配器。
-    private readonly ConcurrentDictionary<string, (ChatAdapter Adapter, AdapterRegistrationHandle Handle)> _routes =
-        new(StringComparer.Ordinal);
+    private volatile ImmutableDictionary<string, (ChatAdapter Adapter, AdapterRegistrationHandle Handle)> _routes =
+        ImmutableDictionary.Create<string, (ChatAdapter, AdapterRegistrationHandle)>(StringComparer.Ordinal);
+    private readonly object _routeLock = new();
 
     private readonly ILlmCredentialStore _credentials;
 
@@ -25,6 +26,7 @@ public sealed class LlmRuntime : ILlmService
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(adapter);
+        providers = (string[])providers.Clone();
 
         if (providers.Length == 0 || providers.Any(string.IsNullOrWhiteSpace))
             throw new LlmException("至少需要一个非空 provider 路由。", LlmErrorCodes.InvalidAdapter);
@@ -32,16 +34,18 @@ public sealed class LlmRuntime : ILlmService
         if (providers.Distinct(StringComparer.Ordinal).Count() != providers.Length)
             throw new LlmException($"路由重复：{string.Join(", ", providers)}。", LlmErrorCodes.InvalidAdapter);
 
-        foreach (var provider in providers)
+        AdapterRegistrationHandle handle;
+        lock (_routeLock)
         {
-            if (!_routes.TryAdd(provider, (adapter, null!)))
-                throw new LlmException($"provider '{provider}' 已被其它适配器注册。", LlmErrorCodes.InvalidAdapter);
+            foreach (var provider in providers)
+            {
+                if (_routes.ContainsKey(provider))
+                    throw new LlmException($"provider '{provider}' 已被其它适配器注册。", LlmErrorCodes.InvalidAdapter);
+            }
+            handle = new AdapterRegistrationHandle(this, providers, adapter);
+            _routes = _routes.AddRange(providers.Select(provider =>
+                new KeyValuePair<string, (ChatAdapter, AdapterRegistrationHandle)>(provider, (adapter, handle))));
         }
-
-        var handle = new AdapterRegistrationHandle(this, providers, adapter);
-        // 回填 handle：TryAdd 已全部成功，索引器设置是原子且键必在。
-        foreach (var provider in providers)
-            _routes[provider] = (adapter, handle);
 
         AdaptersUpdated?.Invoke();
         return handle;
@@ -147,7 +151,7 @@ public sealed class LlmRuntime : ILlmService
         private readonly LlmRuntime _owner;
         private readonly ChatAdapter _adapter;
         private string[] _providers;
-        private int _disposed;
+        private bool _disposed;
 
         public AdapterRegistrationHandle(LlmRuntime owner, string[] providers, ChatAdapter adapter)
         {
@@ -158,43 +162,40 @@ public sealed class LlmRuntime : ILlmService
 
         public void Replace(string[] providers)
         {
-            ObjectDisposedException.ThrowIf(_disposed != 0, this);
             ArgumentNullException.ThrowIfNull(providers);
+            providers = (string[])providers.Clone();
 
             // 先校验候选集：冲突/非法必须抛，且保持当前路由不变。
             if (providers.Any(string.IsNullOrWhiteSpace))
                 throw new LlmException("路由不能为空。", LlmErrorCodes.InvalidAdapter);
 
-            foreach (var provider in providers)
+            lock (_owner._routeLock)
             {
-                if (_owner._routes.TryGetValue(provider, out var existing) &&
-                    !ReferenceEquals(existing.Adapter, _adapter))
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                foreach (var provider in providers)
                 {
-                    throw new LlmException($"provider '{provider}' 已被其它适配器注册。", LlmErrorCodes.InvalidAdapter);
+                    if (_owner._routes.TryGetValue(provider, out var existing) &&
+                        !ReferenceEquals(existing.Handle, this))
+                        throw new LlmException($"provider '{provider}' 已被其它适配器注册。", LlmErrorCodes.InvalidAdapter);
                 }
+                var routes = _owner._routes.RemoveRange(_providers);
+                foreach (var provider in providers)
+                    routes = routes.SetItem(provider, (_adapter, this));
+                _owner._routes = routes;
+                _providers = providers;
             }
-
-            var removed = _providers.Except(providers, StringComparer.Ordinal).ToList();
-            var added = providers.Except(_providers, StringComparer.Ordinal).ToList();
-
-            // 同一同步段内完成交换，观察者看不到中间态。
-            foreach (var provider in removed)
-                _owner._routes.TryRemove(provider, out _);
-
-            foreach (var provider in added)
-                _owner._routes[provider] = (_adapter, this);
-
-            _providers = providers;
             _owner.AdaptersUpdated?.Invoke();
         }
 
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) != 0)
-                return;
-
-            foreach (var provider in _providers)
-                _owner._routes.TryRemove(provider, out _);
+            lock (_owner._routeLock)
+            {
+                if (_disposed)
+                    return;
+                _disposed = true;
+                _owner._routes = _owner._routes.RemoveRange(_providers);
+            }
 
             _owner.AdaptersUpdated?.Invoke();
         }

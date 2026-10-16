@@ -21,7 +21,9 @@
 ### 路由与请求分发（`Core/Llm/LlmRuntime.cs` / `ILlmService`）
 
 - 适配器按 `ProviderIds` 装入路由表；`RegisterAdapter` 返回 `IAdapterRegistration` 句柄，
-  可原子替换 / 撤销路由（`AdaptersUpdated` 事件）。
+  可原子替换 / 撤销路由（`AdaptersUpdated` 事件）。注册 / 替换 / 撤销共用写锁，
+  读者读取不可变路由快照；冲突不会留下部分注册，同一适配器的不同句柄各自拥有路由，
+  调用方修改传入数组不影响句柄所有权。事件在发布快照并释放写锁后通知。
 - `StreamAsync` 前置校验：模型是否支持所请求的推理强度（不支持抛 `UNSUPPORTED_OPTION`）。
 - **请求时鉴权**：适配器声明 `Auth` 后先解析凭据（config > env），缺 key 抛 `MISSING_CREDENTIAL`——
   DI 注册不再要求 key，CLI 无 key 也能启动。
