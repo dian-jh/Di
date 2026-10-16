@@ -12,7 +12,7 @@
 - **`CompactingExecutor`**：L1 工具结果预算控制（§3.1）——包装 `IToolExecutor`，白名单工具的大输出
   落盘 artifacts + 摘要进上下文；
 - **`ArtifactStore` / `IArtifactStore`**：L1 大输出落盘（§7.1 artifacts/ 布局）；
-- **`InputBudgetTracker`**：B_current 共享 holder（§6.3）——AgentRunner 每回合写入累计输入 token
+- **`InputBudgetTracker`**：B_current 共享 holder（§6.3）——AgentRunner 每次工具执行前写入当前轨迹 token
   估算，组合根把读取闭包注入 `CompactingExecutor` 的预测判定（B_current 不再默认 0）；
 - **`ContextManagementOptions`**：模块配置（`ContextManagement` 配置段，分层配置见 `docs/di-home.md`）。
 
@@ -64,9 +64,11 @@ B_predicted = B_current + B_next-tool-estimate + B_next-output-reserve
 L1 控制点正在"执行后、进轨迹前"：`B_next-tool-estimate` 用结果的**实际长度**
 （`TokenEstimator` ~4 字符/token）测得，无需执行前预测；`B_predicted ≥` soft 水位线 → 该结果
 改用摘要 + 落盘，而不是先把大输出灌进上下文再压。`B_current`（本回合累计输入 token）经
-`InputBudgetTracker` 共享 holder 接入：AgentRunner 每回合裁剪完持久记忆后写入估算值，组合根把
+`InputBudgetTracker` 共享 holder 接入：AgentRunner 通过 `AgentRequest.BeforeToolExecution` 在每次
+工具执行前按当前轨迹更新估算（含当前用户消息、assistant 与同批此前工具结果），回合末再同步
+裁剪后的持久记忆。组合根把
 `() => tracker.CurrentTokens` 闭包注入 `CompactingExecutor` 的预测判定——长会话靠近水位线时，
-单点大输出即可越线（§9 验收场景 1）。只估算持久记忆，系统提示 / 工具定义等稳定前缀留归
+单点大输出即可越线（§9 验收场景 1）。只估算轨迹，系统提示 / 工具定义等稳定前缀留归
 `B_margin` 覆盖（阶段四校准）。
 
 ### L1 落盘与摘要（§3.1）
@@ -102,7 +104,7 @@ L1 控制点正在"执行后、进轨迹前"：`B_next-tool-estimate` 用结果�
 | `Core/ContextManagement/ArtifactStore.cs` / `IArtifactStore.cs` | L1 落盘（sessions/YYYY/MM/DD/artifacts/），可注入假存储 |
 | `Core/ContextManagement/InputBudgetTracker.cs` | B_current 共享 holder（AgentRunner 写入，L1 执行器闭包读取） |
 | `Core/ContextManagement/ContextManagementOptions.cs` | 配置段 `ContextManagement`（Enabled、MarginRatio、OutputReserveTokens、NextOutputReserveTokens、SoftRatio、HardRatio、BlockingRatio） |
-| `Core/AgentLoop/AgentRunner.cs` | 预算化改造：注入 BudgetPolicy 时以 soft 水位线为历史预算；每回合写 InputBudgetTracker |
+| `Core/AgentLoop/AgentRunner.cs` | soft 水位线历史裁剪；每次工具执行前和回合末更新 InputBudgetTracker |
 | `Di.Cli/CliHost.cs` | 组合根：默认模型窗口解析成功且 Enabled → 包 CompactingExecutor + 注入 BudgetPolicy / InputBudgetTracker；失败回退原行为 |
 | `Di.Cli/DiServiceCollectionExtensions.cs` | `AddOptions<ContextManagementOptions>().BindConfiguration("ContextManagement")` |
 
@@ -127,6 +129,7 @@ Di.Cli/CliHost.cs（组合根）
   │                           currentInputTokens: () => tracker.CurrentTokens)
   │    否 → 原执行器 / 无政策（回退原行为）
   └─ AgentRunner(…, toolExecutor, …, budgetPolicy, budgetTracker)
+        ├─ 每次工具执行前：BeforeToolExecution → tracker.Update(当前轨迹估算)
         ├─ 每回合末：_history 按 policy.SoftThreshold 预算化裁剪 → tracker.Update(估算)
         └─ ReAct.ExecuteToolAsync ──► IToolExecutor（CompactingExecutor 拦截）
               ├─ 白名单 + B_current + B_next-tool-estimate ≥ soft → Write(artifacts) + 摘要（fail-safe）
@@ -153,12 +156,13 @@ Core.Tools(CoreTools / OutputBuffer)`；持久化经 `DiHome`（Core.Configurati
 | L1：B_current 累计参与预测 / shell 平台名 + bash 别名 | `CompactingExecutor` | `Di.Tests/ContextManagement/CompactingExecutorTests.cs` |
 | 落盘布局与文件往返（真实文件系统） | `ArtifactStore` | `Di.Tests/ContextManagement/ArtifactStoreTests.cs` |
 | 接线级：真实执行路径"长会话 + 输出暴增 → 摘要 + 落盘"（M1 验收） | `AgentRunner` + `CompactingExecutor` + `InputBudgetTracker` | `Di.Tests/ContextManagement/CompactingWiringTests.cs` |
+| 同回合多工具：用户消息、assistant 与前一工具结果共同参与下一工具预算预测 | `AgentRequest.BeforeToolExecution` + `InputBudgetTracker` | `Di.Tests/ContextManagement/CompactingWiringTests.cs` |
 | AgentRunner 预算制裁剪（soft 水位线 / 未注入退回旧口径 / 至少保留 1 轮 / B_current 上报） | `AgentRunner` | `Di.Tests/ContextManagement/AgentRunnerBudgetTrimmingTests.cs` |
 
 ## 关联文档
 
 - `docs/context-compression.md` —— 顶层设计（五层机制 / 预算 / 持久化 / 分阶段落地，唯一权威）
-- `docs/modules/agent-loop.md` —— 跨回合记忆现状（每轮丢最旧；预算化改造是下一步）
+- `docs/modules/agent-loop.md` —— 跨回合记忆与预算裁剪
 - `docs/di-home.md` —— `~/.di` 家目录与分层配置（`ContextManagement` 配置段）
 - `docs/architecture.md` —— 依赖方向与数据流（本模块已登记）
 - `docs/roadmap.md` —— Phase C 上下文与记忆工程

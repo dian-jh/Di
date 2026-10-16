@@ -449,8 +449,8 @@ B_{\text{margin}}
 - `B_margin`：给估算误差、动态提示、工具定义等预留的安全空间（可为 ContextWindow 的 10%，
   或固定值——实现时按实际数据校正）。
 
-当前实现用 `ContextWindow × HistoryBudgetRatio(0.5)` 直接当预算，**没有**给输出 / 安全空间留余量。
-新公式显式计入这两项。
+阶段一已通过 `BudgetPolicy` 显式扣除输出与安全预留；未注入策略的兼容路径仍使用
+`ContextWindow × HistoryBudgetRatio(0.5)`。
 
 ### 6.2 多级水位线（渐进降级）
 
@@ -486,8 +486,9 @@ B_{\text{next-output-reserve}}
 
 **估算口径**：优先用对应模型的 tokenizer 精确计数；当前只有 `TokenEstimator`（~4 字符/token）
 估算时，误差由 §6.1 的 `B_margin` 吸收——margin 须按实测误差校准，而非拍定。
-`B_current`（本回合已累计输入 token）：AgentRunner 每回合裁剪完持久记忆后，把估算写入共享
-holder `InputBudgetTracker`，组合根以闭包注入 L1 执行器（§9 阶段一已落地）——只估算持久记忆，
+`B_current`（本回合已累计输入 token）：AgentRunner 经 `AgentRequest.BeforeToolExecution` 在每次工具
+执行前按当前轨迹更新共享 holder `InputBudgetTracker`，包括用户消息、assistant 和此前工具结果；
+回合末同步裁剪后的记忆。组合根以闭包注入 L1 执行器（§9 阶段一已落地）——只估算轨迹，
 系统提示 / 工具定义等稳定前缀留归 `B_margin` 覆盖（阶段四校准）。
 路径：本回合已累计 `B_current` + 本工具结果长度 > soft → 该结果**改用摘要 + 落盘**（L1），
 而不是先把 3 万 token 灌进上下文再压。

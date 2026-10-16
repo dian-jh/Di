@@ -18,6 +18,50 @@ namespace Di.Tests.ContextManagement;
 public sealed class CompactingWiringTests
 {
     [Fact]
+    public async Task SameTurn_MultipleToolResults_UseCurrentTrajectoryBudget()
+    {
+        var policy = new BudgetPolicy(100_000, outputReserveTokens: 0, marginRatio: 0);
+        var tracker = new InputBudgetTracker();
+        var artifacts = new RecordingArtifacts();
+        var full = new string('X', 160_000);
+        var executor = new CompactingExecutor(new FakeInner(_ => full), policy, artifacts,
+            () => tracker.CurrentTokens);
+        var model = new FakeChatModel();
+        model.Enqueue(_ => new ModelResponse
+        {
+            Message = ChatMessage.Assistant(new string('A', 40_000), toolCalls:
+                [new ToolCallBlock("c1", "read_file", "{}"), new ToolCallBlock("c2", "read_file", "{}")]),
+            FinishReason = new FinishReason.ToolCalls(),
+            Usage = TokenUsage.Zero,
+        });
+        model.Enqueue(_ => new ModelResponse
+        {
+            Message = ChatMessage.Assistant("done"),
+            FinishReason = new FinishReason.Stop(),
+            Usage = TokenUsage.Zero,
+        });
+        var runner = new AgentRunner(_ => model, executor, new AgentLoopOptions(), new InMemoryEventBus(),
+            budgetPolicy: policy, budgetTracker: tracker);
+
+        await runner.RunAsync(new string('U', 40_000));
+
+        var results = model.Requests[^1].Messages.OfType<ToolResultMessage>().ToArray();
+        Assert.Equal(full, results[0].Content);
+        Assert.Contains("已保存到", results[1].Content);
+        Assert.Equal(1, artifacts.Writes);
+    }
+
+    private sealed class RecordingArtifacts : IArtifactStore
+    {
+        public int Writes { get; private set; }
+        public string Write(string toolName, string content)
+        {
+            Writes++;
+            return "artifact.txt";
+        }
+    }
+
+    [Fact]
     public async Task LongSession_WithToolOutputSpike_SummarizesAndSpills_OnRealExecutionPath()
     {
         var root = Path.Combine(Path.GetTempPath(), "di-cm-wiring", Guid.NewGuid().ToString("N"));

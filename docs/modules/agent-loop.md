@@ -9,7 +9,7 @@ harness 的核心执行引擎：
 
 - **`ReAct`**：单回合的 ReAct 主循环（无外部依赖，可独立复用）；
 - **`AgentRunner`**：跨回合宿主——模型路由、历史累加 / 裁剪、环境快照、Skills 注入（`IAgentRunner` 实现）；
-- **`EnvironmentSnapshot`**：把工作区状态（git 分支 / 最近提交 / 未提交变更）注入上下文。
+- **`EnvironmentSnapshot`**：注入工作目录与自助查询提示。
 
 ## 实现原理
 
@@ -25,6 +25,8 @@ harness 的核心执行引擎：
   异常路径）正交。完整语义与状态机见 `docs/interrupt.md`。
 - **工具失败 = 观察结果**（`ExecuteToolAsync`）：异常 → `error: ...` 观察文本回填模型，模型可据此纠正，
   不是崩溃。
+- **历史协议完整性**（`AgentRunner.SanitizeHistory`）：回合停止后移除尾部未配齐结果的整个工具调用组，
+  包括最终输出工具前已执行的部分结果，避免下一回合请求携带悬空调用。
 - **成本跨轮累计**（`CombineCost`）：`ModelResponse.Cost` 累加 → `AgentResult.Cost` / `TurnCompleted.Cost`。
 - **消息布局（缓存关键）**：`[稳定 system prompt] + [完整轨迹] + [易变 SystemContext 于请求末尾]`。
   稳定前缀逐字节不变、跨回合单调增长 → 命中 DeepSeek 前缀缓存；易变上下文（skill 指令）只在末尾，
@@ -46,7 +48,8 @@ harness 的核心执行引擎：
   `ContextWindow × AgentLoopOptions.HistoryBudgetRatio`（默认 0.5）。**降级路径**：token 预算为
   null（未知上下文窗口，`contextWindowProvider` 返回 null 或解析失败）时，仅当调用方**显式**传
   `maxHistoryTurns > 0` 才按轮数兜底（`TrimHistory`，默认 0 / 不传 = 无轮数上限，历史原样保留）。
-  每回合裁剪完，累计输入 token 估算写入共享 holder `InputBudgetTracker`（B_current，
+  每次工具执行前按当前轨迹（含用户、assistant 和已完成工具结果）更新共享 holder
+  `InputBudgetTracker`；回合末同步裁剪后的记忆估算（B_current，
   §6.3），供 L1 工具结果预算控制的预测判定读取。`ResetHistory()` 同时重置快照标记与 holder。
 - **Skills 注入**：有 skill 时追加 `load_skill` 工具、执行器包一层 `SkillAwareExecutor`；
   `ActiveSkills`（固定 `/skill` + 每回合自动匹配）逐回合构建 SystemContext（见 `docs/modules/skills.md`）。
@@ -63,7 +66,7 @@ harness 的核心执行引擎：
 | `Core/AgentLoop/AgentResult.cs` | 一次运行结局（Answer / Trajectory / Usage / Cost / StopReason / Failure） |
 | `Core/AgentLoop/AgentLoopEvent.cs` | 领域事件（见 `docs/modules/events.md`） |
 | `Core/AgentLoop/AgentLoopOptions.cs` | 循环配置（`MaxIterations` / `SystemPrompt` / `FinalOutputTool` / `MaxTokens` / `ReasoningEffort`） |
-| `Core/AgentLoop/EnvironmentSnapshot.cs` | 工作区状态渲染（尽力而为：git 缺失 / 超时静默省略；变更概览紧凑截断到 `MaxStatusLines` 行；git 输出显式按 UTF-8 解码） |
+| `Core/AgentLoop/EnvironmentSnapshot.cs` | 最小环境快照：工作目录与 git 自助查询提示，不启动 git 进程 |
 | `Core/AgentLoop/IToolExecutor.cs` / `Core/AgentLoop/IToolValidator.cs` | 执行与安全 / 权限挂点，loop 不认识具体工具 |
 
 ## 关键符号

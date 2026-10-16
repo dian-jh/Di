@@ -164,6 +164,7 @@ public sealed class ReAct
                     break;
 
                 var validated = request.Validator?.Validate(call) ?? call;
+                request.BeforeToolExecution?.Invoke(trajectory);
                 Emit(new AgentLoopEvent.ToolStarted(call));
                 var (observation, isError) = await ExecuteToolAsync(request.ToolExecutor, validated, cancellationToken);
                 Emit(new AgentLoopEvent.ToolCompleted(call, observation, isError));
@@ -216,13 +217,8 @@ public sealed class ReAct
     }
 
     /// <summary>
-    /// 布局：[稳定 system prompt] + [完整轨迹(历史+当前回合)] + [易变 SystemContext(环境快照/skills) 于末尾]。
-    ///
-    /// 快照带 git 状态，回合间会变；若把它并进第一条 system 消息或插在轨迹中间，一旦变化就
-    /// 从字节 0 起击穿 DeepSeek 的前缀缓存，整段历史全部 miss。放在<b>请求末尾</b>后：
-    /// 稳定前缀（system prompt + 全部历史）逐字节不变、跨回合单调增长，历史始终可命中；
-    /// 易变快照只在末尾（每次请求重发，但代价有界），且不进入持久历史（不污染跨回合记忆）。
-    /// 工具定义经 <see cref="ModelRequest.Tools"/> 传递。
+    /// 布局：稳定 system prompt + 完整轨迹 + 易变 skills 上下文，保留稳定的缓存前缀。
+    /// 最小环境快照属于持久轨迹；工具定义经 <see cref="ModelRequest.Tools"/> 传递。
     /// </summary>
     private IReadOnlyList<ChatMessage> BuildContext(AgentRequest request, IReadOnlyList<ChatMessage> trajectory)
     {

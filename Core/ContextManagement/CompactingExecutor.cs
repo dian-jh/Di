@@ -31,7 +31,7 @@ public sealed class CompactingExecutor : IToolExecutor
     private readonly BudgetPolicy _policy;
     private readonly IArtifactStore _artifacts;
 
-    /// <summary>B_current：本回合已累计的输入 token（跨回合累计的接入记下一步，见模块文档）。</summary>
+    /// <summary>B_current：执行本工具前的轨迹 token 估算。</summary>
     private readonly Func<int> _currentInputTokens;
 
     public CompactingExecutor(IToolExecutor inner, BudgetPolicy policy, IArtifactStore artifacts,

@@ -9,7 +9,7 @@ public sealed class AgentRequest
     public required string UserMessage { get; init; }
 
     /// <summary>
-    /// 可选的追加系统上下文（如环境快照），置于 stable_prefix 之后、历史之前，随每次请求刷新。
+    /// 可选的追加系统上下文（如 skills），置于完整轨迹之后，随每次请求刷新。
     /// null = 无。
     /// </summary>
     public string? SystemContext { get; init; }
@@ -29,4 +29,7 @@ public sealed class AgentRequest
 
     /// <summary>可选的执行前校验步骤（安全/权限挂点）。null = 跳过校验。</summary>
     public IToolValidator? Validator { get; init; }
+
+    /// <summary>每次工具执行前同步观察当前轨迹（含本轮 assistant 和此前工具结果），供宿主更新预算。</summary>
+    public Action<IReadOnlyList<ChatMessage>>? BeforeToolExecution { get; init; }
 }

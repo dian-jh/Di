@@ -133,6 +133,8 @@ public sealed class AgentRunner : IAgentRunner
             Tools = _tools,
             ToolExecutor = _toolExecutor,
             SystemContext = systemContext,
+            BeforeToolExecution = _budgetTracker is null ? null : trajectory =>
+                _budgetTracker.Update(EstimateTokens(trajectory)),
         }, cancellationToken).ConfigureAwait(false);
 
         // 累加本回合轨迹作为下一回合的记忆，按整回合（user 消息为界）裁剪（预算独占）：
@@ -167,9 +169,7 @@ public sealed class AgentRunner : IAgentRunner
         // 裁剪可能把最早注入的快照裁出历史：重置标记，让下一回合重新注入（否则长期会话会失去环境上下文）。
         if (_lastSnapshotText is not null && !_history.OfType<SystemMessage>().Any(m => m.Text == _lastSnapshotText))
             _lastSnapshotText = null;
-        // B_current（跨回合累计输入 token 估算）写入共享 holder：组合根把它以闭包注入
-        // CompactingExecutor 的预测判定（docs/context-compression.md §6.3）。只估算持久记忆，
-        // 系统提示/工具定义等稳定前缀留归 B_margin 覆盖（阶段四校准）。
+        // 回合末同步裁剪后的记忆；工具执行前另按实时轨迹更新。稳定前缀由 B_margin 覆盖。
         _budgetTracker?.Update(EstimateTokens(_history));
         return result;
     }
@@ -250,15 +250,26 @@ public sealed class AgentRunner : IAgentRunner
     /// 跨回合记忆必须"工具良构"：assistant 的 tool_calls 必须紧跟对应的 tool 结果。
     /// 封顶（<see cref="AgentStopReason.MaxIterations"/>）或最终输出工具
     /// （<see cref="AgentStopReason.FinalOutputTool"/>）回合会以"未执行的 tool_calls"结尾——
-    /// 该悬空 assistant 消息若带进下一轮请求，provider（如 DeepSeek）会以 invalid_request_error
-    /// 拒绝整个请求。从尾部丢弃未获响应的 tool_calls，直到历史良构。
+    /// 未配齐结果的调用组会导致 provider 拒绝下一轮请求；从尾部整组移除 assistant 和部分结果。
     /// 只修剪<b>持久化记忆</b>，不动回合结果：轨迹仍是可重放的完整状态。
     /// </summary>
     private static IReadOnlyList<ChatMessage> SanitizeHistory(IReadOnlyList<ChatMessage> history)
     {
         var end = history.Count;
-        while (end > 0 && history[end - 1] is AssistantMessage { ToolCalls.Count: > 0 })
-            end--;
+        while (end > 0)
+        {
+            var assistantIndex = end - 1;
+            while (assistantIndex >= 0 && history[assistantIndex] is ToolResultMessage)
+                assistantIndex--;
+            if (assistantIndex < 0 || history[assistantIndex] is not AssistantMessage { ToolCalls.Count: > 0 } assistant)
+                break;
+
+            var resultIds = history.Skip(assistantIndex + 1).Take(end - assistantIndex - 1)
+                .OfType<ToolResultMessage>().Select(m => m.ToolCallId).ToHashSet(StringComparer.Ordinal);
+            if (assistant.ToolCalls.All(call => resultIds.Contains(call.Id)))
+                break;
+            end = assistantIndex;
+        }
         return end == history.Count ? history : history.Take(end).ToArray();
     }
 }

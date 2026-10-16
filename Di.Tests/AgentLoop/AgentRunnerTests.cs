@@ -471,8 +471,10 @@ public sealed class AgentRunnerTests
         AssertToolWellFormed(model.Requests[3].Messages);
     }
 
-    [Fact]
-    public async Task RunAsync_FinalOutputToolTurn_NextTurnHistoryStaysToolWellFormed()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsync_FinalOutputToolTurn_NextTurnHistoryStaysToolWellFormed(bool precedingTool)
     {
         // FinalOutputTool 回合同样以"assistant(调用最终输出工具)"结尾、后面没有 tool 结果
         //（参数即答案，工具不执行）——悬空尾部同样会毒化下一轮请求。
@@ -480,7 +482,10 @@ public sealed class AgentRunnerTests
             ? new ModelResponse
             {
                 Message = ChatMessage.Assistant(text: null,
-                    toolCalls: [new ToolCallBlock("final-call", "final_output", "最终答案")]),
+                    toolCalls: precedingTool
+                        ? [new ToolCallBlock("regular", "read_file", "{}"),
+                           new ToolCallBlock("final-call", "final_output", "最终答案")]
+                        : [new ToolCallBlock("final-call", "final_output", "最终答案")]),
                 FinishReason = new FinishReason.ToolCalls(),
                 Usage = TokenUsage.Zero,
             }

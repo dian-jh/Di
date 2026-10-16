@@ -1,10 +1,8 @@
 namespace Core.ContextManagement;
 
 /// <summary>
-/// B_current 共享 holder（docs/context-compression.md §6.3）：跨回合累计输入 token 的
-/// 单一数据源。AgentRunner 每回合裁剪完持久记忆后写入估算值；组合根把 holder 的读取闭包
-/// 注入 <see cref="CompactingExecutor"/>，L1 预测判定即可计入"长会话已接近水位线"的当前量，
-/// 而不是默认 0（否则 1M 窗口 soft≈616k 下，单点结果长度根本够不到阈值，L1 形同虚设）。
+/// B_current 共享值：AgentRunner 在每次工具执行前按当前轨迹更新，回合末同步裁剪后的记忆。
+/// 组合根把读取闭包注入 <see cref="CompactingExecutor"/>，供 L1 预算预测使用。
 /// </summary>
 public sealed class InputBudgetTracker
 {
