@@ -10,6 +10,45 @@ namespace Di.Tests.Sessions;
 /// </summary>
 public sealed class SessionStatsTests
 {
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("{\"type\":42}")]
+    [InlineData("{\"type\":\"event_msg\",\"payload\":null}")]
+    [InlineData("{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"usage\":{\"input_tokens\":1.5}}}")]
+    [InlineData("{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"duration_ms\":9223372036854775808}}")]
+    [InlineData("{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"usage\":{\"input_tokens\":100},\"cost\":{\"total\":\"bad\"}}}")]
+    public void Aggregate_SkipsInvalidRecords_WithoutPartialTotals(string invalid)
+    {
+        var path = WriteLines(invalid,
+            """{"type":"event_msg","payload":{"type":"task_complete","usage":{"input_tokens":7},"cost":{"total":0.25}}}""");
+        try
+        {
+            var stats = SessionStats.Aggregate(path);
+            Assert.Equal(1, stats.Turns);
+            Assert.Equal(7, stats.InputTokens);
+            Assert.Equal(0.25, stats.TotalCost);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Aggregate_SkipsOverflowingRecord_AndContinues()
+    {
+        var path = WriteLines(
+            """{"type":"event_msg","payload":{"type":"task_complete","usage":{"input_tokens":9223372036854775807,"cache_read_tokens":9223372036854775807}}}""",
+            """{"type":"event_msg","payload":{"type":"task_complete","usage":{"input_tokens":1,"output_tokens":50}}}""",
+            """{"type":"event_msg","payload":{"type":"task_complete","usage":{"output_tokens":3}}}""");
+        try
+        {
+            var stats = SessionStats.Aggregate(path);
+            Assert.Equal(2, stats.Turns);
+            Assert.Equal(long.MaxValue, stats.InputTokens);
+            Assert.Equal(3, stats.OutputTokens);
+            Assert.Equal(0.5, stats.CacheHitRate);
+        }
+        finally { File.Delete(path); }
+    }
+
     [Fact]
     public void Aggregate_RealSessionLog_SumsUsageAndCost_ComputesHitRate()
     {

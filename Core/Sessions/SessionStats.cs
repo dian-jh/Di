@@ -44,38 +44,51 @@ public static class SessionStats
                 continue;   // 容错：无法解析的行跳过，不中断聚合
             }
 
-            using (doc)
+            try
             {
-                var root = doc.RootElement;
-                if (root.TryGetProperty("type", out var type) && type.GetString() == "event_msg" &&
-                    root.TryGetProperty("payload", out var payload) &&
-                    payload.TryGetProperty("type", out var payloadType) &&
-                    payloadType.GetString() == "task_complete")
+                using (doc)
                 {
-                    turns++;
-                    if (payload.TryGetProperty("usage", out var usage))
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("type", out var type) && type.GetString() == "event_msg" &&
+                        root.TryGetProperty("payload", out var payload) &&
+                        payload.TryGetProperty("type", out var payloadType) &&
+                        payloadType.GetString() == "task_complete")
                     {
-                        input += GetInt64(usage, "input_tokens");
-                        output += GetInt64(usage, "output_tokens");
-                        cacheRead += GetInt64(usage, "cache_read_tokens");
-                        cacheWrite += GetInt64(usage, "cache_write_tokens");
+                        var usage = payload.TryGetProperty("usage", out var u) ? u : default;
+                        var nextInput = checked(input + GetInt64(usage, "input_tokens"));
+                        var nextOutput = checked(output + GetInt64(usage, "output_tokens"));
+                        var nextRead = checked(cacheRead + GetInt64(usage, "cache_read_tokens"));
+                        var nextWrite = checked(cacheWrite + GetInt64(usage, "cache_write_tokens"));
+                        var nextCost = totalCost;
+                        var nextDuration = totalDuration;
+                        if (payload.TryGetProperty("cost", out var cost) && cost.TryGetProperty("total", out var total))
+                        {
+                            nextCost = (totalCost ?? 0) + total.GetDouble();
+                            if (!double.IsFinite(nextCost.Value))
+                                throw new FormatException("Non-finite session cost");
+                        }
+                        if (payload.TryGetProperty("duration_ms", out var duration))
+                            nextDuration = checked((totalDuration ?? 0) + duration.GetInt64());
+                        turns++;
+                        (input, output, cacheRead, cacheWrite) = (nextInput, nextOutput, nextRead, nextWrite);
+                        (totalCost, totalDuration) = (nextCost, nextDuration);
                     }
-                    if (payload.TryGetProperty("cost", out var cost) && cost.TryGetProperty("total", out var total))
-                        totalCost = (totalCost ?? 0) + total.GetDouble();
-                    if (payload.TryGetProperty("duration_ms", out var duration))
-                        totalDuration = (totalDuration ?? 0) + duration.GetInt64();
                 }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or FormatException or OverflowException)
+            {
+                // 整行跳过，不保留部分合计。
             }
         }
 
-        var billable = input + cacheRead + cacheWrite;
+        var billable = (double)input + cacheRead + cacheWrite;
         double? hitRate = billable > 0 ? (double)cacheRead / billable : null;
 
         return new SessionStatsSummary(turns, input, output, cacheRead, cacheWrite, hitRate, totalCost, totalDuration);
     }
 
     private static long GetInt64(JsonElement obj, string property) =>
-        obj.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number
-            ? value.GetInt64()
-            : 0;
+        obj.ValueKind == JsonValueKind.Undefined || !obj.TryGetProperty(property, out var value)
+            ? 0
+            : value.GetInt64();
 }
