@@ -33,8 +33,8 @@ Di.Cli --mode rpc（C# 后端，复用既有 CliHost 组合根与 AgentRunner）
 1. **终端体验**：现有 `Di.Cli/EventRenderer.cs` 只是"逐字符打印 + 两段 ANSI 控制序列"，
    无排版 / 滚动 / 工具卡片 / 思考展示。TS TUI 目标是对齐 pi / Claude Code 的聊天视口体验。
 2. **核心与 UI 解耦**：`docs/cli.md` §5 已把"子进程 + stdin-stdout 协议"列为跨语言 CLI 的既定
-   机制；`CliApp` 中 `AppMode.Rpc` 是**预留但未实现**的缝（`--mode rpc` 当前 exit 1）。
-   TS TUI 正好把这条缝落地——**不触碰核心层，核心层本来就不认识 UI**（依赖方向
+   机制；`CliApp` 中 `AppMode.Rpc` 已通过 `Di.Cli/modes/RpcMode.cs` 实现。
+   TS TUI 通过该后端复用核心（依赖方向
    `Di.Cli → Core → Common` 不变）。
 3. **复用而非自研**：`@earendil-works/pi-tui` 是现成的高质量差分渲染 TUI 库（MIT，npm 1.2.0，
    engines node≥22.19），组件契约极简（`render(width): string[]` + `invalidate()`），不引入框架。
@@ -45,11 +45,9 @@ Di.Cli --mode rpc（C# 后端，复用既有 CliHost 组合根与 AgentRunner）
    `IAgentRunner.RunAsync(string) → AgentResult`（每回合一次调用）与
    `IEventBus.CreateConsumer<AgentLoopEvent>()`（事件 pull 流）。`--mode rpc` 把这两个面
    序列化为 NDJSON（事件逐条流出、回合终了发 result），TS TUI 只消费协议，不感知 C# 类型。
-2. **事件保真补齐**：`ReAct.StreamModelAsync` 目前把 `ModelEvent.ReasoningDelta` /
-   `ToolCallDelta` **丢弃**（`Core/AgentLoop/ReAct.cs`）。新增
-   `AgentLoopEvent.ReasoningDelta(string)` / `ToolCallDelta(id, name, arguments)` 并把它们
-   转发到事件总线——TS TUI 才能展示思考与实时工具参数（既有 EventRenderer 对新增类型天然忽略，
-   需测试确认）。事件类型表唯一权威 `docs/modules/events.md` 同步更新。
+2. **事件保真**：`ReAct.StreamModelAsync`（`Core/AgentLoop/ReAct.cs`）已将模型的推理与工具参数增量
+   转为 `AgentLoopEvent.ReasoningDelta` / `ToolCallDelta`，经事件总线和 RPC 转发到 TUI。
+   事件类型见 `docs/modules/events.md`；文本渲染由 `Di.Cli/EventRenderer.cs` 按终端模式处理。
 3. **回合语义上移到 TUI**：turn 边界（消费者创建 / 排空、interrupt 首退回合 / 再退退出）目前
    在 `Di.Cli/Repl.cs`。RPC 模式下这些语义由 TS TUI 拥有；后端无状态、串行处理请求，
    Ctrl+C 由 TUI 捕获并翻译成 `interrupt` 请求（后端取消当前回合 → `stop_reason: "cancelled"`）。
@@ -97,7 +95,7 @@ tui/
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
-| **M1**（本任务） | C# `--mode rpc` 后端 + reasoning/toolcall 事件转发；TS TUI MVP（流式文本、工具行、提示输入、Ctrl+C 中断） | 进行中 |
+| **M1** | C# `--mode rpc` 后端 + reasoning/toolcall 事件转发；TS TUI MVP（流式文本、工具行、提示输入、Ctrl+C 中断） | 已实现 |
 | M2 | 全屏 alt-screen 视口（transcript ScrollView + dock）、工具折叠 / 展开、skills 展示、Markdown 主题 | 部分实现（本变更）：全屏 alt-screen 视口已落地，仅用于**现代终端**（Windows Terminal / mintty / VS Code 等，SGR 滚轮可用）—— transcript ScrollView（follow end，滚轮 / PgUp / PgDn 滚动、`↓ 最新消息`跳底；无滚动条 hidden）+ dock（错误横幅 / 状态行 / 输入框固定终端底部，对齐 pi coding-agent `createChatViewport`，`tui/src/app/chat-layout.ts`）。**cmd 特例**：经典 conhost 不把滚轮转成 SGR 事件交给 Node（pi 同方案在 cmd 同样滚不动的铁证），应用内捕获滚轮是死路 → 走 `TuiMainScreen` 主缓冲渲染（`createMainScreenLayout`，纯 Container 堆叠、无 ScrollView），conhost 自己的 scrollback 累积整份文档、滚轮由控制台原生滚动历史（见 `tui/src/app/terminal-mode.ts`、`tui/src/main.ts`）。剩余：工具折叠 / 展开、skills 展示、Markdown 主题 |
 | M3 | 状态栏（模型 / 成本 / tokens）、`/tui` 主屏/全屏切换、斜杠命令 UI、编辑器增强（补全 / 粘贴） | 部分就绪：命令注册表（内置 + `~/.di/commands/*.md` 用户命令）已挂到 C# 宿主（`CliHost.Commands`），RPC `command` 方法（list/run，`docs/tui-rpc.md` §2.5/§3）。**本变更**：命令 UI + 状态显示落地 —— 输入框换 `Editor`（内置斜杠菜单：行首 `/` 弹命令+skills 列表、Tab/Enter 选择、`/m` 模糊命中），`ready` 握手携带 model/effort/skills/models 快照 → 模型徽标（`模型 · 强度`）渲染在输入框下方独立一行、右对齐（不与输入框同处一行；早期合成进底部边框造成视觉冲突，故改独立行）、终端一开即显示（启动时 `view.sync`，`/model` 切换后经 `command_ran` 快照实时更新）；用户输入消息自带浅灰条形框（区分非用户输入）；左下角状态行记录最近一回合统计（`N 轮 · tokens: … · cost:…`，与 REPL 摘要同格式，`EventRenderer.cs:140`/`TokenUsage.cs` 同源）；`/model <Tab>`/`/skill <Tab>` 参数补全；回合型命令（`/skill <名> <参数>`、用户命令）经 `turn_message` 回退到 TUI 自身 prompt 回合。**体验修补**：现代终端滚轮固定 3 行/格（`wheelScrollLines: 3`，`auto` 在 Windows 上慢速滚动每格仅 1 行、感觉不到在动）；cmd 滚轮修复 = 上面 M2 的 `TuiMainScreen` 主缓冲方案（conhost 原生 scrollback 滚动，不依赖应用收滚轮事件）。剩余：`/tui` 主屏/全屏切换、粘贴增强 |
 | M4（本变更） | 安装整合（`install.*` 构建 TS 并复制到 `~/.di/tui/`）、`di` 交互默认启动 TUI（`node <entry>` 继承控制台；`DI_UI=repl` 逃生门回退 REPL）、根 `README.md` 用户视图 | **已实现**（`di tui` 显式子命令仍待办） |

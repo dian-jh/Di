@@ -61,7 +61,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 | `sessions/YYYY/MM/DD/artifacts/*.txt` | 程序（`Core.ContextManagement` ArtifactStore，L1 大输出落盘） | 用户/`read_file` | ✅ 阶段一（会话目录随阶段二迁入） |
 | `logs/di-YYYY-MM-DD.log` | 程序（DiLog） | 用户/排障 | ✅ 已实现 |
 | `skills/<name>/SKILL.md` 或 `skills/<name>.md` | 用户 | SkillRepository（多源合并 + `/skill` 激活） | ✅ MVP |
-| `commands/<name>.md` | 用户 | `Di.Cli/Commands/CommandLoader`（内置 + 用户命令 → `SlashCommandRegistry`） | ✅ 已实现 |
+| `commands/<name>.md` | 用户 | `Di.Cli/Commands/CommandLoader.cs` 的 `CommandLoader`（内置 + 用户命令 → `SlashCommandRegistry`） | ✅ 已实现 |
 | `agents/<name>.md` | 用户 | 将来子代理加载器 | 🔜 格式已预留 |
 | `mcp.json` | 用户 | 将来 MCP 桥 | 🔜 格式已预留 |
 

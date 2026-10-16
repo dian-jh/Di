@@ -50,7 +50,7 @@ Coding Agent 的**八个核心编码工具**（对应 pi 的 `https://github.com
   每条命令按**原始字节**收集 stdout/stderr，结束时整段用 `ProcessEncoding.SmartDecode`（UTF-8 优先 /
   OEM 回退）解码；cmd 的回显行（以提示符标签开头）在**字节层**先剥掉，避免 GBK 回显与 .NET CLI 的
   UTF-8 输出混在同一段导致误判编码。退出码行（`_exitMarker:`）界定输出边界。
-- `Core/Tools/ProcessRunner.cs`：统一进程执行，超时强杀（含进程树）、输出捕获（字节级有界累积，
+- `Core/Tools/ProcessRunner.cs`：统一进程执行，超时强杀（含进程树）、退出后独立的 1 秒管道排干预算、输出捕获（字节级有界累积，
   结束时整段解码，见 `BoundedByteBuffer`）。
 - `Core/Tools/ProcessEncoding.cs`：子进程输出解码——`ChildOutput`（OEM 代码页，中文系统 = GBK）与
   `SmartDecode`（严格 UTF-8 优先、OEM 回退，处理接缝处被切断的多字节字符）；git / python 可传
@@ -58,7 +58,7 @@ Coding Agent 的**八个核心编码工具**（对应 pi 的 `https://github.com
 - `Core/Tools/BoundedByteBuffer.cs`：**字节级**有界输出累积（头尾预算），任意长度输出内存恒定，
   超长截断头尾并插入提示；保留原始字节到解码前，支持解码前逐行预处理（如剥回显行）。
   （字符级版 `OutputBuffer.cs` 仍保留并被其单元测试覆盖。）
-- `Core/Tools/ToolHelpers.cs`：JSON Schema 构造、参数解析、路径解析（防越界）。
+- `Core/Tools/ToolHelpers.cs`：JSON Schema 构造、参数解析、路径解析（相对路径以工作区为基准，允许绝对路径及 `..`）。
 
 ### 使用说明注入稳定前缀（`CoreTools.BuildInstructions`）
 
@@ -80,6 +80,9 @@ schema 表达不了的**操作知识**（观察约定 / 行为偏好 / 协议）
 | edit_file | `Core/Tools/EditFileTool.cs` | old_string 唯一性校验的精准替换 |
 | glob | `Core/Tools/GlobTool.cs` + `Core/Tools/GlobMatcher.cs` | 文件名模式搜索（`* ? **`）；匹配器独立可单测 |
 | grep | `Core/Tools/GrepTool.cs` | 正则内容搜索，`file:行号: 内容` 输出；limit/ignore_case/literal/context；超过 1 MiB 的文件跳过并**如实提示**（避免"跳过"伪装成"未找到匹配"）；扫描带墙钟预算与取消支持（见下"搜索边界"） |
+| cmd / bash | `Core/Tools/BashTool.cs` | 平台默认 shell（Windows 为 `cmd`，其他平台为 `bash`）；独立进程或共享会话；默认 30s 超时强杀；保留 `bash` 兼容别名 |
+| powershell | `Core/Tools/PowerShellTool.cs` | 独立 PowerShell 持久化会话（不能与 shell 工具共用） |
+| python | `Core/Tools/PythonTool.cs` | `code` 必填，`working_dir` 可选；独立进程执行代码，默认 cwd 为系统临时目录；不提供操作系统沙盒或文件访问隔离；stdin 以 EOF 启动（见 `ProcessRunner.redirectInput`） |
 
 ## 搜索边界
 
@@ -89,9 +92,6 @@ schema 表达不了的**操作知识**（观察约定 / 行为偏好 / 协议）
 - **取消自检**：同步实现每文件轮询 `CancellationToken`，Ctrl+C / RPC `interrupt` 的取消信号能落地打断扫描（此前在途扫描不可打断，只能干等扫完）。
 
 枚举（`ToolHelpers.EnumerateFiles`）除构建/依赖/版本控制目录（obj、bin、node_modules、.git 等）外，还按名跳过**缓存/配置宿主目录**：`AppData`、`Temp`、`cache`、`Caches`、`.cache`——它们是可再生目录，跳过不影响"搜代码"语义（2026-10-15 事故回归：grep 直扫 `C:\Users\52143` 含 AppData 卡死 10+ 分钟）。
-| cmd / bash | `Core/Tools/BashTool.cs` | 平台默认 shell（Windows 展示为 `cmd`，其他平台为 `bash`）；一次性独立进程或共享持久化会话；超时强杀（默认 30s）；Windows 手工构造 `cmd /d /s /c`，模型侧保留 `bash` 兼容别名 |
-| powershell | `Core/Tools/PowerShellTool.cs` | 独立 PowerShell 持久化会话（不能与 shell 工具共用） |
-| python | `Core/Tools/PythonTool.cs` | 沙盒临时目录执行代码（计算 / 数据处理 / 图表）；stdin 恒以 EOF 空管道启动（代码不继承 di/终端的 stdin 句柄，见 `ProcessRunner.redirectInput`） |
 
 ## 代码入口
 

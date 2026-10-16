@@ -14,7 +14,8 @@ ReAct 只**发布**事件、不渲染；CLI 从总线**消费**并流式渲染�
 - **两种消费模式**（各自独立、互不影响）：
   - **订阅（push）**：`Subscribe`（按处理器类型 / 实例 / 委托三种重载），fan-out，每个订阅者收到每条事件，
     适合日志、安全、遥测等旁路观察。返回 `IDisposable` 退订令牌。
-  - **消费（pull）**：`CreateConsumer` → `await foreach`，拉取有序事件流，适合 CLI UI 渲染（按序 + 背压）。
+  - **消费（pull）**：`CreateConsumer` → `await foreach`，通过无界通道拉取有序事件流。
+    当前无容量限制或背压，消费慢于发布时会累积内存；消费者应及时读取并在结束后释放。
 - **多态派发**：事件沿继承链向上投递——订阅 / 消费基类（如 `AgentLoopEvent`）收到其全部具体子类事件；
   同一处理器注册在具体类型与基类两层时会收到两次事件，应只订阅最需要的层级。
 - **异常隔离**：单个订阅者抛异常不中断其它订阅者；`EventBusOptions.OnHandlerError` 配置错误接收器后
@@ -29,7 +30,7 @@ ReAct 只**发布**事件、不渲染；CLI 从总线**消费**并流式渲染�
 | `Common/Events/Event.cs` / `Common/Events/IEvent.cs` | 事件基类（Id / CreatedAt / CorrelationId）与标记接口 |
 | `Common/Events/IEventHandler.cs` | push 订阅者契约（`HandleAsync`） |
 | `Common/Events/IEventConsumer.cs` | pull 消费者契约（`ConsumeAsync` / `TryRead`，Dispose 退订） |
-| `Common/Events/EventBusOptions.cs` | 异常隔离（`OnHandlerError`）与容量配置 |
+| `Common/Events/EventBusOptions.cs` | 异常处理回调（`OnHandlerError`） |
 | `Common/Events/EventBusServiceCollectionExtensions.cs` | DI 注册扩展 |
 
 ## 关键符号

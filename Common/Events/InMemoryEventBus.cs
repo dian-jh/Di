@@ -43,7 +43,7 @@ public sealed class InMemoryEventBus : IEventBus
             consumers = Collect(_consumers, typeof(TEvent)).ToArray();
         }
 
-        // pull 模式：入队给消费者（无阻塞，带背压的通道）
+        // pull 模式：写入消费者的无界通道，不阻塞发布者。
         foreach (var consumer in consumers)
             consumer.TryWrite(@event);
 

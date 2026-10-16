@@ -20,6 +20,10 @@
 任何语言的 CLI 都只做三件事：**解析参数 → 决定模式 → 用同一个会话 API 跑并渲染**。
 参数与模式的解析是纯函数（无 I/O），因此规则可以（也应该）在另一种语言里原样复刻。
 
+当前实现中，`Di.Cli/Repl.cs`、`Di.Cli/modes/PrintMode.cs` 与 `Di.Cli/modes/RpcMode.cs`
+仍各自管理回合的 skill 激活、事件消费与排空、取消及会话落盘；“薄壳”描述的是分层目标，
+这些宿主生命周期尚未抽成共享服务。
+
 ---
 
 ## 2. harness 侧稳定契约（换语言时"调用"它）
@@ -159,7 +163,7 @@ JSON 模式 `stop_reason` 字段本身即 `maxiterations`，脚本据此判断�
 **软停止兜底**：`StopReason == Interrupted` 时（`EventRenderer.RenderResult`）打印一行"已中断：未开始的工作不再执行"
 （模型已流出的文本不重复回显）；JSON 模式 `stop_reason` 即 `interrupted`，**退出码 0**（软停止是正常收敛，
 非失败）。见 `docs/interrupt.md`。
-与 REPL 同一共享计算（`Core/Skills/SkillActivation`，见 `docs/modules/skills.md`）做 skill 自动匹配：
+与 REPL 同一共享计算（`Core/Skills/SkillActivation.cs` 的 `SkillActivation.Compute`，见 `docs/modules/skills.md`）做 skill 自动匹配：
 提示词命中 skill 描述时完整指令注入系统上下文，未命中的只广告（headless 输出不额外打印激活信息，
 保持脚本友好）。
 
@@ -219,8 +223,8 @@ stdout 只输出**一个** JSON 文档（snake_case，可空键省略）：
 | 命令注册表 | `Di.Cli/Commands/`（`SlashCommand` / `SlashCommandRegistry` / `CommandContext` / `CommandResult`） | 对齐 Pi 的 `SlashCommands` 服务：`name/description/argumentHint/handler` 注册、按名解析、重名抛异常；REPL 与 `--mode rpc` 前端共用同一份（挂在 `CliHost.Commands`） |
 | 内置命令 | `Di.Cli/Commands/BuiltinCommands.cs` | `/help` `/clear` `/model` `/skills` `/skill` `/skill <名> <参数>` `/exit`（模式无关，只经 `CommandContext` 访问能力） |
 | 用户命令（`~/.di/commands/*.md`） | `Di.Cli/Commands/CommandMarkdown.cs` + `CommandLoader.cs` | 扁平文件，命令名 = 文件名；frontmatter `description`（必填）/ `argument-hint`（可选）+ 正文指令模板；运行 = 正文 + 参数跑一个回合；无效/重名告警跳过 |
-| RPC 命令方法 | `Di.Cli/modes/RpcMode.cs`（`HandleCommandAsync`） | `command` 请求：`list` 列注册表、`run` 执行同步命令；回合型命令 → `command_error: turn_not_supported`（协议见 `docs/tui-rpc.md` §2.5/§3） |
-| 回合级 Ctrl+C | `Di.Cli/InterruptCoordinator.cs` + `Di.Cli/Program.cs` | 第一次取消当前回合、第二次退出；headless/空闲直接退出 |
+| RPC 命令方法 | `Di.Cli/modes/RpcMode.cs`（`HandleCommandAsync`） | `command` 请求：`list` 列注册表、`run` 执行同步命令；回合型命令返回 `command_error: turn_not_supported` 并携带 `turn_message`，TUI 随后用 `prompt` 执行（协议见 `docs/tui-rpc.md` §2.5/§3） |
+| 回合级 Ctrl+C | `Di.Cli/InterruptCoordinator.cs` + `Di.Cli/Program.cs` | 回合内首次软停止、再次硬取消；headless/空闲直接退出（见 §3.4） |
 | 纯参数解析（语言无关契约） | `Di.Cli/cli/CliArgs.cs` | `string[] → CliArgs` 纯数据 + 诊断；`--` 截断、未知 / 缺值 / 非法模式报错 |
 | 纯模式解析 | `Di.Cli/cli/CliMode.cs` | `Resolve(args, stdinTty, stdoutTty)`；短路径优先（version/info/help 直接输出不建 DI；list-models 仍建宿主） |
 | 环境 / 生效配置诊断 | `Di.Cli/CliApp.cs`（`InfoAsync`） | `di --info` 打印版本 / 构建时间 / 配置源存在性 / 生效 MaxIterations、模型、provider（含 CLI 覆盖标注）；短路径不建 DI，专治"装的二进制是不是旧的" |
