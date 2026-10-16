@@ -2,9 +2,9 @@
 
 模型选择补充：`ready.models[].id` 使用 `provider/model` 完整路由。`command_ran`
 可包含 `models: [{id,name}]` 目录快照，TUI 在 `/model --refresh` 后更新参数补全。
-`set_model` 和 `/model` 共用名称匹配与本地鉴权检查；回合进行中拒绝模型切换（`busy`），
+`set_model` 和 `/model` 共用名称匹配与本地鉴权检查；回合进行中拒绝模型或 `/thinking` 强度修改（`busy`），
 失败时保留当前模型。`set_model` 校验失败返回 `error.code: invalid_model`。
-`command_ran.effort` 始终返回当前值（默认档位为显式 null），跨 provider 切换后前端清除旧强度显示。
+`command_ran.effort` 始终返回当前值（默认档位为显式 null），`/thinking` 修改后更新显示，跨 provider 切换后前端清除旧强度显示。
 
 > 唯一权威：TS TUI（`tui/`）与 `di --mode rpc`（C# 后端）之间的进程边界协议。
 > 双端实现**必须**与此文档逐字段一致；事件载荷形状以 `Core.AgentLoop.AgentLoopEvent` 为准
@@ -37,7 +37,7 @@
 | 字段 | 类型 | 语义 |
 |---|---|---|
 | `model` | string | 当前生效模型名（`/model` 可切换） |
-| `effort` | string? | 推理强度（off/low/high/max 等；启动时由 `--thinking` / 配置固定，运行期暂不可切）。null 键省略 |
+| `effort` | string? | 推理强度（支持值因模型而异；启动由 `--thinking` / 配置提供，运行期可用 `/thinking` 修改）。ready 中 null 键省略 |
 | `skills` | `[{name,description}]` | 可见 skills（`/skill` 补全与一次性执行） |
 | `models` | `[{id,name}]` | 模型目录（`/model <Tab>` 参数补全） |
 

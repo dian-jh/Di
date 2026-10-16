@@ -18,6 +18,14 @@ const RESULT: AgentResult = {
 };
 
 describe("TurnStateMachine：状态转移", () => {
+  it("显示缓存写入量，避免把写缓存误读成普通未命中输入", () => {
+    const state = new TurnStateMachine();
+    state.startTurn("hi");
+    state.finishTurn({ ...RESULT, usage: { input_tokens: 500, output_tokens: 50,
+      cache_read_tokens: 1000, cache_write_tokens: 1500, total_tokens: 3050 } });
+    assert.match(state.statusText, /cache_write=1500/);
+    assert.match(state.statusText, /total=3050/);
+  });
   it("idle → running → (cancelling) → idle", () => {
     const s = new TurnStateMachine();
     assert.equal(s.state, "idle");

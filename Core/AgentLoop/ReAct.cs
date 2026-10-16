@@ -100,6 +100,7 @@ public sealed class ReAct
             {
                 var modelRequest = new ModelRequest
                 {
+                    SessionId = request.SessionId,
                     Messages = BuildContext(request, trajectory),
                     Tools = request.Tools,
                     ReasoningEffort = _options.ReasoningEffort,

@@ -4,8 +4,33 @@ using Core.Llm;
 namespace Di.Cli;
 
 /// <summary>Shared by /model, RPC and the model factory: resolve first, check local auth, then commit.</summary>
-public sealed class ModelSelection(ILlmService llm, IAgentRunner runner, string defaultProvider = "deepseek", Action? onProviderChanged = null)
+public sealed class ModelSelection(ILlmService llm, IAgentRunner runner, string defaultProvider = "deepseek",
+    string? reasoningEffort = null, Action<string?>? onReasoningChanged = null)
 {
+    public string? ReasoningEffort { get; private set; } = reasoningEffort;
+    public Task<LlmResolvedModelInfo> ResolveCurrentAsync(CancellationToken ct = default)
+        => llm.ResolveModelAsync(Current.Provider, Current.Id, ct);
+
+    public async Task SetReasoningAsync(string value, CancellationToken ct = default)
+    {
+        var effort = value.Trim().ToLowerInvariant();
+        if (effort == "default") { ChangeReasoning(null); return; }
+        var model = await ResolveCurrentAsync(ct);
+        if (model.Reasoning is { } reasoning)
+        {
+            if (reasoning.Efforts.All(e => e.Id != effort))
+                throw new ArgumentException("支持的推理强度: " + string.Join(", ", reasoning.Efforts.Select(e => e.Id)));
+        }
+        else if (Current.Provider != "chatgpt" || effort is not ("none" or "minimal" or "low" or "medium" or "high" or "xhigh" or "max"))
+            throw new ArgumentException("无法确认此模型支持该推理强度。ChatGPT 使用 none/minimal/low/medium/high/xhigh/max 的模型相关子集。");
+        ChangeReasoning(effort);
+    }
+
+    private void ChangeReasoning(string? effort)
+    {
+        ReasoningEffort = effort;
+        onReasoningChanged?.Invoke(effort);
+    }
     public ModelReference Current => ModelReference.Parse(runner.CurrentModel, defaultProvider, ProviderIds());
     public IReadOnlyList<LlmModelInfo> List() => llm.ListModels();
 
@@ -50,9 +75,15 @@ public sealed class ModelSelection(ILlmService llm, IAgentRunner runner, string 
         if (!await llm.CheckAuthAsync(selected.Provider, ct))
             throw new LlmException($"{selected.Provider} 尚未配置凭据，请先登录或配置 API Key。", LlmErrorCodes.MissingCredential);
         var providerChanged = Current.Provider != selected.Provider;
+        var incompatibleEffort = false;
+        if (!providerChanged && ReasoningEffort is { } effort)
+        {
+            var model = await llm.ResolveModelAsync(selected.Provider, selected.Id, ct);
+            incompatibleEffort = model.Reasoning is { } r && r.Efforts.All(e => e.Id != effort);
+        }
         // Keep default-provider labels short while qualified references carry cross-provider routing.
         runner.CurrentModel = selected.Provider == defaultProvider ? selected.Id : selected.QualifiedId;
-        if (providerChanged) onProviderChanged?.Invoke();
+        if (providerChanged || incompatibleEffort) ChangeReasoning(null);
         return selected;
     }
 

@@ -40,6 +40,9 @@ public static class CliInfo
           /model                            查看当前模型和目录
           /model chatgpt/<slug>              会话内跨 provider 切换
           /model --refresh                   刷新已配置 provider 的模型目录
+          /thinking high                     会话内切换推理强度（/thinking 查看当前及支持档位）
+          /thinking default                  恢复模型默认强度
+          /usage                             查看 ChatGPT 官方订阅额度入口
 
         选项：
           -m, --model <名>      指定模型（覆盖配置 Model:DefaultModel）

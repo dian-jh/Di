@@ -49,8 +49,47 @@ REPL、TUI 命令和 RPC set_model 共用 ModelSelection：
 
 交互启动会刷新已配置 provider 的目录，刷新失败仅报告并保留已有快照。
 /model --refresh 返回新目录给 TUI，参数补全使用 provider/model 并支持名称搜索。
-ChatGPT 目录从 /v1/models 取 visibility:list 项，保留服务端顺序，不猜测订阅可用模型、
-上下文窗口或价格。
+ChatGPT 目录从 /v1/models 取 visibility:list 项，保留服务端顺序，不猜测订阅可用模型或价格。
+已知的 gpt-6.1-sol 元数据来自官方文档：上下文窗口 1,050,000 tokens，默认推理强度 medium。
+静态元数据只补充能力描述，不将模型加入账户可用目录。
+
+## 推理强度与额度
+
+```text
+/thinking
+/thinking high
+/thinking default
+/usage
+```
+
+`/thinking` 显示当前档位和已知支持值；gpt-6.1-sol 支持 low、medium、high、xhigh、max。
+`default` 移除显式覆盖，使用模型默认值。启动时也可传 `--thinking high`。
+`Di.Cli/ModelSelection.cs` 的 SetReasoningAsync 依据模型元数据校验，成功后同步实际循环选项；
+无元数据的 ChatGPT 模型仅做候选值检查，最终由服务端校验。跨提供商切换或目标模型不支持
+当前档位时恢复默认值。RPC 在回合进行中拒绝修改模型或强度。
+
+`/usage` 提供官方 [ChatGPT Usage](https://chatgpt.com/settings/usage) 入口。
+公开 SIWC 文档没有五小时/每周剩余额度查询 API，因此不在本地推算剩余百分比。
+本地 token 统计不能代表订阅剩余额度，具体窗口以账户 Usage 页面为准。
+
+## 缓存计量与回放
+
+gpt-6.1-sol 的缓存读取与写入分别计量。`Core/Providers/ChatGpt/ChatGptAdapter.cs`
+从 input_tokens_details 读取 cached_tokens 与 cache_write_tokens；普通输入量扣除二者，
+`Core/Llm/TokenUsage.cs` 合计输入时再加回，避免重复计数。CLI/TUI 在有写入时显示 cache_write。
+
+首轮、切换模型后首次请求为 cache_read=0 可以正常发生。GPT-5.6 及后续模型要求至少
+1024 个可复用的可见前缀 tokens；输入总数 1810 并不说明有这么长的相同前缀。
+模型、推理强度、工具定义或前缀变化均可能导致缓存未命中，简单问候的 reasoning=0
+也不能单独说明推理配置失效。旧日志没有缓存写入字段，不能据此还原服务端未命中的原因。
+
+`Core/AgentLoop/AgentRunner.cs` 创建运行器级 SessionId，经 AgentRequest、ReAct、
+ModelRequest 和 `Core/Llm/ChatModelClient.cs` 传给翻译器，作为哈希化 prompt_cache_key。
+对 GPT-5.6 及后续模型它是可选的会话隔离标识，不保证缓存命中。
+`Core/Providers/ChatGpt/ChatGptTranslator.cs` 原样回放终态 response.output 中的条目，
+保留消息边界、工具调用与 reasoning；显示用的归一化块不再重复发送。
+旧历史没有原始 output 时沿用兼容回放。store:false 不等于禁用提示缓存。
+不添加填充、预热或显式缓存写入请求；修改推理强度仍可能导致前缀变化。
 
 ## Responses
 
@@ -69,7 +108,10 @@ max token 或 stop 选项会在请求前报 UNSUPPORTED_OPTION。
 - [官方刷新与撤销](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)
 - [官方模型与 Responses](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
 - [官方通道限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
+- [gpt-6.1-sol 能力](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+- [提示缓存计量与匹配规则](https://developers.openai.com/api/docs/guides/prompt-caching)
 
 本地测试使用模拟服务与 loopback 回调，覆盖 OAuth 契约、刷新串行化、失败保留凭据、
-跨 provider 路由、切换失败、busy 拒绝、动态预算和 TUI 目录解码。
+跨 provider 路由、切换失败、busy 拒绝、动态预算、强度修改、缓存读写计量、原始 output 回放、
+会话标识传递和 TUI 目录解码。测试不发送真实推理请求。
 真实账户访问权限仍需完成浏览器登录后验证。

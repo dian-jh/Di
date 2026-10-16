@@ -221,7 +221,7 @@ stdout 只输出**一个** JSON 文档（snake_case，可空键省略）：
 | 流式渲染 | `Di.Cli/EventRenderer.cs` | 逐字输出；工具调用 / 思考轮 / 用量+成本脚注；ANSI 状态行（重定向自动禁用）；MaxIterations 预算耗尽时补打印模型最后输出 |
 | 斜杠命令分发 | `Di.Cli/Repl.cs`（`RunCommandAsync`） | 走 `SlashCommandRegistry` 分发（内置 + 用户命令）；回合型命令返回 `CommandResult.Turn` 由 REPL 回合机制执行；`/help` 由注册表推导 |
 | 命令注册表 | `Di.Cli/Commands/`（`SlashCommand` / `SlashCommandRegistry` / `CommandContext` / `CommandResult`） | 对齐 Pi 的 `SlashCommands` 服务：`name/description/argumentHint/handler` 注册、按名解析、重名抛异常；REPL 与 `--mode rpc` 前端共用同一份（挂在 `CliHost.Commands`） |
-| 内置命令 | `Di.Cli/Commands/BuiltinCommands.cs` | `/help` `/clear` `/model` `/skills` `/skill` `/skill <名> <参数>` `/exit`（模式无关，只经 `CommandContext` 访问能力） |
+| 内置命令 | `Di.Cli/Commands/BuiltinCommands.cs` | `/help` `/clear` `/model` `/thinking [强度或default]` `/usage` `/skills` `/skill` `/skill <名> <参数>` `/exit`（模式无关，只经 `CommandContext` 访问能力） |
 | 用户命令（`~/.di/commands/*.md`） | `Di.Cli/Commands/CommandMarkdown.cs` + `CommandLoader.cs` | 扁平文件，命令名 = 文件名；frontmatter `description`（必填）/ `argument-hint`（可选）+ 正文指令模板；运行 = 正文 + 参数跑一个回合；无效/重名告警跳过 |
 | RPC 命令方法 | `Di.Cli/modes/RpcMode.cs`（`HandleCommandAsync`） | `command` 请求：`list` 列注册表、`run` 执行同步命令；回合型命令返回 `command_error: turn_not_supported` 并携带 `turn_message`，TUI 随后用 `prompt` 执行（协议见 `docs/tui-rpc.md` §2.5/§3） |
 | 回合级 Ctrl+C | `Di.Cli/InterruptCoordinator.cs` + `Di.Cli/Program.cs` | 回合内首次软停止、再次硬取消；headless/空闲直接退出（见 §3.4） |

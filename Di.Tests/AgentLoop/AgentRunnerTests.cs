@@ -15,6 +15,19 @@ namespace Di.Tests;
 public sealed class AgentRunnerTests
 {
     [Fact]
+    public async Task SessionAffinity_IsStableAcrossTurnsAndIsolatedAcrossRunners()
+    {
+        var first = new FakeChatModel();
+        var runner = new AgentRunner(_ => first, new FakeToolExecutor(), new AgentLoopOptions(), new InMemoryEventBus());
+        await runner.RunAsync("one");
+        await runner.RunAsync("two");
+        Assert.False(string.IsNullOrEmpty(first.Requests[0].SessionId));
+        Assert.Equal(first.Requests[0].SessionId, first.Requests[1].SessionId);
+        var second = new FakeChatModel();
+        await new AgentRunner(_ => second, new FakeToolExecutor(), new AgentLoopOptions(), new InMemoryEventBus()).RunAsync("other");
+        Assert.NotEqual(first.Requests[0].SessionId, second.Requests[0].SessionId);
+    }
+    [Fact]
     public async Task UnchangedBudget_StillPreservesMostRecentTurn()
     {
         var model = new FakeChatModel();

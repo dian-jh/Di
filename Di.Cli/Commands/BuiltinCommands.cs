@@ -63,6 +63,29 @@ public static class BuiltinCommands
             return CommandResult.Handled;
         }),
 
+        new("thinking", "查看或切换推理强度", "[强度 | default]", async (args, ctx) =>
+        {
+            if (ctx.Models is null) { ctx.Output.WriteLine("宿主未提供模型选择器。"); return CommandResult.Handled; }
+            try
+            {
+                if (args.Length > 0) await ctx.Models.SetReasoningAsync(args, ctx.CancellationToken);
+                var model = await ctx.Models.ResolveCurrentAsync(ctx.CancellationToken);
+                ctx.Output.WriteLine($"推理强度: {ctx.Models.ReasoningEffort ?? (model.Reasoning?.DefaultEffort is { } d ? $"default ({d})" : "default")}");
+                ctx.Output.WriteLine(model.Reasoning is { } r ? "支持档位: " + string.Join(", ", r.Efforts.Select(e => e.Id)) :
+                    "目录未提供模型专属档位，实际支持情况由模型校验。");
+            }
+            catch (Exception ex) when (ex is ArgumentException or Core.Llm.LlmException) { ctx.Output.WriteLine(ex.Message); }
+            return CommandResult.Handled;
+        }),
+
+        new("usage", "查看 ChatGPT 订阅额度入口", null, (_, ctx) =>
+        {
+            ctx.Output.WriteLine("ChatGPT 官方额度: https://chatgpt.com/settings/usage");
+            ctx.Output.WriteLine("此官方 OAuth 接口未公开五小时/每周剩余额度查询，无法在本地准确显示；请以账户 Usage 页面为准。");
+            ctx.Output.WriteLine("本地 tokens/cache_read/cache_write 是请求计量，不代表订阅剩余额度。");
+            return Task.FromResult(CommandResult.Handled);
+        }),
+
         new("skills", "列出可用 skill（固定激活的以 * 标记）", null, (_, ctx) =>
         {
             ListSkills(ctx);

@@ -26,6 +26,7 @@ public interface IChatModel
 /// <summary>一次请求（不含 provider/model，它们在模型实例上绑定）。</summary>
 public sealed record ModelRequest
 {
+    public string? SessionId { get; init; }
     public required IReadOnlyList<ChatMessage> Messages { get; init; }
 
     public IReadOnlyList<ChatTool>? Tools { get; init; }

@@ -16,6 +16,7 @@
 | Core.ContextManagement | `context-management.md` | `Core/ContextManagement/` | `Di.Tests/ContextManagement/` | 上下文压缩：BudgetPolicy 预算/水位线 + L1 工具结果预算控制（大输出落盘 + 摘要） |
 | Core.Llm | `llm.md` | `Core/Llm/` | `Di.Tests/Llm/` | 模型层抽象：路由 / 流式协议 / 重试 / 计量 / 成本 / 目录 / 认证 |
 | Core.Providers.DeepSeek | `deepseek.md` | `Core/Providers/DeepSeek/` | `Di.Tests/Providers/` | DeepSeek 适配器：厂商怪癖唯一居所 |
+| Core.Providers.ChatGpt | `chatgpt.md` | `Core/Providers/ChatGpt/` | `Di.Tests/Providers/` | 官方 OAuth、Responses、缓存计量与模型切换 |
 | Core.Tools | `tools.md` | `Core/Tools/` | `Di.Tests/Tools/` | 8 个内置编码工具 + 注册表 + 执行器 |
 | Core.Skills | `skills.md` | `Core/Skills/` | `Di.Tests/Skills/` | SKILL.md 解析 / 发现合并 / 词法匹配 / 渐进式披露 / 评估 |
 | Core.Sessions | `sessions.md` | `Core/Sessions/` | `Di.Tests/Sessions/` | 会话 JSONL 落盘（对齐 codex 格式） |

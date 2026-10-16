@@ -42,7 +42,7 @@ public sealed class CliHost : IDisposable
     /// <summary>
     /// 当前推理强度；启动时取 --thinking / 配置，跨 provider 切换后恢复目标提供方默认值。
     /// </summary>
-    public string? ReasoningEffort { get; private set; }
+    public string? ReasoningEffort => Models.ReasoningEffort;
 
     /// <summary>会话持久化（headless 单发也写日志；--no-session 时跳过）。</summary>
     public SessionLog? SessionLog { get; }
@@ -55,19 +55,14 @@ public sealed class CliHost : IDisposable
 
     public CliHost(IAgentRunner runner, IEventBus bus, ILlmService llm, IReadOnlyList<Skill> skills,
         ReplOptions replOptions, SessionLog? sessionLog = null, IDisposable? disposer = null,
-        SlashCommandRegistry? commands = null, string? reasoningEffort = null, string defaultProvider = "deepseek", Action? resetReasoning = null)
+        SlashCommandRegistry? commands = null, string? reasoningEffort = null, string defaultProvider = "deepseek", Action<string?>? setReasoning = null)
     {
         Runner = runner ?? throw new ArgumentNullException(nameof(runner));
         Bus = bus ?? throw new ArgumentNullException(nameof(bus));
         Llm = llm ?? throw new ArgumentNullException(nameof(llm));
-        Models = new ModelSelection(llm, runner, defaultProvider, onProviderChanged: () =>
-        {
-            ReasoningEffort = null;
-            resetReasoning?.Invoke();
-        });
+        Models = new ModelSelection(llm, runner, defaultProvider, reasoningEffort, setReasoning);
         Skills = skills ?? throw new ArgumentNullException(nameof(skills));
         ReplOptions = replOptions ?? throw new ArgumentNullException(nameof(replOptions));
-        ReasoningEffort = reasoningEffort;
         SessionLog = sessionLog;
         _disposer = disposer;
         Commands = commands ?? BuiltinCommands.CreateRegistry();
@@ -235,7 +230,7 @@ public sealed class CliHost : IDisposable
             commands: commands,
             reasoningEffort: loopOptions.ReasoningEffort,
             defaultProvider: effectiveProvider,
-            resetReasoning: () => loopOptions.ReasoningEffort = null);
+            setReasoning: effort => loopOptions.ReasoningEffort = effort);
     }
 
     /// <summary>

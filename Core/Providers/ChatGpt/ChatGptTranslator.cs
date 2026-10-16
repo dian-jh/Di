@@ -1,4 +1,6 @@
 using System.Text.Json.Nodes;
+using System.Security.Cryptography;
+using System.Text;
 using Core.Llm;
 
 namespace Core.Providers.ChatGpt;
@@ -33,6 +35,12 @@ internal static class ChatGptTranslator
                     input.Add(new JsonObject { ["role"] = "user", ["content"] = content });
                     break;
                 case AssistantMessage assistant:
+                    var original = assistant.Content.OfType<OpaqueBlock>().FirstOrDefault(b => b.UnknownType == "chatgpt.output");
+                    if (original is not null)
+                    {
+                        foreach (var item in JsonNode.Parse(original.RawJson)!.AsArray()) input.Add(item!.DeepClone());
+                        break;
+                    }
                     // Encrypted reasoning must precede calls when replaying stateless responses.
                     foreach (var opaque in assistant.Content.OfType<OpaqueBlock>())
                     {
@@ -68,6 +76,8 @@ internal static class ChatGptTranslator
             ["model"] = options.Model, ["input"] = input, ["store"] = false, ["stream"] = true,
             ["include"] = new JsonArray("reasoning.encrypted_content")
         };
+        if (!string.IsNullOrWhiteSpace(options.SessionId))
+            request["prompt_cache_key"] = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(options.SessionId)));
         if (options.ReasoningEffort is { } effort)
             request["reasoning"] = new JsonObject { ["effort"] = effort, ["summary"] = "auto" };
         if (options.Tools is { Count: > 0 } tools)

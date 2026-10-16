@@ -5,6 +5,7 @@ namespace Core.AgentLoop;
 /// <summary>一次 loop 运行的全部输入（模型与配置在构造时注入，不随请求走）。</summary>
 public sealed class AgentRequest
 {
+    public string? SessionId { get; init; }
     /// <summary>用户的请求消息，作为 trajectory 的起点。</summary>
     public required string UserMessage { get; init; }
 

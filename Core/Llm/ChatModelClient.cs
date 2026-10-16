@@ -34,6 +34,7 @@ public sealed class ChatModelClient : IChatModel
     {
         var options = new GenerateOptions
         {
+            SessionId = request.SessionId,
             Provider = _provider,
             Model = _model,
             Messages = request.Messages,

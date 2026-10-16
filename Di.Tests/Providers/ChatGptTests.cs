@@ -12,6 +12,57 @@ namespace Di.Tests.Providers;
 public sealed class ChatGptTests
 {
     [Fact]
+    public async Task Sol61_UsesOfficialReasoningLevelsAndContextWindow()
+    {
+        using var f = new OAuthFixture();
+        var model = await new ChatGptAdapter(f.Http, f.Auth).ResolveModelAsync("chatgpt", "gpt-6.1-sol");
+        Assert.Equal(1_050_000, model.Context?.ContextWindow);
+        Assert.NotNull(model.Reasoning);
+        Assert.Equal("medium", model.Reasoning.DefaultEffort);
+        Assert.Equal(new[] { "low", "medium", "high", "xhigh", "max" }, model.Reasoning.Efforts.Select(e => e.Id));
+    }
+    [Fact]
+    public async Task CacheWrites_AreSeparateFromOrdinaryInputAndVisibleInUsage()
+    {
+        using var f = new OAuthFixture();
+        using var http = new HttpClient(new Handler(_ => Task.FromResult(Sse("""{"type":"response.completed","response":{"usage":{"input_tokens":3000,"output_tokens":50,"total_tokens":3050,"input_tokens_details":{"cached_tokens":1000,"cache_write_tokens":1500}}}}"""))));
+        var chunks = await Collect(new ChatGptAdapter(http, f.Auth).StreamAsync(Options(), default));
+        var usage = Assert.Single(chunks.OfType<StreamChunk.Usage>()).Tokens;
+        Assert.Equal(500, usage.InputTokens);
+        Assert.Equal(1500, usage.CacheWriteTokens);
+        Assert.Equal(3000, usage.BillableInputTokens);
+        Assert.Contains("cache_write=1500", usage.ToString());
+    }
+
+    [Fact]
+    public async Task Replay_PreservesOriginalOutputItemsAndMessageBoundaries()
+    {
+        using var f = new OAuthFixture();
+        var output = JsonNode.Parse("""[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"first","annotations":[]}]},{"type":"message","id":"msg_2","role":"assistant","status":"completed","content":[{"type":"output_text","text":"second","annotations":[]}]}]""")!;
+        using var http = new HttpClient(new Handler(_ => Task.FromResult(Sse(
+            """{"type":"response.output_text.delta","output_index":0,"delta":"first"}""",
+            """{"type":"response.output_text.delta","output_index":1,"delta":"second"}""",
+            new JsonObject { ["type"] = "response.completed", ["response"] = new JsonObject { ["output"] = output.DeepClone() } }.ToJsonString()))));
+        var assembler = new ChatAssembler();
+        foreach (var chunk in await Collect(new ChatGptAdapter(http, f.Auth).StreamAsync(Options(), default))) assembler.Add(chunk);
+        var replay = ChatGptTranslator.Request(Options() with { Messages = [assembler.Build(), ChatMessage.User("next")] });
+        Assert.True(JsonNode.DeepEquals(output[0], replay["input"]![0]));
+        Assert.True(JsonNode.DeepEquals(output[1], replay["input"]![1]));
+        Assert.Equal(3, replay["input"]!.AsArray().Count);
+    }
+
+    [Fact]
+    public void CacheAffinity_UsesStableOpaqueSessionKey()
+    {
+        var first = ChatGptTranslator.Request(Options() with { SessionId = "a-session" });
+        var second = ChatGptTranslator.Request(Options() with { SessionId = "a-session", Messages = [ChatMessage.User("next")] });
+        var other = ChatGptTranslator.Request(Options() with { SessionId = "other-session" });
+        Assert.NotNull(first["prompt_cache_key"]);
+        Assert.Equal(first["prompt_cache_key"]!.GetValue<string>(), second["prompt_cache_key"]!.GetValue<string>());
+        Assert.NotEqual(first["prompt_cache_key"]!.GetValue<string>(), other["prompt_cache_key"]!.GetValue<string>());
+        Assert.DoesNotContain("prompt_cache_retention", first.ToJsonString());
+    }
+    [Fact]
     public async Task ConsumedCode_RetriesWithIssuedClient()
     {
         using var f = new OAuthFixture { CodeFailuresRemaining = 1 };

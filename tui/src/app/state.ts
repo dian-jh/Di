@@ -50,7 +50,11 @@ const STATUS_RANK: Record<ToolStatus, number> = { pending: 0, running: 1, comple
  */
 function formatTokenUsage(usage: TokenUsage): string {
   const known = (value: number | undefined) => value === undefined ? "N/A" : String(value);
-  return `in=${usage.input_tokens} (cache_read=${known(usage.cache_read_tokens)}) out=${usage.output_tokens} (reasoning=${known(usage.reasoning_tokens)}) total=${known(usage.total_tokens)}`;
+  const cacheRead = known(usage.cache_read_tokens);
+  const billable = usage.input_tokens + cacheRead + (usage.cache_write_tokens ?? 0);
+  const total = usage.total_tokens === undefined ? String(billable + usage.output_tokens) : String(usage.total_tokens);
+  const writes = (usage.cache_write_tokens ?? 0) > 0 ? ` cache_write=${usage.cache_write_tokens}` : "";
+  return `in=${usage.input_tokens} (cache_read=${cacheRead}${writes}) out=${usage.output_tokens} (reasoning=${known(usage.reasoning_tokens)}) total=${total}`;
 }
 
 export class TurnStateMachine {

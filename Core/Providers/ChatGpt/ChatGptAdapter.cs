@@ -13,6 +13,18 @@ public sealed class ChatGptAdapter(HttpClient http, ChatGptAuth auth) : ChatAdap
     public override IReadOnlyList<string> ProviderIds => ["chatgpt"];
     public override LlmProviderInfo ProviderInfo(string provider) => new("chatgpt", "ChatGPT");
     public override LlmAuthDefinition Auth => new LlmAuthDefinition.OAuth("Continue with ChatGPT");
+    // Official model metadata, separate from the account-specific entitlement list.
+    public override IReadOnlyList<ModelSpec> Catalog { get; } =
+    [
+        new("gpt-6.1-sol", "GPT-6.1 Sol", ContextWindow: 1_050_000,
+            ReasoningEfforts: [new("low", "低"), new("medium", "中"), new("high", "高"), new("xhigh", "更高"), new("max", "最大")])
+    ];
+    public override async Task<LlmResolvedModelInfo> ResolveModelAsync(string provider, string model, CancellationToken cancellationToken = default)
+    {
+        var resolved = await base.ResolveModelAsync(provider, model, cancellationToken);
+        return model == "gpt-6.1-sol" && resolved.Reasoning is { } r
+            ? resolved with { Reasoning = r with { DefaultEffort = "medium" } } : resolved;
+    }
     private IReadOnlyList<LlmModelInfo> _models = [];
     public override Task<bool> CheckAuthAsync(string provider, ILlmCredentialStore store, CancellationToken cancellationToken = default)
         => auth.CheckAsync(cancellationToken);
@@ -54,6 +66,7 @@ public sealed class ChatGptAdapter(HttpClient http, ChatGptAuth auth) : ChatAdap
         var blocks = new Dictionary<string, int>();
         var calls = new Dictionary<int, (string Id, string Name)>();
         var toolCalls = false;
+        var reasoningItems = new List<(int Index, string Json)>();
         var finished = false;
         using var idle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         while (true)
@@ -113,18 +126,25 @@ public sealed class ChatGptAdapter(HttpClient http, ChatGptAuth auth) : ChatAdap
                     yield return new StreamChunk.ToolCallDelta(Index($"call:{outputIndex}"), call.Id, call.Name, evt["delta"]!.GetValue<string>());
                     break;
                 case "response.output_item.done" when (evt["item"]?["type"]?.GetValue<string>() == "reasoning"):
-                    yield return new StreamChunk.BlockEnd(Index($"reasoning:{outputIndex}"), new OpaqueBlock("chatgpt.reasoning", evt["item"]!.ToJsonString()));
+                    reasoningItems.Add((Index($"reasoning:{outputIndex}"), evt["item"]!.ToJsonString()));
                     break;
                 case "response.completed":
                 case "response.failed":
                 case "response.incomplete":
                     var result = evt["response"]!.AsObject();
+                    if (result["output"] is JsonArray originalOutput)
+                        yield return new StreamChunk.BlockEnd(Index("original-output"), new OpaqueBlock("chatgpt.output", originalOutput.ToJsonString()));
+                    else
+                        foreach (var reasoning in reasoningItems)
+                            yield return new StreamChunk.BlockEnd(reasoning.Index, new OpaqueBlock("chatgpt.reasoning", reasoning.Json));
                     if (result["usage"] is JsonObject usage)
                     {
                         var cached = usage["input_tokens_details"]?["cached_tokens"]?.GetValue<int>() ?? 0;
+                        var written = usage["input_tokens_details"]?["cache_write_tokens"]?.GetValue<int>();
                         yield return new StreamChunk.Usage(new TokenUsage(
-                            (usage["input_tokens"]?.GetValue<int>() ?? 0) - cached,
+                            Math.Max(0, (usage["input_tokens"]?.GetValue<int>() ?? 0) - cached - (written ?? 0)),
                             usage["output_tokens"]?.GetValue<int>() ?? 0, usage["total_tokens"]?.GetValue<int>(), cached,
+                            CacheWriteTokens: written,
                             ReasoningTokens: usage["output_tokens_details"]?["reasoning_tokens"]?.GetValue<int>()));
                     }
                     FinishReason finish = type switch

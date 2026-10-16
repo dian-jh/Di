@@ -15,6 +15,7 @@ namespace Core.AgentLoop;
 /// </summary>
 public sealed class AgentRunner : IAgentRunner
 {
+    private readonly string _sessionId = Guid.NewGuid().ToString("N");
     private readonly Func<string, IChatModel> _modelFactory;
     private readonly AgentLoopOptions _options;
     private readonly IEventBus _eventBus;
@@ -142,6 +143,7 @@ public sealed class AgentRunner : IAgentRunner
 
         var result = await react.RunStreamingAsync(new AgentRequest
         {
+            SessionId = _sessionId,
             UserMessage = userMessage,
             History = _history,   // 上一回合的完整轨迹 → 模型"记得"之前的对话
             Tools = _tools,

@@ -38,7 +38,7 @@ public sealed class BuiltinCommandsTests
     [Fact]
     public async Task All_Builtins_Registered()
     {
-        Assert.Equal(["clear", "exit", "help", "model", "skill", "skills"],
+        Assert.Equal(["clear", "exit", "help", "model", "skill", "skills", "thinking", "usage"],
             _registry.List().Select(c => c.Name));
     }
 

@@ -160,7 +160,7 @@ public static class RpcMode
 
                     case "command":
                         if (turnTask is { IsCompleted: false } && request.Params?["name"] is { } commandName &&
-                            commandName.GetValueKind() == JsonValueKind.String && commandName.GetValue<string>() == "model")
+                            commandName.GetValueKind() == JsonValueKind.String && commandName.GetValue<string>() is "model" or "thinking")
                         {
                             WriteLine(stdout, writeLock, Serialize(new { type = "command_error", code = "busy", message = "请等待当前回合结束后切换模型。" }));
                             break;

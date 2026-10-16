@@ -12,6 +12,40 @@ namespace Di.Cli.Tests;
 
 public sealed class ModelSelectionTests
 {
+    [Fact]
+    public async Task ThinkingCommand_ChangesRuntimeEffortAndSupportsDefault()
+    {
+        var (llm, runner, _, _) = Setup();
+        var loopOptions = new AgentLoopOptions { ReasoningEffort = "low" };
+        using var host = new CliHost(runner, new InMemoryEventBus(), llm, [], new ReplOptions(), reasoningEffort: "low",
+            setReasoning: effort => loopOptions.ReasoningEffort = effort);
+        await host.Models.SelectAsync("chatgpt/account-model");
+        Assert.True(host.Commands.TryGet("thinking", out var command));
+        using var output = new StringWriter();
+        var ctx = new Di.Cli.Commands.CommandContext(host.Commands, runner, [], output, [], Models: host.Models);
+        await command!.Handler("high", ctx);
+        Assert.Equal("high", host.ReasoningEffort);
+        Assert.Equal("high", loopOptions.ReasoningEffort);
+        await command.Handler("banana", ctx);
+        Assert.Equal("high", host.ReasoningEffort);
+        await command.Handler("default", ctx);
+        Assert.Null(host.ReasoningEffort);
+        Assert.Null(loopOptions.ReasoningEffort);
+    }
+
+    [Fact]
+    public async Task UsageCommand_LinksOfficialUsageWithoutGuessingQuotas()
+    {
+        var (llm, runner, _, chatgpt) = Setup();
+        using var host = new CliHost(runner, new InMemoryEventBus(), llm, [], new ReplOptions());
+        await host.Models.SelectAsync("chatgpt/account-model");
+        Assert.True(host.Commands.TryGet("usage", out var command));
+        using var output = new StringWriter();
+        await command!.Handler("", new(host.Commands, runner, [], output, [], Models: host.Models));
+        Assert.Contains("https://chatgpt.com/settings/usage", output.ToString());
+        Assert.Contains("无法", output.ToString());
+        Assert.Equal(0, chatgpt.Refreshes);
+    }
     private static (LlmRuntime Llm, FakeRunner Runner, ModelSelection Selection, Adapter ChatGpt) Setup()
     {
         var llm = new LlmRuntime();
@@ -67,7 +101,7 @@ public sealed class ModelSelectionTests
         var (llm, runner, _, chatgpt) = Setup();
         var resets = 0;
         using var host = new CliHost(runner, new InMemoryEventBus(), llm, [], new ReplOptions(),
-            reasoningEffort: "max", resetReasoning: () => resets++);
+            reasoningEffort: "max", setReasoning: _ => resets++);
         chatgpt.Configured = false;
         await Assert.ThrowsAsync<LlmException>(() => host.Models.SelectAsync("chatgpt/account-model"));
         Assert.Equal("max", host.ReasoningEffort);
@@ -133,10 +167,11 @@ public sealed class ModelSelectionTests
             {"method":"prompt","params":{"message":"hi"}}
             {"method":"set_model","params":{"model":"chatgpt/account-model"}}
             {"method":"command","params":{"name":"model","args":"chatgpt/account-model"}}
+            {"method":"command","params":{"name":"thinking","args":"high"}}
             {"method":"shutdown"}
             """), output, new StringWriter());
         Assert.Equal("deepseek-flash", runner.CurrentModel);
-        Assert.Equal(2, output.ToString().Split('"').Count(s => s == "busy"));
+        Assert.Equal(3, output.ToString().Split('"').Count(s => s == "busy"));
     }
 
     [Fact]

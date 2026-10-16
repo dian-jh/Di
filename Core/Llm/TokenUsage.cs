@@ -50,5 +50,7 @@ public sealed record TokenUsage(
         a is null ? b : b is null ? a : a + b;
 
     public override string ToString() =>
-        $"in={InputTokens} (cache_read={CacheReadTokens ?? 0}) out={OutputTokens} (reasoning={ReasoningTokens ?? 0}) total={TotalTokens ?? BillableInputTokens + OutputTokens}";
+        $"in={InputTokens} (cache_read={CacheReadTokens ?? 0}" +
+        (CacheWriteTokens is > 0 ? $" cache_write={CacheWriteTokens}" : "") +
+        $") out={OutputTokens} (reasoning={ReasoningTokens ?? 0}) total={TotalTokens ?? BillableInputTokens + OutputTokens}";
 }
