@@ -146,10 +146,7 @@ internal static class ProcessRunner
             catch (Exception) { }
         }
 
-        // 进程级诊断（proc: start / running / timeout / exited，经 ProcessDiagnostics 旁路钩子）：
-        // 记录实际解析到的可执行文件、PID、命令行，以及超时点 CPU 用量与已收到输出——
-        // 用于区分"启动即卡死"（cpu≈0 且无输出，如依赖的环境/解析/一次性扫描问题）与
-        // "在跑但慢"（cpu 持续增长）。定位工具调用神秘超时正是靠这些字段。
+        // 旁路诊断记录实际进程及 CPU 用量，区分启动挂起与正常慢命令。
         var elapsed = Stopwatch.StartNew();
         if (ProcessDiagnostics.Log is not null)
         {
@@ -164,9 +161,10 @@ internal static class ProcessRunner
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(timeout);
+        using var drainCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
         // stdout/stderr 并发排干到同一缓冲（BoundedByteBuffer.Append 线程安全）。
-        var stdoutTask = DrainAsync(process.StandardOutput.BaseStream, output, cts.Token);
-        var stderrTask = DrainAsync(process.StandardError.BaseStream, output, cts.Token);
+        var stdoutTask = DrainAsync(process.StandardOutput.BaseStream, output, drainCts.Token);
+        var stderrTask = DrainAsync(process.StandardError.BaseStream, output, drainCts.Token);
 
         try
         {
@@ -176,31 +174,25 @@ internal static class ProcessRunner
         {
             // 外部取消（用户中断整个回合）：让上层处理，而不是当作工具失败。
             Kill(process);
+            await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
             throw;
         }
         catch (OperationCanceledException)
         {
-            // 超时：按第五章，超时要向 Agent 返回结构化错误而非静默杀死。
-            // 诊断行带超时点 CPU 用量与已收到的部分输出；既无输出又 cpu≈0 → 启动即卡死。
+            // 超时返回错误观察，并保留已收到的输出。
             var partial = Decode(output, outputEncoding);
             if (ProcessDiagnostics.Log is not null)
                 Diagnose($"proc: timeout name={Path.GetFileName(fileName)} pid={process.Id} elapsed_ms={elapsed.ElapsedMilliseconds}" +
                          $" cpu_ms={CpuMilliseconds(process)} partial=<<{TruncateField(partial, 300)}>>");
             Kill(process);
+            await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
             return new ProcessResult(-1, partial, $"执行超过 {timeout.TotalSeconds:0} 秒未完成，已终止");
         }
 
-        // 排干：等两个读取任务收尾；若后台子进程继承了管道，EOF 永不出现 → 有界等（不挂）。
-        using var drainCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        // 后台子进程可能持有管道；独立截止时间必须传入实际读取任务。
         drainCts.CancelAfter(DrainTimeoutMs);
-        try
-        {
-            await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // 排干超时：尾部可能还有后台子进程输出，放弃等待。
-        }
+        await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
 
         // 慢速成功（≥2s）也留一条：正常命令几秒级常见，留证可对照超时点的 cpu 判断是否本来就慢。
         if (ProcessDiagnostics.Log is not null && elapsed.ElapsedMilliseconds >= 2000)
