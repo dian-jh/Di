@@ -24,13 +24,14 @@ public sealed class Repl
     private readonly ISkillMatcher _matcher;
     private readonly InterruptCoordinator? _interrupt;
     private readonly SlashCommandRegistry _registry;
+    private readonly ModelSelection? _models;
 
     /// <summary>固定激活的 skills（/skill 手动设置，跨回合保持）。自动匹配的结果是每回合临时算的，不存这里。</summary>
     private readonly List<Skill> _pinned = [];
 
     public Repl(IAgentRunner runner, IEventBus bus, ILineReader reader, TextWriter output, ReplOptions options,
         SessionLog? sessionLog = null, IReadOnlyList<Skill>? skills = null, ISkillMatcher? matcher = null,
-        InterruptCoordinator? interrupt = null, SlashCommandRegistry? commands = null)
+        InterruptCoordinator? interrupt = null, SlashCommandRegistry? commands = null, ModelSelection? models = null)
     {
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
@@ -43,10 +44,13 @@ public sealed class Repl
         _matcher = matcher ?? new LexicalSkillMatcher();
         _interrupt = interrupt;
         _registry = commands ?? BuiltinCommands.CreateRegistry();
+        _models = models;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
+        if (_models is not null)
+            foreach (var error in await _models.RefreshAsync(cancellationToken)) _output.WriteLine(error);
         // 把软停止信号接到 runner（会话级）：Ctrl+C 第一次请求软停止，ReAct 在相位边界轮询它。
         // 与 CurrentModel / ActiveSkills 同款——由前端持有并注入，harness 只读。
         if (_interrupt is not null)
@@ -217,7 +221,7 @@ public sealed class Repl
         }
 
         var context = new CommandContext(_registry, _runner, _skills, _output, _pinned,
-            UseAnsi: _options.UseAnsi, RunTurn: RunTurnAsync, CancellationToken: cancellationToken);
+            UseAnsi: _options.UseAnsi, RunTurn: RunTurnAsync, CancellationToken: cancellationToken, Models: _models);
 
         var result = await cmd.Handler(args, context);
         if (result.TurnMessage is { Length: > 0 } message)

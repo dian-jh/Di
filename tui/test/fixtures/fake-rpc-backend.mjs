@@ -90,7 +90,8 @@ rl.on("line", (line) => {
           lines: [`模型已切换为 ${params.args ?? ""}`],
           exit: false,
           model: params.args ?? "deepseek-flash",
-          effort: "high",
+          effort: params.args?.startsWith("chatgpt/") ? null : "high",
+          models: [{ id: "chatgpt/account-model", name: "Account model" }],
         });
       } else if (params.name === "skill") {
         // 回合型命令：错误载荷附带 turn_message（TUI 据此改用 prompt 跑回合）。

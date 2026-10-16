@@ -1,5 +1,11 @@
 # Di RPC 协议（`--mode rpc`）：线协议唯一权威
 
+模型选择补充：`ready.models[].id` 使用 `provider/model` 完整路由。`command_ran`
+可包含 `models: [{id,name}]` 目录快照，TUI 在 `/model --refresh` 后更新参数补全。
+`set_model` 和 `/model` 共用名称匹配与本地鉴权检查；回合进行中拒绝模型切换（`busy`），
+失败时保留当前模型。`set_model` 校验失败返回 `error.code: invalid_model`。
+`command_ran.effort` 始终返回当前值（默认档位为显式 null），跨 provider 切换后前端清除旧强度显示。
+
 > 唯一权威：TS TUI（`tui/`）与 `di --mode rpc`（C# 后端）之间的进程边界协议。
 > 双端实现**必须**与此文档逐字段一致；事件载荷形状以 `Core.AgentLoop.AgentLoopEvent` 为准
 > （事件类型表唯一权威：`docs/modules/events.md`）。

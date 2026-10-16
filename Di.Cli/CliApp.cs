@@ -37,6 +37,9 @@ public sealed class CliApp
         ArgumentNullException.ThrowIfNull(stdout);
         ArgumentNullException.ThrowIfNull(stderr);
 
+        if (args.FirstOrDefault() == "auth")
+            return await ChatGptAuthCommand.RunAsync(args, stdout, stderr, cancellationToken);
+
         var (cliArgs, diagnostics) = CliArgsParser.Parse(args);
         if (diagnostics.Any(d => d.IsError))
         {
@@ -72,7 +75,7 @@ public sealed class CliApp
                 {
                     return mode switch
                     {
-                        AppMode.ListModels => await ListModelsAsync(host, cliArgs.ListModels, stdout, cancellationToken),
+                        AppMode.ListModels => await ListModelsAsync(host, cliArgs.ListModels, stdout, stderr, cancellationToken),
                         AppMode.SkillEval => await SkillEvalAsync(host, cliArgs.SkillEval, stdout, stderr, cancellationToken),
                         AppMode.Interactive => await InteractiveAsync(host, stdin, stdout, stderr, stdinTty, stdoutTty,
                             interrupt, cancellationToken, _tuiContext),
@@ -242,15 +245,16 @@ public sealed class CliApp
         }
 
         var repl = new Repl(host.Runner, host.Bus, new StreamLineReader(stdin), stdout,
-            host.ReplOptions, host.SessionLog, host.Skills, interrupt: interrupt, commands: host.Commands);
+            host.ReplOptions, host.SessionLog, host.Skills, interrupt: interrupt, commands: host.Commands, models: host.Models);
         await repl.RunAsync(cancellationToken);
         return 0;
     }
 
     /// <summary>列出模型目录（咨询性、尽力而为）；带 pattern 时按 id/provider 子串过滤。</summary>
-    private static Task<int> ListModelsAsync(CliHost host, string? pattern, TextWriter stdout,
+    private static async Task<int> ListModelsAsync(CliHost host, string? pattern, TextWriter stdout, TextWriter stderr,
         CancellationToken cancellationToken)
     {
+        foreach (var error in await host.Models.RefreshAsync(cancellationToken)) await stderr.WriteLineAsync(error);
         var models = host.Llm.ListModels();
         if (!string.IsNullOrWhiteSpace(pattern))
         {
@@ -263,6 +267,6 @@ public sealed class CliApp
             stdout.WriteLine($"{model.Provider}/{model.Id}  {model.Name}");
         if (models.Count == 0)
             stdout.WriteLine("（无可用模型 —— 检查 provider 配置与网络）");
-        return Task.FromResult(0);
+        return 0;
     }
 }

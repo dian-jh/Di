@@ -400,6 +400,7 @@ function validateCoreMessage(m: Record<string, unknown>, line: string): CoreMess
       return {
         type: "command_ran",
         name: expectString(m["name"], "command_ran.name", line),
+        ...(m["models"] === undefined ? {} : { models: validateModelInfos(m["models"], line) }),
         lines: rawLines as string[],
         exit: expectBool(m["exit"], "command_ran.exit", line),
         ...(m["model"] === undefined ? {} : { model: expectString(m["model"], "command_ran.model", line) }),

@@ -46,6 +46,7 @@ public static class RpcMode
 
         // 主循环与后台回合任务都可能写 stdout：同一把锁串行化，保证线序 = 序号一致、无交错。
         var writeLock = new object();
+        foreach (var error in await host.Models.RefreshAsync(cancellationToken)) await stderr.WriteLineAsync(error);
 
         // 组合根已构建、可服务请求：先握手（仅一次）。携带当前模型 / 强度 / skills / 模型目录快照，
         // TUI 据此渲染右下角状态栏并对齐命令补全（docs/tui-rpc.md §2.1）。
@@ -56,7 +57,7 @@ public static class RpcMode
             model = host.Runner.CurrentModel,
             effort = host.ReasoningEffort,
             skills = host.Skills.Select(s => new { name = s.Name, description = s.Description }),
-            models = host.Llm.ListModels().Select(m => new { id = m.Id, name = m.Name }),
+            models = host.Models.List().Select(m => new { id = $"{m.Provider}/{m.Id}", name = m.Name }),
         }));
 
         // 会话开始写首行 session_meta（尽力而为；--no-session 时跳过）。
@@ -120,13 +121,20 @@ public static class RpcMode
                         break;
 
                     case "set_model":
+                        if (turnTask is { IsCompleted: false })
+                        {
+                            WriteLine(stdout, writeLock, Serialize(new { type = "error", code = "busy", message = "请等待当前回合结束后切换模型。" }));
+                            break;
+                        }
                         if (request.Params is not { } pm || pm["model"] is not { } model
                             || model.GetValueKind() != JsonValueKind.String)
                         {
                             WriteLine(stdout, writeLock, Serialize(new { type = "error", code = "invalid_request", message = "set_model 缺少 model 字符串参数" }));
                             break;
                         }
-                        host.Runner.CurrentModel = model.GetValue<string>();
+                        try { await host.Models.SelectAsync(model.GetValue<string>(), cancellationToken); }
+                        catch (Exception ex) when (ex is ArgumentException or LlmException or IOException)
+                        { WriteLine(stdout, writeLock, Serialize(new { type = "error", code = "invalid_model", message = ex.Message })); }
                         break;
 
                     case "set_skills":
@@ -151,7 +159,13 @@ public static class RpcMode
                         break;
 
                     case "command":
-                        await HandleCommandAsync(host, pinnedSkills, request, stdout, writeLock);
+                        if (turnTask is { IsCompleted: false } && request.Params?["name"] is { } commandName &&
+                            commandName.GetValueKind() == JsonValueKind.String && commandName.GetValue<string>() == "model")
+                        {
+                            WriteLine(stdout, writeLock, Serialize(new { type = "command_error", code = "busy", message = "请等待当前回合结束后切换模型。" }));
+                            break;
+                        }
+                        await HandleCommandAsync(host, pinnedSkills, request, stdout, writeLock, cancellationToken);
                         break;
 
                     case "ping":
@@ -193,7 +207,7 @@ public static class RpcMode
     /// REPL 提供 RunTurn（命令定义本身与前端无关，同一份注册表）。
     /// </summary>
     private static async Task HandleCommandAsync(CliHost host, List<Skill> pinned, RpcRequest request,
-        TextWriter stdout, object writeLock)
+        TextWriter stdout, object writeLock, CancellationToken cancellationToken)
     {
         try
         {
@@ -221,7 +235,8 @@ public static class RpcMode
 
             // 命令输出写进内存缓冲，随应答返回（stdout 是协议流，不允许命令直接写）。
             using var buffer = new StringWriter();
-            var context = new CommandContext(host.Commands, host.Runner, host.Skills, buffer, pinned, UseAnsi: false);
+            var context = new CommandContext(host.Commands, host.Runner, host.Skills, buffer, pinned,
+                UseAnsi: false, CancellationToken: cancellationToken, Models: host.Models);
             var result = await cmd.Handler(args, context);
 
             if (result.TurnMessage is { Length: > 0 })
@@ -246,7 +261,8 @@ public static class RpcMode
                 lines = BufferLines(buffer),
                 exit = result.Exit,
                 model = host.Runner.CurrentModel,
-                effort = host.ReasoningEffort,
+                effort = JsonSerializer.SerializeToElement(host.ReasoningEffort),
+                models = name == "model" ? host.Models.List().Select(m => new { id = $"{m.Provider}/{m.Id}", name = m.Name }).ToArray() : null,
             }));
         }
         catch (Exception ex) when (ex is FormatException)

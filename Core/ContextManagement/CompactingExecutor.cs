@@ -29,18 +29,20 @@ public sealed class CompactingExecutor : IToolExecutor
 
     private readonly IToolExecutor _inner;
     private readonly BudgetPolicy _policy;
+    private readonly Func<BudgetPolicy?>? _policyProvider;
     private readonly IArtifactStore _artifacts;
 
     /// <summary>B_current：执行本工具前的轨迹 token 估算。</summary>
     private readonly Func<int> _currentInputTokens;
 
     public CompactingExecutor(IToolExecutor inner, BudgetPolicy policy, IArtifactStore artifacts,
-        Func<int>? currentInputTokens = null)
+        Func<int>? currentInputTokens = null, Func<BudgetPolicy?>? policyProvider = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _artifacts = artifacts ?? throw new ArgumentNullException(nameof(artifacts));
         _currentInputTokens = currentInputTokens ?? (() => 0);
+        _policyProvider = policyProvider;
     }
 
     /// <summary>
@@ -53,8 +55,10 @@ public sealed class CompactingExecutor : IToolExecutor
         if (!ClearableTools.Contains(call.Name))
             return result;
 
+        var policy = _policyProvider is null ? _policy : _policyProvider();
+        if (policy is null) return result;
         var resultTokens = TokenEstimator.Estimate(result);
-        if (!_policy.PredictsOverSoft(_currentInputTokens(), resultTokens, _policy.NextOutputReserveTokens))
+        if (!policy.PredictsOverSoft(_currentInputTokens(), resultTokens, policy.NextOutputReserveTokens))
             return result;
 
         // 摘要上界不变式：输出不超过头+尾预览预算（24000 字符）时，摘要体 = 全文，

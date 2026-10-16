@@ -31,6 +31,7 @@ public sealed class CliHost : IDisposable
 
     /// <summary>模型层服务（--list-models 用）。</summary>
     public ILlmService Llm { get; }
+    public ModelSelection Models { get; }
 
     /// <summary>已发现的 skills（用户级 + 项目级合并，项目覆盖同名用户级）。</summary>
     public IReadOnlyList<Skill> Skills { get; }
@@ -39,10 +40,9 @@ public sealed class CliHost : IDisposable
     public ReplOptions ReplOptions { get; }
 
     /// <summary>
-    /// 当前生效的推理强度（模型强度，如 off/low/high/max；启动时由 --thinking / 配置固定）。
-    /// 快照语义：强度运行期不可切（预留），与可实时切换的 <see cref="IAgentRunner.CurrentModel"/> 分开存放。
+    /// 当前推理强度；启动时取 --thinking / 配置，跨 provider 切换后恢复目标提供方默认值。
     /// </summary>
-    public string? ReasoningEffort { get; }
+    public string? ReasoningEffort { get; private set; }
 
     /// <summary>会话持久化（headless 单发也写日志；--no-session 时跳过）。</summary>
     public SessionLog? SessionLog { get; }
@@ -55,11 +55,16 @@ public sealed class CliHost : IDisposable
 
     public CliHost(IAgentRunner runner, IEventBus bus, ILlmService llm, IReadOnlyList<Skill> skills,
         ReplOptions replOptions, SessionLog? sessionLog = null, IDisposable? disposer = null,
-        SlashCommandRegistry? commands = null, string? reasoningEffort = null)
+        SlashCommandRegistry? commands = null, string? reasoningEffort = null, string defaultProvider = "deepseek", Action? resetReasoning = null)
     {
         Runner = runner ?? throw new ArgumentNullException(nameof(runner));
         Bus = bus ?? throw new ArgumentNullException(nameof(bus));
         Llm = llm ?? throw new ArgumentNullException(nameof(llm));
+        Models = new ModelSelection(llm, runner, defaultProvider, onProviderChanged: () =>
+        {
+            ReasoningEffort = null;
+            resetReasoning?.Invoke();
+        });
         Skills = skills ?? throw new ArgumentNullException(nameof(skills));
         ReplOptions = replOptions ?? throw new ArgumentNullException(nameof(replOptions));
         ReasoningEffort = reasoningEffort;
@@ -118,9 +123,9 @@ public sealed class CliHost : IDisposable
 
         // --provider 覆盖配置的 provider 路由（模型工厂按它选适配器）。
         var effectiveProvider = !string.IsNullOrWhiteSpace(args.Provider) ? args.Provider : modelOptions.Provider;
-        var retry = provider.GetRequiredService<IOptions<RetryPolicyOptions>>().Value;
-        Func<string, IChatModel> modelFactory = name =>
-            new RetryingChatModel(new ChatModelClient(llm, effectiveProvider, name), retry);
+        modelOptions.Provider = effectiveProvider;
+        ModelReference ResolveRoute(string name) => ModelReference.Parse(name, effectiveProvider, llm.ListProviders().Select(p => p.Id));
+        var modelFactory = provider.GetRequiredService<Func<string, IChatModel>>();
 
         // 跨回合记忆的上下文 token 预算（roadmap §3 缺口 #4）：按模型目录的 context window 比例。
         // 目录解析在内存中（DeepSeek 为纯查询），失败 / 模型不在目录 → null → 退回轮数启发式。
@@ -128,7 +133,8 @@ public sealed class CliHost : IDisposable
         {
             try
             {
-                return llm.ResolveModelAsync(effectiveProvider, name).GetAwaiter().GetResult()?.Context?.ContextWindow;
+                var route = ResolveRoute(name);
+                return llm.ResolveModelAsync(route.Provider, route.Id).GetAwaiter().GetResult()?.Context?.ContextWindow;
             }
             catch
             {
@@ -142,15 +148,19 @@ public sealed class CliHost : IDisposable
         // 跨回合记忆按 soft 水位线预算化裁剪（§9 验收场景 2），每回合估算的累计输入 token
         // 经闭包喂给 L1 预测判定（§6.3，验收场景 1——长会话靠近水位线时工具输出暴增单点触发）。
         // 控制开关 = 配置段 ContextManagement（分层配置，docs/di-home.md §3.1）；默认模型的窗口
-        // 解析失败（模型不在目录 / provider 异常）→ 不包装，回退压缩前行为（headless 同路径）。
+        // 解析失败（模型不在目录 / provider 异常）→ 预算返回 null，执行器直通；切换后重新解析。
         var defaultModelName = args.Model ?? modelOptions.DefaultModel;
         IToolExecutor toolExecutor = executor;
         BudgetPolicy? budgetPolicy = null;
         InputBudgetTracker? budgetTracker = null;
         var contextOptions = provider.GetRequiredService<IOptions<ContextManagementOptions>>().Value;
-        if (contextOptions.Enabled && ResolveContextWindow(llm, effectiveProvider, defaultModelName) is { } window && window > 0)
+        AgentRunner? runner = null;
+        BudgetPolicy? CurrentBudget()
         {
-            budgetPolicy = new BudgetPolicy(
+            var route = ResolveRoute(runner?.CurrentModel ?? defaultModelName);
+            if (!contextOptions.Enabled || ResolveContextWindow(llm, route.Provider, route.Id) is not { } window || window <= 0)
+                return null;
+            return new BudgetPolicy(
                 window,
                 marginRatio: contextOptions.MarginRatio,
                 outputReserveTokens: contextOptions.OutputReserveTokens,
@@ -158,12 +168,16 @@ public sealed class CliHost : IDisposable
                 softRatio: contextOptions.SoftRatio,
                 hardRatio: contextOptions.HardRatio,
                 blockingRatio: contextOptions.BlockingRatio);
+        }
+        budgetPolicy = CurrentBudget();
+        if (contextOptions.Enabled)
+        {
             budgetTracker = new InputBudgetTracker();
-            toolExecutor = new CompactingExecutor(toolExecutor, budgetPolicy, new ArtifactStore(diHome.RootDirectory),
-                currentInputTokens: () => budgetTracker.CurrentTokens);
+            toolExecutor = new CompactingExecutor(toolExecutor, budgetPolicy ?? new BudgetPolicy(0), new ArtifactStore(diHome.RootDirectory),
+                currentInputTokens: () => budgetTracker.CurrentTokens, policyProvider: CurrentBudget);
         }
 
-        // 推理强度启动时固定（--thinking 覆盖配置），快照挂到宿主供前端展示；运行期切换预留。
+        // 初始推理强度由 --thinking 覆盖；跨 provider 切换时同步清除选项与展示值。
         var loopOptions = new AgentLoopOptions
         {
             SystemPrompt = systemPrompt,
@@ -171,7 +185,7 @@ public sealed class CliHost : IDisposable
             HistoryBudgetRatio = agentLoop.HistoryBudgetRatio,
             ReasoningEffort = !string.IsNullOrWhiteSpace(args.Thinking) ? args.Thinking : agentLoop.ReasoningEffort,
         };
-        var runner = new AgentRunner(
+        runner = new AgentRunner(
             modelFactory,
             toolExecutor,
             loopOptions,
@@ -181,7 +195,8 @@ public sealed class CliHost : IDisposable
             contextWindowProvider: contextWindowProvider,
             skills: skills,
             budgetPolicy: budgetPolicy,
-            budgetTracker: budgetTracker)
+            budgetTracker: budgetTracker,
+            budgetPolicyProvider: CurrentBudget)
         {
             // --model 覆盖配置默认模型（启动后交互模式仍可 /model 切换）。
             CurrentModel = defaultModelName,
@@ -218,7 +233,9 @@ public sealed class CliHost : IDisposable
             sessionLog,
             disposer: new CompositeDisposer(executor, provider, diLog),
             commands: commands,
-            reasoningEffort: loopOptions.ReasoningEffort);
+            reasoningEffort: loopOptions.ReasoningEffort,
+            defaultProvider: effectiveProvider,
+            resetReasoning: () => loopOptions.ReasoningEffort = null);
     }
 
     /// <summary>

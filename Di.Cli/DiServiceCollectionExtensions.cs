@@ -26,6 +26,7 @@ public static class DiServiceCollectionExtensions
         // 模型层：LlmRuntime 路由 + DeepSeek 适配器（配置段 "DeepSeek"，ApiKey 缺省读环境变量）。
         services.AddLlm();
         services.AddDeepSeek();
+        services.AddChatGpt();
 
         // 事件总线：ReAct 循环事件经它发布，UI / 会话记录从同一总线消费；处理异常只告警不中断。
         services.AddEventBus(o => o.OnHandlerError = (ex, evt) =>
@@ -48,7 +49,11 @@ public static class DiServiceCollectionExtensions
             var llm = sp.GetRequiredService<ILlmService>();
             var retry = sp.GetRequiredService<IOptions<RetryPolicyOptions>>().Value;
             var model = sp.GetRequiredService<IOptions<ModelOptions>>().Value;
-            return name => new RetryingChatModel(new ChatModelClient(llm, model.Provider, name), retry);
+            return name =>
+            {
+                var route = ModelReference.Parse(name, model.Provider, llm.ListProviders().Select(p => p.Id));
+                return new RetryingChatModel(new ChatModelClient(llm, route.Provider, route.Id), retry);
+            };
         });
 
         return services;

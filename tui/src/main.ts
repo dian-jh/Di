@@ -160,7 +160,11 @@ async function main(): Promise<number> {
       }
       // /model 切换后应答携带新模型/强度快照，状态栏据此更新（不依赖解析中文提示）。
       if (result.model !== undefined) {
-        state.applyModel(result.model, result.effort ?? state.effort);
+        state.applyModel(result.model, result.effort === undefined ? state.effort : result.effort);
+      }
+      if (result.models !== undefined) {
+        state.models = result.models;
+        await loadAutocomplete();
       }
       state.finishCommand(result.lines.join("\n"));
     } catch (err: unknown) {

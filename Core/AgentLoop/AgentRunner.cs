@@ -25,8 +25,10 @@ public sealed class AgentRunner : IAgentRunner
     private readonly int _maxHistoryTurns;
     private readonly Func<string, int?>? _contextWindowProvider;
     private readonly BudgetPolicy? _budgetPolicy;
+    private readonly Func<BudgetPolicy?>? _budgetPolicyProvider;
     private readonly InputBudgetTracker? _budgetTracker;
     private IReadOnlyList<ChatMessage> _history = [];
+    private int? _lastHistoryBudget;
 
     /// <summary>最近一次追加进历史的快照文本。快照只在内容变化时追加（见 <see cref="RunAsync"/>），
     /// 未变时不重复注入 → 已进入历史的快照留在字节稳定前缀里，跨回合持续命中缓存。</summary>
@@ -43,7 +45,7 @@ public sealed class AgentRunner : IAgentRunner
         Func<string, int?>? contextWindowProvider = null,
         IReadOnlyList<Skill>? skills = null,
         BudgetPolicy? budgetPolicy = null,
-        InputBudgetTracker? budgetTracker = null)
+        InputBudgetTracker? budgetTracker = null, Func<BudgetPolicy?>? budgetPolicyProvider = null)
     {
         _modelFactory = modelFactory ?? throw new ArgumentNullException(nameof(modelFactory));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -62,6 +64,7 @@ public sealed class AgentRunner : IAgentRunner
         _contextWindowProvider = contextWindowProvider;
         _budgetPolicy = budgetPolicy;
         _budgetTracker = budgetTracker;
+        _budgetPolicyProvider = budgetPolicyProvider;
     }
 
     public string CurrentModel { get; set; } = "deepseek-flash";
@@ -78,6 +81,7 @@ public sealed class AgentRunner : IAgentRunner
     public void ResetHistory()
     {
         _history = [];
+        _lastHistoryBudget = null;
         _lastSnapshotText = null;   // 重置后快照应重新注入
         _budgetTracker?.Update(0);  // B_current holder 同步归零（见 RunAsync 末尾的写入点）
     }
@@ -90,6 +94,16 @@ public sealed class AgentRunner : IAgentRunner
         _ = _eventBus.PublishAsync(new RunStarted(userMessage));
 
         var model = _modelFactory(CurrentModel);
+        var budgetPolicy = _budgetPolicyProvider is null ? _budgetPolicy : _budgetPolicyProvider();
+        if (budgetPolicy is not null && (_lastHistoryBudget is null || budgetPolicy.SoftThreshold < _lastHistoryBudget))
+        {
+            _history = SanitizeHistory(TrimHistoryByTokens(_history, budgetPolicy.SoftThreshold));
+            // These are previous turns only; the new user message is added below.
+            if (EstimateTokens(_history) > budgetPolicy.SoftThreshold) _history = [];
+            if (_lastSnapshotText is not null && !_history.OfType<SystemMessage>().Any(m => m.Text == _lastSnapshotText))
+                _lastSnapshotText = null;
+            _budgetTracker?.Update(EstimateTokens(_history));
+        }
         var react = new ReAct(model, _options, _eventBus, InterruptSignal);
 
         // 环境快照进持久历史，且只在内容变化时追加：快照已最小化（仅"工作目录 + 自取提示"，见
@@ -145,9 +159,9 @@ public sealed class AgentRunner : IAgentRunner
         //   maxHistoryTurns &gt; 0 时按轮数裁剪兜底；0 / 不传 = 无轮数上限（历史原样保留）。
         // 最后对尾部做工具良构化：封顶/最终输出工具回合会留下"未执行的 tool_calls"，必须剔除。
         int? tokenBudget = null;
-        if (_budgetPolicy is not null)
+        if (budgetPolicy is not null)
         {
-            tokenBudget = _budgetPolicy.SoftThreshold;
+            tokenBudget = budgetPolicy.SoftThreshold;
         }
         else
         {
@@ -166,6 +180,7 @@ public sealed class AgentRunner : IAgentRunner
             ? TrimHistoryByTokens(result.Trajectory, tokenBudget)   // 预算独占
             : TrimHistory(result.Trajectory, _maxHistoryTurns);     // 显式 maxHistoryTurns 兜底（0 = 无上限）
         _history = SanitizeHistory(trimmed);
+        _lastHistoryBudget = tokenBudget;
         // 裁剪可能把最早注入的快照裁出历史：重置标记，让下一回合重新注入（否则长期会话会失去环境上下文）。
         if (_lastSnapshotText is not null && !_history.OfType<SystemMessage>().Any(m => m.Text == _lastSnapshotText))
             _lastSnapshotText = null;

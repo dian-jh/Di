@@ -101,6 +101,16 @@ describe("RpcClient：prompt 请求", () => {
 });
 
 describe("RpcClient：command 请求", () => {
+  it("跨 provider 模型切换保留 null 强度和更新后的目录", async () => {
+    const client = makeClient();
+    await client.connect();
+    try {
+      const result = await client.runCommand("model", "chatgpt/account-model");
+      assert.equal(result.model, "chatgpt/account-model");
+      assert.equal(result.effort, null);
+      assert.deepEqual(result.models, [{ id: "chatgpt/account-model", name: "Account model" }]);
+    } finally { await client.stop(); }
+  });
   it("listCommands 返回注册表", async () => {
     const client = makeClient();
     await client.connect();

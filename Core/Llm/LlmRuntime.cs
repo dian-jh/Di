@@ -54,6 +54,9 @@ public sealed class LlmRuntime : ILlmService
     public IReadOnlyList<LlmProviderInfo> ListProviders() =>
         _routes.Select(kv => kv.Value.Adapter.ProviderInfo(kv.Key)).ToList();
 
+    public Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(string provider, CancellationToken cancellationToken = default)
+        => RequireAdapter(provider).RefreshModelsAsync(provider, cancellationToken);
+
     public IReadOnlyList<LlmModelInfo> ListModels(string? provider = null)
     {
         if (provider is not null)
@@ -100,9 +103,11 @@ public sealed class LlmRuntime : ILlmService
         // （Pi：applyAuth 在请求路径解析；缺失 → 请求级错误，宿主正常启动后 UI 提示"未配置"。）
         var apiKey = await adapter.ResolveApiKeyAsync(options.Provider, _credentials, options.CancellationToken)
             .ConfigureAwait(false);
-        if (adapter.Auth is LlmAuthDefinition.ApiKey && string.IsNullOrWhiteSpace(apiKey))
+        if (adapter.Auth is LlmAuthDefinition.ApiKey or LlmAuthDefinition.OAuth && string.IsNullOrWhiteSpace(apiKey))
             throw new LlmException(
-                $"provider '{options.Provider}' 未配置 API Key（请设置环境变量或配置段后重试）。",
+                adapter.Auth is LlmAuthDefinition.OAuth oauth
+                    ? $"provider '{options.Provider}' 尚未授权（{oauth.DisplayName}）。"
+                    : $"provider '{options.Provider}' 未配置 API Key（请设置环境变量或配置段后重试）。",
                 LlmErrorCodes.MissingCredential);
 
         var prepared = await adapter.PrepareCallAsync(options.Provider, options.Model, options.CancellationToken)
@@ -128,11 +133,7 @@ public sealed class LlmRuntime : ILlmService
     {
         if (!_routes.TryGetValue(provider, out var entry))
             return false;
-        var adapter = entry.Adapter;
-        if (adapter.Auth is not LlmAuthDefinition.ApiKey)
-            return true;   // 无鉴权要求的 provider 恒为已配置
-        var key = await adapter.ResolveApiKeyAsync(provider, _credentials, cancellationToken).ConfigureAwait(false);
-        return !string.IsNullOrWhiteSpace(key);
+        return await entry.Adapter.CheckAuthAsync(provider, _credentials, cancellationToken).ConfigureAwait(false);
     }
 
     private ChatAdapter RequireAdapter(string provider)

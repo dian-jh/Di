@@ -62,9 +62,9 @@ public sealed class RpcModeTests
         Assert.Equal("跑后端测试", skills[0].GetProperty("description").GetString());
         var models = root.GetProperty("models");
         Assert.Equal(2, models.GetArrayLength());
-        Assert.Equal("deepseek-flash", models[0].GetProperty("id").GetString());
+        Assert.Equal("deepseek/deepseek-flash", models[0].GetProperty("id").GetString());
         Assert.Equal("DeepSeek Flash", models[0].GetProperty("name").GetString());
-        Assert.Equal("deepseek-v4-pro", models[1].GetProperty("id").GetString());
+        Assert.Equal("deepseek/deepseek-v4-pro", models[1].GetProperty("id").GetString());
     }
 
     [Fact]
@@ -267,7 +267,7 @@ public sealed class RpcModeTests
         var (host, runner) = Host();
         var (code, _, _) = await RunAsync(host, new CliArgs(),
             """
-            {"type":"request","id":1,"method":"set_model","params":{"model":"deepseek-v4-pro"}}
+            {"type":"request","id":1,"method":"set_model","params":{"model":"deepseek/deepseek-v4-pro"}}
             {"type":"request","id":2,"method":"shutdown","params":{}}
             """);
 
@@ -501,7 +501,7 @@ public sealed class RpcModeTests
         var (host, runner) = Host();
         var (code, output, _) = await RunAsync(host, new CliArgs(),
             """
-            {"type":"request","id":1,"method":"command","params":{"name":"model","args":"deepseek-v4-pro"}}
+            {"type":"request","id":1,"method":"command","params":{"name":"model","args":"deepseek/deepseek-v4-pro"}}
             {"type":"request","id":2,"method":"shutdown","params":{}}
             """);
 

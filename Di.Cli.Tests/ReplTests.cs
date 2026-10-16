@@ -447,7 +447,8 @@ public sealed class ReplTests
         var output = new StringWriter();
         var bus = new InMemoryEventBus();
         var runner = new FakeRunner { Bus = bus };
-        var repl = new Repl(runner, bus, new FakeLineReader(lines), output, new ReplOptions(), skills: skills);
+        var repl = new Repl(runner, bus, new FakeLineReader(lines), output, new ReplOptions(), skills: skills,
+            models: new ModelSelection(new FakeLlm([new LlmModelInfo("deepseek", "deepseek-chat", "DeepSeek Chat")]), runner));
         return (repl, output, runner);
     }
 

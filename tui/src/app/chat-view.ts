@@ -138,7 +138,7 @@ export class ChatView {
         ? {
             getArgumentCompletions: (prefix: string) =>
               models
-                .filter((m) => !prefix || m.id.includes(prefix))
+                .filter((m) => !prefix || `${m.id} ${m.name}`.toLowerCase().includes(prefix.toLowerCase()))
                 .map((m) => ({ value: m.id, label: m.id, description: m.name })),
           }
         : {}),

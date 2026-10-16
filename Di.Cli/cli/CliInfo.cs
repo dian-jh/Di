@@ -29,6 +29,18 @@ public static class CliInfo
         交互模式：
           di                               进入 REPL（斜杠命令: /help /model /skills /clear /exit）
 
+        ChatGPT（官方 OAuth，无需 API Key）：
+          di auth chatgpt login             Continue with ChatGPT（复用已有注册）
+          di auth chatgpt login --new       注册另一账户或 workspace
+          di auth chatgpt login --consent   重新申请 ChatGPT plan 授权
+          di auth chatgpt status            查看登录状态
+          di auth chatgpt models            获取当前账户可用模型
+          di auth chatgpt logout             撤销并退出
+          di --provider chatgpt --model <slug> "你好"
+          /model                            查看当前模型和目录
+          /model chatgpt/<slug>              会话内跨 provider 切换
+          /model --refresh                   刷新已配置 provider 的模型目录
+
         选项：
           -m, --model <名>      指定模型（覆盖配置 Model:DefaultModel）
           --provider <id>       指定 provider（覆盖配置 Model:Provider）

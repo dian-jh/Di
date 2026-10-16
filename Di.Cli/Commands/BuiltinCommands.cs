@@ -35,16 +35,32 @@ public static class BuiltinCommands
             return Task.FromResult(CommandResult.Handled);
         }),
 
-        new("model", "切换模型", "<模型名>", (args, ctx) =>
+        new("model", "查看或切换模型", "[provider/model | 名称 | --refresh]", async (args, ctx) =>
         {
-            if (args.Length == 0)
+            if (ctx.Models is null)
             {
-                ctx.Output.WriteLine("用法: /model <模型名>");
-                return Task.FromResult(CommandResult.Handled);
+                ctx.Output.WriteLine("宿主未提供模型选择器。");
+                return CommandResult.Handled;
             }
-            ctx.Runner.CurrentModel = args;
-            ctx.Output.WriteLine($"模型已切换为 {args}");
-            return Task.FromResult(CommandResult.Handled);
+            try
+            {
+                if (args is "" or "--refresh")
+                {
+                    if (args == "--refresh")
+                        foreach (var error in await ctx.Models.RefreshAsync(ctx.CancellationToken)) ctx.Output.WriteLine(error);
+                    ctx.Output.WriteLine($"当前模型: {ctx.Models.Current.QualifiedId}");
+                    foreach (var model in ctx.Models.List()) ctx.Output.WriteLine($"  {model.Provider}/{model.Id}  {model.Name}");
+                    ctx.Output.WriteLine("用法: /model <provider/model 或唯一名称>；/model --refresh 刷新目录。");
+                }
+                else
+                {
+                    await ctx.Models.SelectAsync(args, ctx.CancellationToken);
+                    ctx.Output.WriteLine($"模型已切换为 {ctx.Runner.CurrentModel}");
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or Core.Llm.LlmException or IOException)
+            { ctx.Output.WriteLine(ex.Message); }
+            return CommandResult.Handled;
         }),
 
         new("skills", "列出可用 skill（固定激活的以 * 标记）", null, (_, ctx) =>

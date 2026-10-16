@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Common.Events;
 using Core.AgentLoop;
+using Core.ContextManagement;
 using Core.Llm;
 using Core.Skills;
 
@@ -13,6 +14,31 @@ namespace Di.Tests;
 /// </summary>
 public sealed class AgentRunnerTests
 {
+    [Fact]
+    public async Task UnchangedBudget_StillPreservesMostRecentTurn()
+    {
+        var model = new FakeChatModel();
+        var policy = new BudgetPolicy(100, outputReserveTokens: 0);
+        var runner = new AgentRunner(_ => model, new FakeToolExecutor(), new AgentLoopOptions(), new InMemoryEventBus(),
+            budgetPolicyProvider: () => policy);
+        await runner.RunAsync(new string('x', 10_000));
+        await runner.RunAsync("next");
+        Assert.Contains(model.Requests[1].Messages, m => m.GetText().Length >= 10_000);
+    }
+    [Fact]
+    public async Task ModelSwitch_UsesNewBudgetBeforeSendingExistingHistory()
+    {
+        var model = new FakeChatModel();
+        BudgetPolicy? policy = new(100_000, outputReserveTokens: 0);
+        var runner = new AgentRunner(_ => model, new FakeToolExecutor(), new AgentLoopOptions(), new InMemoryEventBus(),
+            budgetPolicyProvider: () => policy);
+        await runner.RunAsync(new string('x', 10_000));
+        policy = new BudgetPolicy(100, outputReserveTokens: 0);
+        runner.CurrentModel = "smaller-model";
+        await runner.RunAsync("next");
+        Assert.DoesNotContain(model.Requests[1].Messages, m => m.GetText().Length >= 10_000);
+        Assert.Contains(model.Requests[1].Messages, m => m.GetText() == "next");
+    }
     [Fact]
     public async Task RunAsync_UsesCurrentModel_AndReturnsResult()
     {

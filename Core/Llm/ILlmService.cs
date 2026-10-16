@@ -22,6 +22,9 @@ public interface ILlmService
     /// </summary>
     IReadOnlyList<LlmModelInfo> ListModels(string? provider = null);
 
+    Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(string provider, CancellationToken cancellationToken = default)
+        => Task.FromResult(ListModels(provider));
+
     /// <summary>
     /// 按模型目录的费率把用量折算成成本。未知 provider / 模型 / 无费率时返回 null。
     /// 同步、尽力而为、永不抛。

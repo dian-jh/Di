@@ -71,7 +71,7 @@ public sealed class CommandLoaderTests : IDisposable
         Assert.Equal(0, CommandLoader.LoadInto(_registry, CommandsDir, _warnings.Add));
         Assert.Contains(_warnings, w => w.Contains("重名", StringComparison.Ordinal));
         Assert.True(_registry.TryGet("model", out var builtin));
-        Assert.Equal("切换模型", builtin!.Description);   // 内置优先
+        Assert.Equal("查看或切换模型", builtin!.Description);   // 内置优先
     }
 
     [Fact]

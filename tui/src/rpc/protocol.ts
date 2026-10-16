@@ -91,6 +91,7 @@ export interface CommandRanMessage {
   /** 命令执行后的模型/强度快照（/model 切换后 TUI 据此更新状态栏）。 */
   model?: string;
   effort?: string | null;
+  models?: ModelInfo[];
 }
 
 /** `{"type":"command_error","code":...,"message":...}` —— 命令级错误（不含在 `error` 会话级语义内）。 */

@@ -160,6 +160,16 @@ describe("parseMessage（parse + validate）", () => {
 });
 
 describe("MessageQueue（FIFO）", () => {
+  it("保留模型命令返回的完整目录，并拒绝无效条目", () => {
+    const message = parseMessage(JSON.stringify({ type: "command_ran", name: "model", lines: [], exit: false,
+      model: "chatgpt/account-model", models: [{ id: "chatgpt/account-model", name: "Account model" }] }));
+    assert.equal(message.type, "command_ran");
+    if (message.type === "command_ran") {
+      assert.deepEqual(message.models, [{ id: "chatgpt/account-model", name: "Account model" }]);
+    }
+    assert.throws(() => parseMessage(JSON.stringify({ type: "command_ran", name: "model", lines: [], exit: false,
+      models: [{ id: 123, name: "invalid" }] })), /models/);
+  });
   it("先进先出", () => {
     const q = new MessageQueue<number>();
     q.push(1);

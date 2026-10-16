@@ -16,6 +16,7 @@ import type {
   AgentResult,
   CommandDescriptor,
   CommandParams,
+  ModelInfo,
   ReadyMessage,
   RequestMessage,
   RequestMethod,
@@ -26,7 +27,7 @@ import { makeRequest } from "./protocol.ts";
 /** `command` 请求的统一应答：list / run / error 三种（docs/tui-rpc.md §2.5）。 */
 export type CommandOutcome =
   | { kind: "listed"; commands: CommandDescriptor[] }
-  | { kind: "ran"; name: string; lines: string[]; exit: boolean; model?: string; effort?: string | null }
+  | { kind: "ran"; name: string; lines: string[]; exit: boolean; model?: string; effort?: string | null; models?: ModelInfo[] }
   | { kind: "error"; code: string; message: string; turnMessage?: string };
 
 /** `command` 请求的拒绝载体：message 保留 `code: message` 可读文本；回合型命令带 turnMessage。 */
@@ -242,10 +243,11 @@ export class RpcClient {
  * 运行一个后端斜杠命令（同步应答）。应答携带切换后的模型/强度快照（/model 用，状态栏据此更新）。
  * 回合型命令（/skill <名> <参数>、用户命令）→ 抛 {@link CommandError}（code=turn_not_supported，带 turnMessage）。
  */
-  runCommand(name: string, args = ""): Promise<{ lines: string[]; exit: boolean; model?: string; effort?: string | null }> {
+  runCommand(name: string, args = ""): Promise<{ lines: string[]; exit: boolean; model?: string; effort?: string | null; models?: ModelInfo[] }> {
     return this.sendCommand({ name, args }).then((outcome) => {
       if (outcome.kind === "ran") {
-        return { lines: outcome.lines, exit: outcome.exit, model: outcome.model, effort: outcome.effort };
+        return { lines: outcome.lines, exit: outcome.exit, model: outcome.model, effort: outcome.effort,
+          ...(outcome.models === undefined ? {} : { models: outcome.models }) };
       }
       if (outcome.kind === "error") {
         throw new CommandError(outcome.code, outcome.message, outcome.turnMessage);
@@ -383,6 +385,7 @@ export class RpcClient {
           exit: message.exit,
           model: message.model,
           effort: message.effort,
+          models: message.models,
         });
         this.pendingCommand = null;
         break;

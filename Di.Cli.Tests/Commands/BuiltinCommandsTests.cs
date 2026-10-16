@@ -1,4 +1,5 @@
 using Core.AgentLoop;
+using Core.Llm;
 using Core.Skills;
 using Di.Cli.Commands;
 
@@ -25,7 +26,8 @@ public sealed class BuiltinCommandsTests
 
     private CommandContext Ctx() =>
         new(_registry, _runner, [TestSkill], _buffer, _pinned, UseAnsi: true,
-            RunTurn: (msg, _) => { _turns.Add(msg); return Task.CompletedTask; });
+            RunTurn: (msg, _) => { _turns.Add(msg); return Task.CompletedTask; },
+            Models: new ModelSelection(new FakeLlm([new LlmModelInfo("deepseek", "deepseek-chat", "DeepSeek Chat")]), _runner));
 
     private SlashCommand Cmd(string name)
     {
@@ -57,7 +59,7 @@ public sealed class BuiltinCommandsTests
 
         var text = _buffer.ToString();
         Assert.Contains("可用命令", text);
-        Assert.Contains("/model <模型名> —— 切换模型", text);
+        Assert.Contains("/model [provider/model | 名称 | --refresh] —— 查看或切换模型", text);
         Assert.Contains("/exit —— 退出 Di", text);
     }
 

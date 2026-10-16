@@ -7,6 +7,7 @@ namespace Core.Llm;
 /// </summary>
 public abstract record LlmAuthDefinition
 {
+    public sealed record OAuth(string DisplayName) : LlmAuthDefinition;
     /// <summary>无鉴权要求（本地模型 / 无密钥服务）。</summary>
     public static LlmAuthDefinition None { get; } = new NoneDefinition();
 

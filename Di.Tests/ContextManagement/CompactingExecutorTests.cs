@@ -11,6 +11,19 @@ namespace Di.Tests.ContextManagement;
 /// </summary>
 public sealed class CompactingExecutorTests
 {
+    [Fact]
+    public async Task ModelSwitch_UsesCurrentPolicyAndSkipsUnknownWindow()
+    {
+        var store = new FakeStore();
+        var full = BigOutput();
+        BudgetPolicy? current = null;
+        var executor = new CompactingExecutor(new FakeInner(_ => full), Policy(), store, policyProvider: () => current);
+        Assert.Equal(full, await executor.ExecuteAsync(Call("read_file")));
+        Assert.Empty(store.Written);
+        current = Policy();
+        Assert.NotEqual(full, await executor.ExecuteAsync(Call("read_file")));
+        Assert.Single(store.Written);
+    }
     private const int Window = 1_000;
     private const int SoftThresholdTokens = 700;   // budget 1000 × 0.7（margin/output 归零）
 

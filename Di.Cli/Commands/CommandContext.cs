@@ -18,4 +18,5 @@ public sealed record CommandContext(
     List<Skill> Pinned,
     bool UseAnsi = true,
     Func<string, CancellationToken, Task>? RunTurn = null,
-    CancellationToken CancellationToken = default);
+    CancellationToken CancellationToken = default,
+    ModelSelection? Models = null);

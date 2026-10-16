@@ -24,6 +24,10 @@ public abstract class ChatAdapter
     /// </summary>
     public virtual LlmAuthDefinition Auth => LlmAuthDefinition.None;
 
+    /// <summary>Availability check; OAuth adapters inspect local credentials without refreshing tokens.</summary>
+    public virtual async Task<bool> CheckAuthAsync(string provider, ILlmCredentialStore store, CancellationToken cancellationToken = default)
+        => Auth == LlmAuthDefinition.None || !string.IsNullOrWhiteSpace(await ResolveApiKeyAsync(provider, store, cancellationToken));
+
     /// <summary>
     /// 解析一次请求用的 API Key（请求时、惰性）。基类实现按 <see cref="Auth"/> 声明
     /// 让 <see cref="ILlmCredentialStore"/> 依次尝试环境变量；适配器可覆盖以叠加
@@ -54,6 +58,10 @@ public abstract class ChatAdapter
     /// </summary>
     public virtual IReadOnlyList<LlmModelInfo> ListModels(string provider)
         => Catalog.Select(m => new LlmModelInfo(provider, m.Id, m.Name)).ToList();
+
+    /// <summary>Explicit network refresh for account-specific catalogs; synchronous reads remain local.</summary>
+    public virtual Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(string provider, CancellationToken cancellationToken = default)
+        => Task.FromResult(ListModels(provider));
 
     /// <summary>
     /// 精确模型元数据（独立于咨询性目录）：context / defaultMaxTokens / 推理强度列表。
