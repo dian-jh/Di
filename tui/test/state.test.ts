@@ -134,7 +134,7 @@ describe("TurnStateMachine：事件 → 视图模型", () => {
     s.finishTurn(RESULT);
     assert.equal(s.totalCost, 0.001);
     // 左下角摘要对齐 REPL（TokenUsage.ToString 同款：可空键缺省视作 0，total 兜底计费输入+输出；cost F6）。
-    assert.equal(s.statusText, "1 轮 · tokens: in=10 (cache_read=0) out=5 (reasoning=0) total=15 · cost:$0.001000");
+    assert.equal(s.statusText, "1 轮 · tokens: in=10 (cache_read=N/A) out=5 (reasoning=N/A) total=N/A · cost:$0.001000");
     assert.equal(s.turns[0]?.result?.answer, "done");
   });
 
@@ -155,6 +155,77 @@ describe("TurnStateMachine：事件 → 视图模型", () => {
       cost: 0.00085,
     });
     assert.equal(s.statusText, "1 轮 · tokens: in=2316 (cache_read=2176) out=116 (reasoning=29) total=2432 · cost:$0.000850");
+  });
+
+  it("暴露累计缓存命中率与费用，并将当前上下文明确标为 N/A", () => {
+    const s = new TurnStateMachine();
+    s.startTurn("a");
+    s.finishTurn({ ...RESULT, usage: { input_tokens: 300, output_tokens: 2, cache_read_tokens: 100, cache_write_tokens: 0 }, cost: 0.1 });
+    s.startTurn("b");
+    s.finishTurn({ ...RESULT, usage: { input_tokens: 100, output_tokens: 1, cache_read_tokens: 300, cache_write_tokens: 0 }, cost: 0.2 });
+    assert.ok(Math.abs(s.totalCost - 0.3) < 1e-9);
+    assert.equal(s.cacheHitRateLabel(), "50.0%");
+    assert.equal(s.contextUsageLabel(), "N/A");
+    assert.match(s.usageSummary(), /当前上下文用量: N\/A/);
+  });
+
+  it("无缓存 usage 数据时累计命中率为 N/A", () => {
+    const s = new TurnStateMachine();
+    s.startTurn("a");
+    s.finishTurn(RESULT);
+    assert.equal(s.cacheHitRateLabel(), "N/A");
+  });
+
+  it("累计字段缺任一回合 cache/cost 时严格显示 N/A，已知零费用保留 $0", () => {
+    const s = new TurnStateMachine();
+    s.startTurn("known zero");
+    s.finishTurn({ ...RESULT, cost: 0, usage: { input_tokens: 10, output_tokens: 1, cache_read_tokens: 0, cache_write_tokens: 0 } });
+    assert.equal(s.totalCostLabel(), "$0.0000");
+    assert.equal(s.cacheHitRateLabel(), "0.0%");
+    s.startTurn("missing metrics");
+    s.finishTurn({ ...RESULT, cost: undefined, usage: { input_tokens: 8, output_tokens: 1 } });
+    assert.equal(s.totalCostLabel(), "N/A");
+    assert.equal(s.cacheHitRateLabel(), "N/A");
+  });
+
+  it("turn_completed 累计快照只供取消回退，result 正常终结时不重复累计", () => {
+    const s = new TurnStateMachine();
+    s.startTurn("q");
+    s.onTurnCompleted({ iteration: 1, usage: { input_tokens: 4, output_tokens: 2 }, finish_reason: "tool_calls" });
+    s.onTurnCompleted({ iteration: 2, usage: { input_tokens: 9, output_tokens: 5 }, finish_reason: "stop" });
+    s.finishTurn({ ...RESULT, usage: { input_tokens: 9, output_tokens: 5, cache_read_tokens: 1, cache_write_tokens: 0 }, cost: 0.01 });
+    assert.equal(s.totalCost, 0.01);
+    assert.equal(s.cacheHitRateLabel(), "10.0%");
+  });
+
+  it("取消结果的合成零 usage 不覆盖最近累计事件快照", () => {
+    const s = new TurnStateMachine();
+    s.startTurn("q");
+    s.onTurnCompleted({ iteration: 1, usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12, cache_read_tokens: 3 }, finish_reason: "tool_calls" });
+    s.onTurnCompleted({ iteration: 2, usage: { input_tokens: 30, output_tokens: 8, total_tokens: 38, cache_read_tokens: 9 }, finish_reason: "tool_calls" });
+    s.finishTurn({ ...RESULT, stop_reason: "cancelled", usage: { input_tokens: 0, output_tokens: 0 } });
+    assert.match(s.usageSummary(), /input: 30 · output: 8 · total: 38/);
+  });
+
+  it("错误结果的合成零 usage 保留最近累计事件快照且缺成本显示 N/A", () => {
+    const s = new TurnStateMachine();
+    s.startTurn("q");
+    s.onTurnCompleted({ iteration: 1, usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 }, finish_reason: "tool_calls" });
+    s.finishTurn({ ...RESULT, stop_reason: "error", usage: { input_tokens: 0, output_tokens: 0 }, cost: undefined });
+
+    assert.match(s.usageSummary(), /input: 10 · output: 2 · total: 12/);
+    assert.equal(s.totalCostLabel(), "N/A");
+  });
+
+  it("活动回合底栏读取最新累计 snapshot，缺 cost 时保持 N/A", () => {
+    const s = new TurnStateMachine();
+    s.startTurn("q");
+    s.onTurnCompleted({ iteration: 1, usage: { input_tokens: 4, output_tokens: 2, cache_read_tokens: 2 }, finish_reason: "tool_calls" });
+    assert.equal(s.cacheHitRateLabel(), "33.3%");
+    assert.equal(s.totalCostLabel(), "N/A");
+    s.onTurnCompleted({ iteration: 2, usage: { input_tokens: 8, output_tokens: 5, cache_read_tokens: 4 }, cost: 0.002, finish_reason: "stop" });
+    assert.equal(s.cacheHitRateLabel(), "33.3%");
+    assert.equal(s.totalCostLabel(), "$0.0020");
   });
 
   it("finishTurn 取消回合显示已取消而非 0 轮统计", () => {
@@ -189,7 +260,7 @@ describe("TurnStateMachine：事件 → 视图模型", () => {
     s.clear();
     assert.equal(s.turns.length, 0);
     assert.equal(s.state, "idle");
-    assert.equal(s.totalCost, 0);
+    assert.equal(s.totalCost, 0.001, "清历史不重置本会话累计费用");
     assert.equal(s.statusText, "", "clear 后状态行清空（dock 中塌缩不显示）");
   });
 

@@ -63,6 +63,8 @@
 `TokenUsage`（snake_case，null 键省略）：
 `{input_tokens, output_tokens, total_tokens?, cache_read_tokens?, cache_write_tokens?, reasoning_tokens?}`。
 
+`turn_completed.usage` 和 `cost` 是回合截至该 iteration 的累计快照；同一 prompt 的 `result.usage` / `cost` 是最终回合值。前端只用 `result` 结算正常会话累计，遇到携带合成零 usage 的错误/取消终结时才回退到最后事件快照，避免重复累加。
+
 ### 2.3 `result`
 
 ```json

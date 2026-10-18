@@ -29,7 +29,7 @@ export interface ChatLayoutParts {
 export interface ChatLayout {
   /** 包裹 transcript 的主滚动视口（follow end + primary）。 */
   transcriptScroll: ScrollView;
-  /** 底部固定区域：[banner, status, editor]，basis auto 取固有高度。 */
+  /** 底部固定区域：[banner, editor, status]，状态行紧贴输入框下方。 */
   dock: VStack;
   /** 布局根：交给 TuiAltScreen.setLayoutRoot（布局引擎按 terminal.rows 分配合法高度）。 */
   root: VStack;
@@ -45,8 +45,8 @@ export function createChatLayout(parts: ChatLayoutParts): ChatLayout {
   // dock 按固有高度占位（basis auto）；终端变矮时 shrink 收紧凑、minSize 保护输入框可见。
   const dock = new VStack([
     { component: parts.banner, shrink: 1, minSize: 0 },
-    { component: parts.status, shrink: 1, minSize: 0 },
     { component: parts.editor, shrink: 1, minSize: 1 },
+    { component: parts.status, shrink: 1, minSize: 0 },
   ]);
   const root = new VStack([
     { component: transcriptScroll, basis: 0, grow: 1, shrink: 1, minSize: 1 },
@@ -74,7 +74,7 @@ export function createMainScreenLayout(parts: ChatLayoutParts): MainScreenLayout
   const root = new Container();
   root.addChild(parts.transcript);
   root.addChild(parts.banner);
-  root.addChild(parts.status);
   root.addChild(parts.editor);
+  root.addChild(parts.status);
   return { root };
 }

@@ -49,11 +49,8 @@ const STATUS_RANK: Record<ToolStatus, number> = { pending: 0, running: 1, comple
  * total 缺省时按计费输入 + 输出兜底（计费输入 = 未命中 + 命中读 + 命中写）。
  */
 function formatTokenUsage(usage: TokenUsage): string {
-  const cacheRead = usage.cache_read_tokens ?? 0;
-  const reasoning = usage.reasoning_tokens ?? 0;
-  const billable = usage.input_tokens + cacheRead + (usage.cache_write_tokens ?? 0);
-  const total = usage.total_tokens ?? billable + usage.output_tokens;
-  return `in=${usage.input_tokens} (cache_read=${cacheRead}) out=${usage.output_tokens} (reasoning=${reasoning}) total=${total}`;
+  const known = (value: number | undefined) => value === undefined ? "N/A" : String(value);
+  return `in=${usage.input_tokens} (cache_read=${known(usage.cache_read_tokens)}) out=${usage.output_tokens} (reasoning=${known(usage.reasoning_tokens)}) total=${known(usage.total_tokens)}`;
 }
 
 export class TurnStateMachine {
@@ -68,6 +65,25 @@ export class TurnStateMachine {
   errorBanner: string | undefined;
   /** 累计成本（各回合 cost 求和）。 */
   totalCost = 0;
+  private cacheReadTotal = 0;
+  private cacheInputTotal = 0;
+  private cacheUsageSeen = false;
+  private cacheUsageComplete = true;
+  private costUsageComplete = true;
+  private completedTurns = 0;
+  private turnUsage: TokenUsage | undefined;
+  private turnCost: number | undefined;
+  private sessionInput = 0;
+  private sessionOutput = 0;
+  private sessionTotal = 0;
+  private sessionTotalComplete = true;
+  private sessionUsageTurns = 0;
+  private sessionCacheRead = 0;
+  private sessionCacheReadComplete = true;
+  private sessionCacheWrite = 0;
+  private sessionCacheWriteComplete = true;
+  private sessionReasoning = 0;
+  private sessionReasoningComplete = true;
   /** 最近一条斜杠命令的输入（用户输入原样；不参与回合状态机）。 */
   commandInput = "";
   /** 最近一条斜杠命令的输出（join 后，空 = 无输出）。 */
@@ -109,6 +125,37 @@ export class TurnStateMachine {
   /** 右下角状态栏标签：`模型 · 强度`（无强度仅模型名）。 */
   modelLabel(): string {
     return this.model ? (this.effort ? `${this.model} · ${this.effort}` : this.model) : "";
+  }
+
+  cacheHitRateLabel(): string {
+    const currentRead = this.turnUsage?.cache_read_tokens;
+    if (this.state !== "idle" && this.turnUsage && currentRead === undefined) return "N/A";
+    const currentInput = this.state !== "idle" && this.turnUsage && currentRead !== undefined
+      ? this.turnUsage.input_tokens + currentRead + (this.turnUsage.cache_write_tokens ?? 0) : 0;
+    const currentCacheRead = currentRead ?? 0;
+    const known = this.cacheUsageComplete && (this.state === "idle" || !this.turnUsage || currentRead !== undefined);
+    const denominator = this.cacheInputTotal + currentInput;
+    return this.cacheUsageSeen || currentRead !== undefined
+      ? known && denominator > 0 ? `${(((this.cacheReadTotal + currentCacheRead) / denominator) * 100).toFixed(1)}%` : "N/A"
+      : "N/A";
+  }
+
+  contextUsageLabel(): string {
+    return "N/A";
+  }
+
+  totalCostLabel(): string {
+    if (this.state !== "idle") return this.turnCost !== undefined && this.costUsageComplete ? `$${(this.totalCost + this.turnCost).toFixed(4)}` : "N/A";
+    return this.completedTurns > 0 && this.costUsageComplete ? `$${this.totalCost.toFixed(4)}` : "N/A";
+  }
+
+  usageSummary(): string {
+    const cost = this.totalCostLabel();
+    const total = this.sessionUsageTurns > 0 && this.sessionTotalComplete ? String(this.sessionTotal) : "N/A";
+    const cacheRead = this.sessionUsageTurns && this.sessionCacheReadComplete ? this.sessionCacheRead : "N/A";
+    const cacheWrite = this.sessionUsageTurns && this.sessionCacheWriteComplete ? this.sessionCacheWrite : "N/A";
+    const reasoning = this.sessionUsageTurns && this.sessionReasoningComplete ? this.sessionReasoning : "N/A";
+    return `会话累计 input: ${this.sessionUsageTurns ? this.sessionInput : "N/A"} · output: ${this.sessionUsageTurns ? this.sessionOutput : "N/A"} · total: ${total}\ncache_read: ${cacheRead} · cache_write: ${cacheWrite} · reasoning: ${reasoning}\n会话累计 Cache 命中率: ${this.cacheHitRateLabel()}\n会话累计 Cost: ${cost}\n当前上下文用量: ${this.contextUsageLabel()}`;
   }
 
   /** 回合开始：idle → running。后端正忙时忽略。 */
@@ -161,9 +208,29 @@ export class TurnStateMachine {
       }
       if (typeof result.cost === "number") {
         this.totalCost += result.cost;
-      }
+      } else this.costUsageComplete = false;
+      this.completedTurns += 1;
+      const syntheticZero = result.usage.input_tokens === 0 && result.usage.output_tokens === 0 && result.usage.total_tokens === undefined;
+      const usage = syntheticZero && this.turnUsage ? this.turnUsage : result.usage;
+      this.sessionInput += usage.input_tokens;
+      this.sessionOutput += usage.output_tokens;
+      if (usage.total_tokens === undefined) this.sessionTotalComplete = false;
+      else this.sessionTotal += usage.total_tokens;
+      this.sessionUsageTurns += 1;
+      if (usage.cache_read_tokens === undefined) this.sessionCacheReadComplete = false;
+      else this.sessionCacheRead += usage.cache_read_tokens;
+      if (usage.cache_write_tokens === undefined) this.sessionCacheWriteComplete = false;
+      else this.sessionCacheWrite += usage.cache_write_tokens;
+      if (usage.reasoning_tokens === undefined) this.sessionReasoningComplete = false;
+      else this.sessionReasoning += usage.reasoning_tokens;
+      if (usage.cache_read_tokens !== undefined) { this.cacheUsageSeen = true; this.cacheReadTotal += usage.cache_read_tokens; }
+      else this.cacheUsageComplete = false;
+      // 对齐 Core TokenUsage.CacheHitRate：未上报 cache-write 时按 0 参与分母；该分项本身仍保持 N/A。
+      if (usage.cache_read_tokens !== undefined) this.cacheInputTotal += usage.input_tokens + usage.cache_read_tokens + (usage.cache_write_tokens ?? 0);
     }
     this.current = null;
+    this.turnUsage = undefined;
+    this.turnCost = undefined;
     this.state = "idle";
     // 左下角状态行记录本回合统计摘要（对齐 REPL 展示，EventRenderer.cs:140 同源；cost F6）。
     // 取消回合不产生有效统计，单独提示。
@@ -185,6 +252,9 @@ export class TurnStateMachine {
 
   /** turn_completed：状态行脚注（iteration / cost）。 */
   onTurnCompleted(info: { iteration: number; usage: TokenUsage; cost?: number; finish_reason: string }): void {
+    // ReAct 的 turn_completed.usage 是截至 iteration 的累计快照，不是 delta。
+    this.turnUsage = info.usage;
+    this.turnCost = info.cost;
     const cost = typeof info.cost === "number" ? ` · $${info.cost.toFixed(4)}` : "";
     this.statusText = `↻ iteration ${info.iteration}${cost}`;
   }
@@ -210,7 +280,6 @@ export class TurnStateMachine {
     this.current = null;
     this.state = "idle";
     this.errorBanner = undefined;
-    this.totalCost = 0;
     this.statusText = "";
   }
 

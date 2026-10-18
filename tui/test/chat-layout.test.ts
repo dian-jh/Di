@@ -40,9 +40,9 @@ describe("createChatLayout：全屏视口 + 底部固定 dock", () => {
     assert.deepEqual(l.root.children, [l.transcriptScroll, l.dock]);
   });
 
-  it("dock 顺序 = [banner, status, editor]；输入组件始终最后（贴着终端底部）", () => {
+  it("dock 顺序 = [banner, editor, status]；状态行紧贴输入框下方", () => {
     const l = build();
-    assert.deepEqual(l.dock.children, [l.banner, l.status, l.editor]);
+    assert.deepEqual(l.dock.children, [l.banner, l.editor, l.status]);
   });
 
   it("空文案状态行/横幅塌缩：dock 高度只剩输入槽的 minSize 保护行（不挤占）", () => {
@@ -52,13 +52,13 @@ describe("createChatLayout：全屏视口 + 底部固定 dock", () => {
     assert.equal(dockLines.length, Math.max(1, l.editor.render(80).length), "空 banner/status 不应给 dock 增加行");
   });
 
-  it("非空状态行排在编辑器上方（统计行在输入框上面，不遮挡）", () => {
+  it("非空状态行排在编辑器下方", () => {
     const status = new Text("1 轮 · tokens: in=10", 1, 0);
     const l = build({ status });
     const dockLines = l.dock.render(80);
     const statusRow = dockLines.findIndex((line) => line.includes("1 轮 · tokens: in=10"));
     assert.ok(statusRow !== -1, "状态行文本应出现在 dock 渲染结果中");
-    assert.ok(statusRow < dockLines.length - 1, "状态行应在编辑器行之前");
+    assert.ok(statusRow === dockLines.length - 1, "状态行应位于编辑器之后");
   });
 
   it("transcript 内容经滚动视口渲染（ScrollView 包裹文档容器）", () => {
@@ -85,9 +85,9 @@ describe("createMainScreenLayout：经典 conhost 主缓冲布局", () => {
     assert.ok(!(root instanceof ScrollView), "不应再包 ScrollView：cmd 下滚轮由 conhost 原生处理");
   });
 
-  it("children 顺序 = [transcript, banner, status, editor]，输入框在文档末尾", () => {
+  it("children 顺序 = [transcript, banner, editor, status]", () => {
     const { root, transcript, banner, status, editor } = build();
-    assert.deepEqual(root.children, [transcript, banner, status, editor]);
+    assert.deepEqual(root.children, [transcript, banner, editor, status]);
   });
 
   it("文档渲染按序拼接：transcript 内容在上、空 Text 不占行", () => {

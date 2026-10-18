@@ -27,15 +27,18 @@ import {
   parseColor,
   type SlashCommand,
   styleText,
+  visibleWidth,
+  truncateToWidth,
   Text,
   TuiAltScreen,
   type TuiMainScreen,
 } from "@earendil-works/pi-tui";
-import { AssistantMessage, SystemMessage, UserMessage } from "./message.ts";
+import { AssistantMessage, SystemMessage, TurnGroup, UserMessage } from "./message.ts";
 import { BadgedEditor } from "./badge.ts";
 import { createChatLayout, createMainScreenLayout } from "./chat-layout.ts";
 import type { CommandDescriptor, ModelInfo, SkillInfo } from "../rpc/protocol.ts";
 import { Rule } from "./rule.ts";
+import { SpacedBlock } from "./spacing.ts";
 import type { TurnStateMachine } from "./state.ts";
 
 const colorMode = getTerminalColorMode();
@@ -46,6 +49,13 @@ const frame = parseColor("#a0a0a0");
 /** 选中态 / 强调文字用纯白。 */
 const white = parseColor("#ffffff");
 const gray = parseColor("#808080");
+
+export function formatStatusLine(summary: string, model: string, width: number): string {
+  const modelWidth = Math.min(visibleWidth(model), Math.floor(width / 3));
+  const rightModel = truncateToWidth(model, modelWidth);
+  const left = truncateToWidth(summary, Math.max(0, width - visibleWidth(rightModel) - 1));
+  return `${left}${" ".repeat(Math.max(1, width - visibleWidth(left) - visibleWidth(rightModel)))}${rightModel}`;
+}
 
 const editorTheme: EditorTheme = {
   borderColor: (str) => styleText(str, { fg: frame }, colorMode),
@@ -71,6 +81,7 @@ export class ChatView {
   private readonly onSubmit: (text: string) => void;
 
   private assistant: AssistantMessage | null = null;
+  private currentGroup: TurnGroup | null = null;
   private renderedTurnId = 0;
   private renderedCommandSeq = 0;
 
@@ -80,7 +91,8 @@ export class ChatView {
 
     this.transcript = new Container();
     this.banner = new Text("", 1, 0);
-    this.status = new Text("", 1, 0);
+    // Status row owns the full terminal width; zero horizontal padding keeps the formatter budget exact.
+    this.status = new Text("", 0, 0);
 
     // 命令模式输入：Editor 自带斜杠菜单（行首 `/` 自动弹出 + Tab/Enter 选择），Enter 提交、Shift+Enter 换行。
     this.editor = new Editor(tui, editorTheme);
@@ -168,30 +180,32 @@ export class ChatView {
     const turn = state.current;
     if (turn && turn.id !== this.renderedTurnId) {
       // 新回合：追加用户消息 + 新建助手消息。
-      this.appendDialog(new UserMessage(turn.userMessage));
+      const user = new UserMessage(turn.userMessage);
       this.assistant = new AssistantMessage();
-      this.appendDialog(this.assistant);
+      this.currentGroup = new TurnGroup([user, this.assistant], `回合 ${turn.id}`);
+      this.transcript.addChild(this.transcript.children.length > 0 ? new SpacedBlock(this.currentGroup) : this.currentGroup);
       this.renderedTurnId = turn.id;
     }
     if (turn && this.assistant) {
       this.assistant.setReasoning(turn.reasoning);
       this.assistant.setAnswer(turn.answer);
       this.assistant.syncToolCalls(turn.toolCalls.values());
+    } else if (!turn && this.assistant) {
+      this.assistant.finishThinking();
     }
     // 斜杠命令：输出序号变化 → 追加「用户输入 + 系统应答」两条消息（命令不建回合）。
     if (state.commandSeq !== this.renderedCommandSeq) {
       this.renderedCommandSeq = state.commandSeq;
-      if (state.commandInput) {
-        this.appendDialog(new UserMessage(state.commandInput));
-      }
-      if (state.commandOutput) {
-        this.appendDialog(new SystemMessage(state.commandOutput));
-      }
+      if (state.commandInput) this.appendDialog(new UserMessage(state.commandInput));
+      if (state.commandOutput) this.appendDialog(new SystemMessage(state.commandOutput));
     }
     this.banner.setText(state.errorBanner ?? "");
-    this.status.setText(state.statusText);
-    // 右键角徽标：当前模型 · 强度（ready 握手即写入，启动时 view.sync 立即显示）。
-    this.badgedEditor.setBadge(state.modelLabel());
+    const summary = `Cache: ${state.cacheHitRateLabel()} | Cost: ${state.totalCostLabel()}`;
+    const model = state.model;
+    const width = this.tui.terminal.columns;
+    this.status.setText(formatStatusLine(summary, model, width));
+    // 模型已显示在状态行右侧；不重复绘制旧版输入框下方徽标。
+    this.badgedEditor.setBadge("");
     this.tui.requestRender();
   }
 }

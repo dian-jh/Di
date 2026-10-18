@@ -16,11 +16,13 @@ import {
   ProcessTerminal,
   styleText,
   TuiAltScreen,
-  TuiMainScreen,
 } from "@earendil-works/pi-tui";
 import { ChatView } from "./app/chat-view.ts";
+import { cycleTurnGroup, toggleLatestReasoning, toggleLatestTurnGroup } from "./app/message.ts";
+import { toggleLatestToolCall } from "./app/tool-call.ts";
+import { selectFoldItem, toggleSelectedFoldItem } from "./app/fold-navigation.ts";
 import { normalizeSlash } from "./app/commands.ts";
-import { isClassicConhost } from "./app/terminal-mode.ts";
+import { terminalScreenMode } from "./app/terminal-mode.ts";
 import { TurnStateMachine } from "./app/state.ts";
 import { CommandError, RpcClient, resolveDiBin } from "./rpc/client.ts";
 
@@ -75,23 +77,16 @@ async function main(): Promise<number> {
   }
 
   const terminal = new ProcessTerminal();
-  // 终端模式抉择：经典 conhost（cmd）不用 alt-screen —— conhost 不把滚轮转成 SGR 事件
-  // 交给 Node（pi 同方案的铁证），应用内捕获滚轮在 cmd 里是死路；改用 TuiMainScreen
-  // 渲染进主缓冲，让 conhost 自己的 scrollback 累积输出、滚轮由控制台原生滚动历史。
-  // 现代终端（Windows Terminal / mintty / VS Code 等）走全屏 alt-screen 视口，
-  // SGR 滚轮可用：输入框固定 dock 在底部，PgUp / PgDn 滚动 transcript、上滚后浮现
-  // 「↓ 最新消息」跳回底部。
-  const conhost = isClassicConhost();
-  const tui = conhost
-    ? new TuiMainScreen(terminal, undefined, undefined)
-    : new TuiAltScreen(terminal, undefined, undefined, {
-        mouse: true,
-        // 固定行数而非 "auto"：auto 在 Windows 上按事件间隔推速，慢速滚动每格仅 1 行，
-        // 用户几乎察觉不到在滚动（误以为滚轮失效、历史无法回看）。固定 3 行/格保证可感知。
-        wheelScrollLines: 3,
-        scrollToEndIndicator: () =>
-          styleText(" ↓ 最新消息 ", { fg: parseColor("#a0a0a0") }, getTerminalColorMode()),
-      });
+  // 一律使用可交互的全屏视口，避免 Windows cmd 环境退化为不支持鼠标折叠的主屏模式。
+  // 应用内完整 transcript 仍由 ScrollView 保留，可用滚轮 / PgUp / PgDn 查看历史。
+  const screenMode = terminalScreenMode();
+  if (screenMode !== "interactive") throw new Error(`Unsupported terminal mode: ${screenMode}`);
+  const tui = new TuiAltScreen(terminal, undefined, undefined, {
+    mouse: true,
+    wheelScrollLines: 3,
+    scrollToEndIndicator: () =>
+      styleText(" ↓ 最新消息 ", { fg: parseColor("#a0a0a0") }, getTerminalColorMode()),
+  });
 
   view = new ChatView(tui, (text) => {
     if (!state.isIdle) {
@@ -100,6 +95,12 @@ async function main(): Promise<number> {
       return;
     }
     if (text.startsWith("/")) {
+      if (text.trim() === "/usage") {
+        state.startCommand(text);
+        state.finishCommand(state.usageSummary());
+        view?.sync(state);
+        return;
+      }
       // 斜杠命令：交给后端注册表执行（内置 + 用户命令在 C# 宿主侧，TUI 只做前缀路由）。
       state.startCommand(text);
       void runCommand(text);
@@ -118,6 +119,14 @@ async function main(): Promise<number> {
 
   // Ctrl+C：运行中首按 → interrupt（取消当前回合）；cancelling/idle → shutdown（退出）。
   const unsubscribeInput = tui.addInputListener((data) => {
+    if (matchesKey(data, "ctrl+o")) { toggleLatestTurnGroup(); tui.requestRender(); return { consume: true }; }
+    if (matchesKey(data, "ctrl+up")) { cycleTurnGroup(-1); tui.requestRender(); return { consume: true }; }
+    if (matchesKey(data, "ctrl+down")) { cycleTurnGroup(1); tui.requestRender(); return { consume: true }; }
+    if (matchesKey(data, "alt+up")) { selectFoldItem(-1); tui.requestRender(); return { consume: true }; }
+    if (matchesKey(data, "alt+down")) { selectFoldItem(1); tui.requestRender(); return { consume: true }; }
+    if (matchesKey(data, "ctrl+enter")) { toggleSelectedFoldItem(); tui.requestRender(); return { consume: true }; }
+    if (matchesKey(data, "ctrl+r")) { toggleLatestReasoning(); tui.requestRender(); return { consume: true }; }
+    if (matchesKey(data, "ctrl+t")) { toggleLatestToolCall(); tui.requestRender(); return { consume: true }; }
     if (!matchesKey(data, "ctrl+c")) return undefined;
     if (state.state === "running") {
       state.requestCancel();

@@ -4,17 +4,72 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { stripTerminalSequences } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, Text, visibleWidth } from "@earendil-works/pi-tui";
 
-import { SystemMessage, UserMessage } from "../src/app/message.ts";
+import { AssistantMessage, SystemMessage, TurnGroup, UserMessage } from "../src/app/message.ts";
+import { ToolCallView } from "../src/app/tool-call.ts";
+import { SpacedBlock } from "../src/app/spacing.ts";
 
-describe("UserMessage：浅灰条形框", () => {
-  it("内容上下各有全宽框线", () => {
-    const lines = new UserMessage("你好").render(20);
-    assert.equal(lines.length, 3, "上框线 + 内容 + 下框线");
-    assert.equal(stripTerminalSequences(lines[0]!), "─".repeat(20));
-    assert.equal(stripTerminalSequences(lines[2]!), "─".repeat(20));
-    assert.ok(stripTerminalSequences(lines[1]!).includes("❯ 你好"), "内容带 ❯ 前缀");
+describe("UserMessage：整行灰底", () => {
+	it("使用 > 前缀、可读前景和填满宽度的灰底", () => {
+		const lines = new UserMessage("你好").render(20);
+		assert.equal(lines.length, 1);
+		assert.ok(stripTerminalSequences(lines[0]!).includes("> 你好"));
+		assert.equal(visibleWidth(lines[0]!), 20);
+		assert.match(lines[0]!, /\x1b\[48;2;55;55;55m/, "整行应使用 #373737 背景色");
+		assert.match(lines[0]!, /\x1b\[38;2;242;242;242m/, "用户文字应使用高对比浅色");
+  });
+	it("换行与 CJK 按终端列宽填底色", () => {
+		const lines = new UserMessage("你好\nabcdefghijk").render(8);
+		assert.ok(lines.length >= 3);
+		assert.ok(lines.every((line) => visibleWidth(line) === 8));
+		assert.ok(lines.every((line) => /\x1b\[48;2;55;55;55m/.test(line)));
+	});
+});
+
+describe("ToolCallView：默认折叠与键盘切换", () => {
+  it("left-button press/release/click toggles reliably; right click does not", () => {
+    const view = new ToolCallView();
+    view.update({ id: "mouse", name: "shell", arguments: '{"cmd":"echo hi"}', status: "completed", observation: "output" });
+    const event = (type: "press" | "release" | "click", button: "left" | "right" = "left") => ({
+      type, button, x: 0, y: 0, screenX: 0, screenY: 0, width: 80, height: 24,
+      shift: false, alt: false, ctrl: false,
+    } as const);
+    const toggleWithPair = () => {
+      const pressed = view.component.handleMouse?.(event("press"));
+      assert.equal(pressed?.handled, true);
+      assert.equal(pressed?.render, false);
+      view.component.handleMouse?.(event("release"));
+      view.component.handleMouse?.(event("click"));
+    };
+
+    toggleWithPair();
+    assert.match(stripTerminalSequences(view.component.render(80).join("\n")), /output/);
+    toggleWithPair();
+    assert.ok(!stripTerminalSequences(view.component.render(80).join("\n")).includes("output"));
+    assert.equal(view.component.handleMouse?.(event("press", "right")), undefined);
+  });
+
+  it("默认隐藏参数/结果，Enter 展开后显示，再按 Enter 折叠", () => {
+    const view = new ToolCallView();
+    view.update({ id: "1", name: "read", arguments: '{"path":"x"}', status: "completed", observation: "contents" });
+    const collapsed = stripTerminalSequences(view.component.render(80).join("\n"));
+    assert.ok(!collapsed.includes("contents"));
+    view.component.handleInput?.("\r");
+    assert.match(stripTerminalSequences(view.component.render(80).join("\n")), /contents/);
+    view.component.handleInput?.("\r");
+    assert.ok(!stripTerminalSequences(view.component.render(80).join("\n")).includes("contents"));
+  });
+
+  it("折叠标题显示工具耗时，参数只在展开后显示", () => {
+    const view = new ToolCallView();
+    view.update({ id: "2", name: "shell", arguments: '{"cmd":"ok"}', status: "running" });
+    view.update({ id: "2", name: "shell", arguments: '{"cmd":"ok"}', status: "completed", observation: "done" });
+    const collapsed = stripTerminalSequences(view.component.render(80).join("\n"));
+    assert.match(collapsed, /shell 0\.0s/);
+    assert.ok(!collapsed.includes('"cmd"'));
+    view.component.handleInput?.("\r");
+    assert.match(stripTerminalSequences(view.component.render(80).join("\n")), /args \{"cmd":"ok"\}/);
   });
 });
 
@@ -24,5 +79,98 @@ describe("SystemMessage：无框系统应答", () => {
     assert.equal(lines.length, 2);
     assert.ok(stripTerminalSequences(lines[0]!).includes("‖ a"));
     assert.ok(stripTerminalSequences(lines[1]!).includes("‖ b"));
+  });
+});
+
+describe("TurnGroup：历史回合独立折叠", () => {
+  it("只折叠当前组；Enter 可重新展开", () => {
+    const first = new TurnGroup([new Text("answer one")], "回合一");
+    const second = new TurnGroup([new Text("answer two")], "回合二");
+    first.handleInput("\r");
+    assert.ok(!first.render(40).join("\n").includes("answer one"));
+    assert.ok(second.render(40).join("\n").includes("answer two"));
+    first.handleInput("\r");
+    assert.ok(first.render(40).join("\n").includes("answer one"));
+  });
+});
+
+describe("SpacedBlock：只为可见块留一个普通空行", () => {
+  it("用户行之后的 thinking/answer 留空行，空 assistant 不制造空白", () => {
+    const assistant = new AssistantMessage();
+    const group = new TurnGroup([new UserMessage("prompt"), assistant], "spacing");
+    assert.equal(group.render(30).length, 1);
+    assistant.setReasoning("reason");
+    const thinking = group.render(30).map(stripTerminalSequences);
+    assert.ok(thinking.includes(""), "用户灰条与思考标题之间应留普通背景空行");
+    assistant.setAnswer("answer");
+    const answer = group.render(30).map(stripTerminalSequences);
+    const answerIndex = answer.findIndex((line) => line.includes("answer"));
+    assert.ok(answerIndex > 0 && answer[answerIndex - 1] === "", "思考展开内容与答案之间应留空行");
+    assistant.setAnswer("answer\ncontinued");
+    assert.equal(group.render(30).filter((line) => stripTerminalSequences(line) === "").length, 2,
+      "流式 setText 更新不能累计空行");
+  });
+
+  it("空块保持零行，鼠标坐标映射跳过插入的空白行", () => {
+    const child = new Text("line", 0, 0);
+    let receivedY = -1;
+    child.handleMouse = (event) => { receivedY = event.y; return { handled: true, render: false }; };
+    const spaced = new SpacedBlock(child);
+    const rendered = spaced.render(20).map(stripTerminalSequences);
+    assert.equal(rendered[0], "");
+    assert.match(rendered[1]!, /^line/);
+    spaced.handleMouse?.({ type: "click", button: "left", x: 0, y: 1, screenX: 0, screenY: 1, width: 20, height: 4, shift: false, alt: false, ctrl: false });
+    assert.equal(receivedY, 0);
+    assert.equal(new SpacedBlock(new Text("", 0, 0)).render(20).length, 0);
+  });
+
+  it("历史回合后留一行，首个回合不需要前置空白", () => {
+    const first = new TurnGroup([new UserMessage("one")], "one");
+    const second = new TurnGroup([new UserMessage("two")], "two");
+    assert.equal(first.render(20).length, 1);
+    const spaced = new SpacedBlock(second).render(20).map(stripTerminalSequences);
+    assert.equal(spaced.length, 2);
+    assert.equal(spaced[0], "");
+    assert.match(spaced[1]!, /two/);
+  });
+});
+
+describe("Thinking 折叠", () => {
+  it("complete left-button press/release pairs toggle Thinking in both directions", () => {
+    const assistant = new AssistantMessage();
+    assistant.setReasoning("reasoning text");
+    const group = new TurnGroup([new UserMessage("prompt"), assistant], "回合测试");
+    const fold = assistant.children[0]!;
+    const gesture = (type: "press" | "release" | "click", y: number, button: "left" | "right" = "left") => ({
+      type, button, x: 0, y, screenX: 0, screenY: y, width: 80, height: 24,
+      shift: false, alt: false, ctrl: false,
+    } as const);
+
+    const press1 = group.handleMouse(gesture("press", 2));
+    assert.equal(press1?.handled, true, "press must register a target so the TUI can synthesize click on release");
+    assert.equal(press1?.render, false, "press capture must not repaint or steal focus");
+    group.handleMouse(gesture("release", 2));
+    group.handleMouse(gesture("click", 2));
+    assert.ok(fold.render(80).join("\n").includes("reasoning text"));
+
+    group.handleMouse(gesture("press", 2));
+    group.handleMouse(gesture("release", 2));
+    group.handleMouse(gesture("click", 2));
+    assert.ok(!fold.render(80).join("\\n").includes("reasoning text"));
+
+    assert.equal(group.handleMouse(gesture("press", 2, "right")), undefined, "right click must not capture a fold gesture");
+  });
+
+  it("完成后折叠和展开保留冻结耗时", () => {
+    const assistant = new AssistantMessage();
+    assistant.setReasoning("reasoning");
+    assistant.finishThinking();
+    const fold = assistant.children[0]!;
+    const first = stripTerminalSequences(fold.render(80).find((line) => stripTerminalSequences(line).includes("Thinking"))!);
+    fold.handleInput?.("\r");
+    fold.handleInput?.("\r");
+    const after = stripTerminalSequences(fold.render(80).find((line) => stripTerminalSequences(line).includes("Thinking"))!);
+    assert.match(first, /Thinking · \d+\.\d+s/);
+    assert.equal(after, first);
   });
 });

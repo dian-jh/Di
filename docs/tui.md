@@ -77,11 +77,11 @@ tui/
 │   │   └── client.ts       # 子进程管理：spawn、ready 握手、请求方法、事件订阅、退出清理
 │   └── app/
 │       ├── state.ts        # 回合状态机（idle/running/cancelling）+ 会话元数据（模型/强度/skills/models）
-│       ├── chat-view.ts    # 聊天视口：transcript + 错误横幅 + 状态行（左下回合统计）+ 输入框，装载到全屏布局根
-│       ├── chat-layout.ts  # 全屏布局装配（纯函数）：root = VStack[transcript ScrollView + dock]，可单测
+│       ├── chat-view.ts    # 聊天视口：transcript + 错误横幅 + 输入框 + 输入框下状态行，装载到全屏布局根
+│       ├── chat-layout.ts  # 全屏布局装配（纯函数）：root = VStack[transcript ScrollView + dock]，输入框后固定状态行
 │       ├── badge.ts        # 输入框下方独立徽标行（右对齐，不与输入框同处一行；委托鼠标/键盘）
 │       ├── terminal-mode.ts# 终端模式检测：经典 conhost（cmd）vs 现代终端（WT/TERM_PROGRAM/ConEmuANSI）
-│       ├── message.ts      # 用户/助手消息组件（用户输入自带浅灰条形框）
+│       ├── message.ts      # 用户/助手消息组件（用户输入整行灰底）
 │       ├── rule.ts         # 浅灰框线（消息分隔 / 用户条形框 / 输入框边框，颜色可配）
 │       ├── commands.ts     # 斜杠命令文本解析 + skill: 前缀归一（纯函数，可单测）
 │       └── tool-call.ts    # 工具调用组件（标题行 + 结果，M2 再做折叠/展开）
@@ -96,9 +96,19 @@ tui/
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
 | **M1** | C# `--mode rpc` 后端 + reasoning/toolcall 事件转发；TS TUI MVP（流式文本、工具行、提示输入、Ctrl+C 中断） | 已实现 |
-| M2 | 全屏 alt-screen 视口（transcript ScrollView + dock）、工具折叠 / 展开、skills 展示、Markdown 主题 | 部分实现（本变更）：全屏 alt-screen 视口已落地，仅用于**现代终端**（Windows Terminal / mintty / VS Code 等，SGR 滚轮可用）—— transcript ScrollView（follow end，滚轮 / PgUp / PgDn 滚动、`↓ 最新消息`跳底；无滚动条 hidden）+ dock（错误横幅 / 状态行 / 输入框固定终端底部，对齐 pi coding-agent `createChatViewport`，`tui/src/app/chat-layout.ts`）。**cmd 特例**：经典 conhost 不把滚轮转成 SGR 事件交给 Node（pi 同方案在 cmd 同样滚不动的铁证），应用内捕获滚轮是死路 → 走 `TuiMainScreen` 主缓冲渲染（`createMainScreenLayout`，纯 Container 堆叠、无 ScrollView），conhost 自己的 scrollback 累积整份文档、滚轮由控制台原生滚动历史（见 `tui/src/app/terminal-mode.ts`、`tui/src/main.ts`）。剩余：工具折叠 / 展开、skills 展示、Markdown 主题 |
-| M3 | 状态栏（模型 / 成本 / tokens）、`/tui` 主屏/全屏切换、斜杠命令 UI、编辑器增强（补全 / 粘贴） | 部分就绪：命令注册表（内置 + `~/.di/commands/*.md` 用户命令）已挂到 C# 宿主（`CliHost.Commands`），RPC `command` 方法（list/run，`docs/tui-rpc.md` §2.5/§3）。**本变更**：命令 UI + 状态显示落地 —— 输入框换 `Editor`（内置斜杠菜单：行首 `/` 弹命令+skills 列表、Tab/Enter 选择、`/m` 模糊命中），`ready` 握手携带 model/effort/skills/models 快照 → 模型徽标（`模型 · 强度`）渲染在输入框下方独立一行、右对齐（不与输入框同处一行；早期合成进底部边框造成视觉冲突，故改独立行）、终端一开即显示（启动时 `view.sync`，`/model` 切换后经 `command_ran` 快照实时更新）；用户输入消息自带浅灰条形框（区分非用户输入）；左下角状态行记录最近一回合统计（`N 轮 · tokens: … · cost:…`，与 REPL 摘要同格式，`EventRenderer.cs:140`/`TokenUsage.cs` 同源）；`/model <Tab>`/`/skill <Tab>` 参数补全；回合型命令（`/skill <名> <参数>`、用户命令）经 `turn_message` 回退到 TUI 自身 prompt 回合。**体验修补**：现代终端滚轮固定 3 行/格（`wheelScrollLines: 3`，`auto` 在 Windows 上慢速滚动每格仅 1 行、感觉不到在动）；cmd 滚轮修复 = 上面 M2 的 `TuiMainScreen` 主缓冲方案（conhost 原生 scrollback 滚动，不依赖应用收滚轮事件）。剩余：`/tui` 主屏/全屏切换、粘贴增强 |
+| M2 | 全屏 alt-screen 视口（transcript ScrollView + dock）、工具折叠 / 展开、skills 展示、Markdown 主题 | 部分实现：全屏 alt-screen 视口使用 transcript ScrollView（follow end，滚轮 / PgUp / PgDn 滚动、`↓ 最新消息`跳底；无滚动条）与固定 dock（`tui/src/app/chat-layout.ts`）。所有终端使用同一全屏布局。剩余：工具折叠 / 展开、skills 展示、Markdown 主题 |
+| M3 | 状态栏（模型 / 成本 / tokens）、`/tui` 主屏/全屏切换、斜杠命令 UI、编辑器增强（补全 / 粘贴） | 部分就绪：命令注册表与 RPC `command` 方法见 `docs/tui-rpc.md` §2.5/§3。TUI 使用 `Editor` 斜杠菜单与参数补全；`ready` / `command_ran` 更新模型元数据。状态行固定在输入框下方，左侧显示累计 cache 命中率与 cost，右侧显示纯模型名。用户消息为整行灰底并用 `>` 标记；回合不再绘制重复输入标题，折叠导航仍保留。剩余：`/tui` 切换与粘贴增强 |
 | M4（本变更） | 安装整合（`install.*` 构建 TS 并复制到 `~/.di/tui/`）、`di` 交互默认启动 TUI（`node <entry>` 继承控制台；`DI_UI=repl` 逃生门回退 REPL）、根 `README.md` 用户视图 | **已实现**（`di tui` 显式子命令仍待办） |
+
+### TUI 展示行为（`tui/src/app/`）
+
+- 用户消息以 `>` 前缀显示为整行 `#373737` 灰底浅色文字，包含 CJK 与换行内容；助手正文使用 `@earendil-works/pi-tui` 的 `Markdown` 组件增量更新。状态行固定在输入框下方，左侧显示 Cache/Cost，右侧仅显示模型名。历史回合不重复显示用户输入标题，折叠导航键仍可用。
+- 可见内容块之间由 `tui/src/app/spacing.ts` 的 `SpacedBlock` 插入一行普通背景留白：用户灰条与思考/工具/答案、思考展开内容与后续工具/答案、相邻回合之间至少一行；空组件不占行，流式更新重用同一组件而不会累积空行。间隔行不会继承用户灰底，也不改变 Markdown 内部排版。
+- 标准 `diff` fenced block 中新增行使用绿色背景、删除行使用红色背景（跳过 `+++` / `---` 文件头）；普通代码块和正文行不按首字符染色。
+- 工具卡片默认折叠，仅显示名称、状态与 UI 实测耗时；参数和结果在展开后显示。通过点击或逐项快捷键可展开；思考区也默认折叠并显示 UI 实测耗时。历史按回合分组，各组独立折叠。`Alt+Up` / `Alt+Down` 遍历各可折叠项，`Ctrl+Enter` 切换选中项；现代终端提供 ScrollView 鼠标与翻页滚动，经典 conhost 由系统 scrollback 负责滚轮并支持键盘快捷键。
+- `/usage` 展示会话累计 input/output/total/cache_read/cache_write/reasoning、cache 命中率与费用，并将协议未提供的当前上下文用量显示为 `N/A`。正常累计采纳 `result` 回合终值；synthetic zero usage（取消或错误）使用最近的 `turn_completed` 累计快照。缺失的 cache/cost 子字段不会按零伪造完整统计。命中率与 `Core/Llm/TokenUsage.CacheHitRate` 对齐：`cache_read / (input + cache_read + cache_write)`，分母中缺少的可选 cache-write 按 0 处理；cache-write 单项展示仍为 `N/A`，cache-read 缺失则整体命中率为 `N/A`。实现见 `tui/src/app/state.ts` 的 `TurnStateMachine.usageSummary()` / `finishTurn()` / `onTurnCompleted()`。
+- 折叠键盘操作：`Alt+Up` / `Alt+Down` 在历史回合、思考区、工具卡片间逐项选择，`Ctrl+Enter` 切换选中项；`Ctrl+Up` / `Ctrl+Down` 选择历史回合，`Ctrl+O` / `Ctrl+R` / `Ctrl+T` 提供快速切换。全局快捷键不夺走输入框焦点；鼠标点击只触发展开/折叠。
+- 新增交互应先在 `tui/test/` 写失败测试，再实现；Node 测试入口为 `cd tui && npm test`，构建为 `cd tui && npm run build`。
 
 ## 6. 验收信号（M1）
 
