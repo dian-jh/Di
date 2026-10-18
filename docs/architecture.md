@@ -129,7 +129,7 @@ Repl.RunTurnAsync
    loop 层保持无状态、可独立复用。
 7. **失败是观察不是崩溃**：工具失败 → 错误观察文本回填模型；不可重试模型错误 → 干净结局。
 8. **MVP 优先 + TDD**：每个模块最小可用先跑通，测试先行（红→绿），提交用 Conventional Commits
-   （见根 `CLAUDE.md`）。
+   （见根 `AGENTS.md`）。
 9. **模型是纯数据、鉴权是声明**：模型目录（Catalog）与认证声明（Auth）都是适配器上的数据，
    凭据存储（`ILlmCredentialStore`）由宿主注入、请求时才解析——加模型 / 换凭据来源零引擎改动。
 10. **工具设计（schema 与说明互补、说明与 schema 同源、子集预留）**：`tools` 参数是机器可读的
