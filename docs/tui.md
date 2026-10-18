@@ -107,6 +107,7 @@ tui/
 - 标准 `diff` fenced block 中新增行使用绿色背景、删除行使用红色背景（跳过 `+++` / `---` 文件头）；普通代码块和正文行不按首字符染色。
 - 工具卡片默认折叠，仅显示名称、状态与 UI 实测耗时；参数和结果在展开后显示。通过点击或逐项快捷键可展开；思考区也默认折叠并显示 UI 实测耗时。历史按回合分组，各组独立折叠。`Alt+Up` / `Alt+Down` 遍历各可折叠项，`Ctrl+Enter` 切换选中项；现代终端提供 ScrollView 鼠标与翻页滚动，经典 conhost 由系统 scrollback 负责滚轮并支持键盘快捷键。
 - `/usage` 展示会话累计 input/output/total/cache_read/cache_write/reasoning、cache 命中率与费用，并将协议未提供的当前上下文用量显示为 `N/A`。正常累计采纳 `result` 回合终值；synthetic zero usage（取消或错误）使用最近的 `turn_completed` 累计快照。缺失的 cache/cost 子字段不会按零伪造完整统计。命中率与 `Core/Llm/TokenUsage.CacheHitRate` 对齐：`cache_read / (input + cache_read + cache_write)`，分母中缺少的可选 cache-write 按 0 处理；cache-write 单项展示仍为 `N/A`，cache-read 缺失则整体命中率为 `N/A`。实现见 `tui/src/app/state.ts` 的 `TurnStateMachine.usageSummary()` / `finishTurn()` / `onTurnCompleted()`。
+- 输入行首 `/` 后，`@earendil-works/pi-tui` 的 `Editor` 显示斜杠菜单；`CombinedAutocompleteProvider` 用 `fuzzyFilter` 做按字符顺序匹配并按连续字符、词边界、间隔打分排序（子序列匹配，不是单纯前缀或子串）。因此输入 `/u` 会匹配 `/usage`，选择候选后替换命令文本并追加空格。TUI 的命令候选由 `tui/src/app/chat-view.ts` 的 `buildAutocompleteEntries()` 组装：包含 RPC 后端注册的 `exit` / `help` / `clear` / `model` / `skills` / `skill`，并补入本地执行的 `usage`；skill 名以 `skill:<名称>` 形式加入菜单，`/model` 与 `/skill` 另提供参数补全。`/usage` 在 `tui/src/main.ts` 的提交处理器中直接调用 `TurnStateMachine.usageSummary()`，不经过 RPC 命令注册表。
 - 折叠键盘操作：`Alt+Up` / `Alt+Down` 在历史回合、思考区、工具卡片间逐项选择，`Ctrl+Enter` 切换选中项；`Ctrl+Up` / `Ctrl+Down` 选择历史回合，`Ctrl+O` / `Ctrl+R` / `Ctrl+T` 提供快速切换。全局快捷键不夺走输入框焦点；鼠标点击只触发展开/折叠。
 - 新增交互应先在 `tui/test/` 写失败测试，再实现；Node 测试入口为 `cd tui && npm test`，构建为 `cd tui && npm run build`。
 

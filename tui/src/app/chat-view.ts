@@ -57,6 +57,42 @@ export function formatStatusLine(summary: string, model: string, width: number):
   return `${left}${" ".repeat(Math.max(1, width - visibleWidth(left) - visibleWidth(rightModel)))}${rightModel}`;
 }
 
+export function buildAutocompleteEntries(
+  commands: CommandDescriptor[], skills: SkillInfo[], models: ModelInfo[],
+): (SlashCommand | AutocompleteItem)[] {
+  const skillItems: AutocompleteItem[] = skills.map((s) => ({
+    value: `skill:${s.name}`,
+    label: s.name,
+    description: s.description,
+  }));
+  const skillCommand: SlashCommand = {
+    name: "skill",
+    description: "激活/停用 skill；带参数一次性执行",
+    argumentHint: "<名称> [参数]",
+    getArgumentCompletions: (prefix) =>
+      skills
+        .filter((s) => !prefix || s.name.includes(prefix))
+        .map((s) => ({ value: s.name, label: s.name, description: s.description })),
+  };
+  const commandEntries: SlashCommand[] = commands.map((c) => ({
+    name: c.name,
+    description: c.description,
+    argumentHint: c.argument_hint,
+    ...(c.name === "model"
+      ? {
+          getArgumentCompletions: (prefix: string) =>
+            models
+              .filter((m) => !prefix || `${m.id} ${m.name}`.toLowerCase().includes(prefix.toLowerCase()))
+              .map((m) => ({ value: m.id, label: m.id, description: m.name })),
+        }
+      : {}),
+  }));
+  if (!commandEntries.some((command) => command.name === "usage")) {
+    commandEntries.push({ name: "usage", description: "显示会话累计用量" });
+  }
+  return [...commandEntries, skillCommand, ...skillItems];
+}
+
 const editorTheme: EditorTheme = {
   borderColor: (str) => styleText(str, { fg: frame }, colorMode),
   selectList: {
@@ -127,37 +163,10 @@ export class ChatView {
 
   /** 安装命令补全（ready 握手后调用）：后端命令 + skills（skill:<名> 形态）+ /model /skill 参数补全。 */
   setAutocomplete(commands: CommandDescriptor[], skills: SkillInfo[], models: ModelInfo[]): void {
-    const skillItems: AutocompleteItem[] = skills.map((s) => ({
-      value: `skill:${s.name}`,
-      label: s.name,
-      description: s.description,
-    }));
-    const skillCommand: SlashCommand = {
-      name: "skill",
-      description: "激活/停用 skill；带参数一次性执行",
-      argumentHint: "<名称> [参数]",
-      getArgumentCompletions: (prefix) =>
-        skills
-          .filter((s) => !prefix || s.name.includes(prefix))
-          .map((s) => ({ value: s.name, label: s.name, description: s.description })),
-    };
-    const commandEntries: SlashCommand[] = commands.map((c) => ({
-      name: c.name,
-      description: c.description,
-      argumentHint: c.argument_hint,
-      // /model <Tab>：从模型目录补全可切换的模型名。
-      ...(c.name === "model"
-        ? {
-            getArgumentCompletions: (prefix: string) =>
-              models
-                .filter((m) => !prefix || `${m.id} ${m.name}`.toLowerCase().includes(prefix.toLowerCase()))
-                .map((m) => ({ value: m.id, label: m.id, description: m.name })),
-          }
-        : {}),
-    }));
+    // CombinedAutocompleteProvider's fuzzy matching displays the command menu and arguments.
     // CombinedAutocompleteProvider 对 `skill:<名>` 条目先按剥名、再按全名模糊匹配（autocomplete.js），
     // 因此 `/` 列出全部 skills+命令，`/m` 等前缀即模糊命中。
-    const provider = new CombinedAutocompleteProvider([...commandEntries, skillCommand, ...skillItems], process.cwd());
+    const provider = new CombinedAutocompleteProvider(buildAutocompleteEntries(commands, skills, models), process.cwd());
     this.editor.setAutocompleteProvider(provider);
   }
 
