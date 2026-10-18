@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Core.Llm;
 using Core.Providers.DeepSeek;
 
 namespace Di.Tests.Providers;
@@ -60,7 +61,7 @@ public sealed class DeepSeekUsageParsingTests
 
         Assert.Equal(3072, usage.CacheReadTokens);
         Assert.Equal(22, usage.ReasoningTokens);
-        Assert.Equal(3291, usage.InputTokens);
+        Assert.Equal(219, usage.InputTokens);
     }
 
     [Fact]
@@ -79,5 +80,75 @@ public sealed class DeepSeekUsageParsingTests
         var usage = DeepSeekTranslator.ToUsage(wire);
 
         Assert.Equal(800, usage.CacheReadTokens);
+    }
+
+    [Fact]
+    public void ToUsage_UsesPromptCacheMissTokens_AsUncachedInput()
+    {
+        var usage = DeepSeekTranslator.ToUsage(new DeepSeekUsage
+        {
+            PromptTokens = 1000,
+            PromptCacheHitTokens = 800,
+            PromptCacheMissTokens = 200,
+        });
+
+        Assert.Equal(200, usage.InputTokens);
+        Assert.Equal(800, usage.CacheReadTokens);
+        Assert.Equal(1000, usage.BillableInputTokens);
+    }
+
+    [Fact]
+    public void ToUsage_FallsBackToPromptMinusCacheHit_WhenMissTokensAreMissing()
+    {
+        var usage = DeepSeekTranslator.ToUsage(new DeepSeekUsage
+        {
+            PromptTokens = 1000,
+            PromptCacheHitTokens = 800,
+        });
+
+        Assert.Equal(200, usage.InputTokens);
+        Assert.Equal(800, usage.CacheReadTokens);
+    }
+
+    [Fact]
+    public void ToUsage_CostUsesDisjointUncachedAndCacheReadRates()
+    {
+        var usage = DeepSeekTranslator.ToUsage(new DeepSeekUsage
+        {
+            PromptTokens = 1000,
+            CompletionTokens = 0,
+            PromptCacheHitTokens = 800,
+            PromptCacheMissTokens = 200,
+        });
+        var cost = CostCalculator.Calculate(new ModelCostRates(
+            InputPerMillion: 1.00,
+            OutputPerMillion: 0,
+            CacheReadPerMillion: 0.20), usage);
+
+        Assert.Equal(0.0002, cost.Input, precision: 9);
+        Assert.Equal(0.00016, cost.CacheRead, precision: 9);
+        Assert.Equal(0.00036, cost.Total, precision: 9);
+    }
+
+    [Fact]
+    public void ToUsage_MissingTotalTokensPreservesUnknown()
+    {
+        const string json = """{"usage":{"prompt_tokens":10,"completion_tokens":2}}""";
+        var chunk = JsonSerializer.Deserialize<DeepSeekChatChunk>(json, DeepSeekJson.Options)!;
+
+        var usage = DeepSeekTranslator.ToUsage(chunk.Usage!);
+
+        Assert.Null(usage.TotalTokens);
+    }
+
+    [Fact]
+    public void ToUsage_ExplicitZeroTotalTokensRemainsZero()
+    {
+        const string json = """{"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}""";
+        var chunk = JsonSerializer.Deserialize<DeepSeekChatChunk>(json, DeepSeekJson.Options)!;
+
+        var usage = DeepSeekTranslator.ToUsage(chunk.Usage!);
+
+        Assert.Equal(0, usage.TotalTokens);
     }
 }

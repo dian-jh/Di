@@ -250,12 +250,17 @@ internal static class DeepSeekTranslator
         _ => new FinishReason.Error(new LlmFailure($"未知 finish_reason: '{finishReason}'。", "UNKNOWN_FINISH_REASON")),
     };
 
-    public static TokenUsage ToUsage(DeepSeekUsage usage) => new(
-        InputTokens: usage.PromptTokens,
-        OutputTokens: usage.CompletionTokens,
-        TotalTokens: usage.TotalTokens,
-        CacheReadTokens: usage.PromptCacheHitTokens ?? usage.PromptTokensDetails?.CachedTokens,
-        ReasoningTokens: usage.CompletionTokensDetails?.ReasoningTokens);
+    public static TokenUsage ToUsage(DeepSeekUsage usage)
+    {
+        var cacheRead = usage.PromptCacheHitTokens ?? usage.PromptTokensDetails?.CachedTokens;
+        var input = usage.PromptCacheMissTokens ?? Math.Max(0, usage.PromptTokens - (cacheRead ?? 0));
+        return new TokenUsage(
+            InputTokens: input,
+            OutputTokens: usage.CompletionTokens,
+            TotalTokens: usage.TotalTokens,
+            CacheReadTokens: cacheRead,
+            ReasoningTokens: usage.CompletionTokensDetails?.ReasoningTokens);
+    }
 }
 
 internal sealed class DeepSeekContentPart

@@ -51,7 +51,7 @@ internal sealed class DeepSeekUsage
 {
     public int CompletionTokens { get; set; }
     public int PromptTokens { get; set; }
-    public int TotalTokens { get; set; }
+    public int? TotalTokens { get; set; }
 
     /// <summary>顶层字段（官方线格式）：命中上下文缓存的 prompt token 数。</summary>
     public int? PromptCacheHitTokens { get; set; }
