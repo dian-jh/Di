@@ -91,6 +91,17 @@ ModelRequest 和 `Core/Llm/ChatModelClient.cs` 传给翻译器，作为哈希化
 旧历史没有原始 output 时沿用兼容回放。store:false 不等于禁用提示缓存。
 不添加填充、预热或显式缓存写入请求；修改推理强度仍可能导致前缀变化。
 
+**订阅（SIWC）通道的缓存实测**：官方[模型与推理](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
+要求 store:false + stream:true 的无状态请求（HTTP 上不传 previous_response_id）；
+[预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
+把 prompt_cache_retention 列为不支持字段，且未声明该通道提供提示缓存。
+实测在固定前缀（相同 runner/会话键/工具集、连续三条相同请求）下，usage 始终
+无 cached_tokens / cache_write_tokens（cache_read=0，首请求也无 cache_write），
+而 gpt-6.1-sol 在付费 API 上的缓存能力见[模型页](https://developers.openai.com/api/docs/models/gpt-6.1-sol)。
+说明该通道当前不提供缓存计量：本地 cache_read=0 属预期，不代表 Di 请求拼装错误；
+缓存命中率类优化主要作用于会上报缓存的提供商（如 DeepSeek，见 docs/modules/deepseek.md）。
+需最终确认时可抓 response.completed 事件里的原始 usage 字段。
+
 ## Responses
 
 请求使用 store:false、stream:true 和完整 input 历史，system 转 developer。

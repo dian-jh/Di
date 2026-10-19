@@ -59,9 +59,13 @@ public sealed class DeepSeekUsageParsingTests
 
         var usage = DeepSeekTranslator.ToUsage(chunk.Usage!);
 
+        // 计数互斥（TokenUsage 契约）：InputTokens 只含未命中部分，命中单独报 CacheReadTokens。
         Assert.Equal(3072, usage.CacheReadTokens);
         Assert.Equal(22, usage.ReasoningTokens);
-        Assert.Equal(219, usage.InputTokens);
+        Assert.Equal(24, usage.OutputTokens);
+        Assert.Equal(3315, usage.TotalTokens);
+        Assert.Equal(219, usage.InputTokens);                    // 3291 全量 − 3072 命中 = 未命中
+        Assert.Equal(3291, usage.BillableInputTokens);           // 未命中 + 命中读取 = 计费全量
     }
 
     [Fact]
@@ -80,6 +84,42 @@ public sealed class DeepSeekUsageParsingTests
         var usage = DeepSeekTranslator.ToUsage(wire);
 
         Assert.Equal(800, usage.CacheReadTokens);
+        Assert.Equal(200, usage.InputTokens);   // 无 miss 字段 → 全量 1000 − 命中 800 兜底
+    }
+
+    [Fact]
+    public void ToUsage_FallsBackToSubtraction_WhenMissFieldAbsent()
+    {
+        // 实测顶层 hit/miss 并存；若只出现 hit，则由全量扣除命中兜底出未命中数。
+        var wire = new DeepSeekUsage
+        {
+            PromptTokens = 1000,
+            CompletionTokens = 5,
+            TotalTokens = 1005,
+            PromptCacheHitTokens = 800,
+        };
+
+        var usage = DeepSeekTranslator.ToUsage(wire);
+
+        Assert.Equal(800, usage.CacheReadTokens);
+        Assert.Equal(200, usage.InputTokens);
+    }
+
+    [Fact]
+    public void ToUsage_NoCacheFields_KeepsFullPromptAsInput()
+    {
+        // 无任何缓存字段（未启用/未上报）时，整个 prompt 都是未命中输入。
+        var wire = new DeepSeekUsage
+        {
+            PromptTokens = 1000,
+            CompletionTokens = 5,
+            TotalTokens = 1005,
+        };
+
+        var usage = DeepSeekTranslator.ToUsage(wire);
+
+        Assert.Null(usage.CacheReadTokens);
+        Assert.Equal(1000, usage.InputTokens);
     }
 
     [Fact]
