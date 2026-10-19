@@ -299,7 +299,7 @@ function validateEventPayload(kind: string, payload: Record<string, unknown>, li
   }
 }
 
-const STOP_REASONS = new Set(["answer", "final_output_tool", "max_iterations", "error", "cancelled"]);
+const STOP_REASONS = new Set(["answer", "final_output_tool", "max_iterations", "error", "interrupted", "context_limit", "cancelled"]);
 
 function validateAgentResult(value: unknown, line: string): AgentResult {
   if (!isObject(value)) {

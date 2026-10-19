@@ -66,7 +66,9 @@ public static class CliMode
             "rpc" => AppMode.Rpc,
             _ => args.Positionals.Count > 0
                 ? AppMode.Print                       // di "prompt" → 单发
-                : args.Print || !stdinIsTty || !stdoutIsTty
+                : args.Resume is not null
+                    ? AppMode.Interactive
+                    : args.Print || !stdinIsTty || !stdoutIsTty
                     ? AppMode.Print                   // --print 或管道/重定向 → 单发
                     : AppMode.Interactive,
         };

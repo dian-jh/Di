@@ -407,6 +407,7 @@ public static class RpcMode
             AgentStopReason.MaxIterations => "max_iterations",
             AgentStopReason.Error => "error",
             AgentStopReason.Interrupted => "interrupted",
+            AgentStopReason.ContextLimit => "context_limit",
             _ => "error",
         },
         iterations = result.Iterations,

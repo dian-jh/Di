@@ -43,9 +43,10 @@ public sealed class CompactingWiringTests
         var runner = new AgentRunner(_ => model, executor, new AgentLoopOptions(), new InMemoryEventBus(),
             budgetPolicy: policy, budgetTracker: tracker);
 
-        await runner.RunAsync(new string('U', 40_000));
+        var result = await runner.RunAsync(new string('U', 40_000));
 
-        var results = model.Requests[^1].Messages.OfType<ToolResultMessage>().ToArray();
+        Assert.Equal(AgentStopReason.ContextLimit, result.StopReason);
+        var results = result.Trajectory.OfType<ToolResultMessage>().ToArray();
         Assert.Equal(full, results[0].Content);
         Assert.Contains("已保存到", results[1].Content);
         Assert.Equal(1, artifacts.Writes);

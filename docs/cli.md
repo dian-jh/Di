@@ -66,7 +66,7 @@ class AgentResult
     TokenUsage Usage;                           // 累计 tokens
     UsageCost? Cost;                            // 累计成本（无费率时 null）
     int Iterations;                             // 实际轮数
-    AgentStopReason StopReason;                 // Answer / FinalOutputTool / MaxIterations / Error / Interrupted
+    AgentStopReason StopReason;                 // Answer / FinalOutputTool / MaxIterations / ContextLimit / Error / Interrupted
     LlmFailure? Failure;                        // StopReason==Error 时的故障事实
 }
 ```
@@ -92,10 +92,12 @@ string[] args
 ### 3.2 纯数据与纯函数（语言无关，建议他语言原样复刻）
 
 - **`CliArgs`**（`Di.Cli/cli/CliArgs.cs`）：`Positionals`、`Model`、`Provider`、`Print`、`Mode`、
-  `Version`、`Info`、`Help`、`ListModels`、`Stats`、`SkillEval`、`Thinking`、`NoSession`、`NoAnsi`、`UnknownFlags`。
+  `Version`、`Info`、`Help`、`ListModels`、`Stats`、`SkillEval`、`Thinking`、`Resume`、`NoSession`、`NoAnsi`、`UnknownFlags`。
   规则：`--` 后全为位置参数；带值旗标缺值报错；`--list-models [pattern]` 可选吃下一个非旗标 token；
   `--stats <file>` / `--skill-eval <file>` 必选吃下一个非旗标 token（缺值报错）；
   `--mode` 值域 `interactive/print/json/rpc`；未知旗标记入 `UnknownFlags` 并报错（不静默忽略）。
+- **会话恢复**：`di --resume <file>` 在首次交互输入前校验并加载 checkpoint；若没有显式 `--mode` 且无位置参数则进入 REPL 并跳过 TUI。用户输入后才继续模型调用。JSON / print 模式按原模式解析，兼容 `di --mode json --resume <file> 继续`；恢复错误为 stderr + exit 1，JSON 模式 stdout 输出一个 `session_resume` error。旧版没有 checkpoint 的日志明确拒绝；可用更大上下文预算继续超窗任务。未知工具执行结果要求核查后启动新会话，禁止自动重放。
+- **默认长程循环**：`AgentLoop:MaxIterations` 默认 `0`（不限轮数），设置正整数才启用显式预算。模型调用前会检查完整请求估算；超预算返回 `ContextLimit`（JSON: `context_limit`），完整轨迹 checkpoint 保留。换用更大上下文预算/模型后输入“继续”可重试；超长轨迹目前没有自动摘要，若仍放不下需另开任务提炼状态。该估算不是 tokenizer 精算；模型上下文窗口未知时无请求级保护。
 - **`CliMode.Resolve(CliArgs, stdinTty, stdoutTty)`**（`Di.Cli/cli/CliMode.cs`）：
 
 | 条件 | 模式 |
@@ -156,10 +158,10 @@ API Key 不在启动时要求 —— 凭据由模型层在**请求时**解析，
 **思考渲染**：TTY 下模型思考期（DeepSeek 先流 ~1s reasoning 再流回答）以"── 思考中 ──"块实时渲染，
 消除"等好几秒无输出"的死屏（`EventRenderer.ReasoningDelta`，仅真实终端开启）；管道/重定向省略，
 推理全文在会话 JSONL；JSON 模式不渲染（单文档契约）。
-会话日志写入 `~/.di/sessions/`（`--no-session` 关闭）。
-**预算耗尽兜底**：`StopReason == MaxIterations` 时（`EventRenderer.RenderResult`）在脚注前补打印
+会话日志写入 `~/.di/sessions/`（`--no-session` 关闭 checkpoint 与审计日志）；`--resume <file>` 恢复 checkpoint 文件。
+**迭代预算耗尽兜底**：`StopReason == MaxIterations` 时（`EventRenderer.RenderResult`）在脚注前补打印
 "已达迭代上限，任务可能未完成"与模型最后一段输出（`AgentResult.Answer`），避免"跑完没结果"；
-JSON 模式 `stop_reason` 字段本身即 `maxiterations`，脚本据此判断。
+JSON 模式 `stop_reason` 为 `max_iterations`，脚本据此判断。
 **软停止兜底**：`StopReason == Interrupted` 时（`EventRenderer.RenderResult`）打印一行"已中断：未开始的工作不再执行"
 （模型已流出的文本不重复回显）；JSON 模式 `stop_reason` 即 `interrupted`，**退出码 0**（软停止是正常收敛，
 非失败）。见 `docs/interrupt.md`。

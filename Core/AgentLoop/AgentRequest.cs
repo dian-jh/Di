@@ -22,6 +22,18 @@ public sealed class AgentRequest
     /// </summary>
     public IReadOnlyList<ChatMessage>? History { get; init; }
 
+    /// <summary>每次模型调用前的保守 token 预算；超出时以 ContextLimit 暂停并保留轨迹。</summary>
+    public int? ContextTokenBudget { get; init; }
+
+    /// <summary>同步持久化完整模型消息；写入失败时当前回合停止。</summary>
+    public Action<ChatMessage>? CheckpointMessage { get; init; }
+
+    /// <summary>同步持久化工具意图；写入失败时工具绝不执行。</summary>
+    public Action<ToolCallBlock>? CheckpointToolStarted { get; init; }
+
+    /// <summary>同步持久化工具结果。</summary>
+    public Action<ToolResultMessage>? CheckpointToolCompleted { get; init; }
+
     /// <summary>本次运行中模型可以调用的工具。</summary>
     public IReadOnlyList<ChatTool>? Tools { get; init; }
 

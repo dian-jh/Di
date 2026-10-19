@@ -25,6 +25,16 @@ public sealed class CliArgsTests
     }
 
     [Fact]
+    public void Parse_ResumePath_EntersInteractiveMode()
+    {
+        var (args, diagnostics) = Parse("--resume", "session.jsonl");
+
+        Assert.Empty(diagnostics);
+        Assert.Equal("session.jsonl", args.Resume);
+        Assert.Equal(AppMode.Interactive, CliMode.Resolve(args, stdinIsTty: false, stdoutIsTty: false));
+    }
+
+    [Fact]
     public void Parse_Positionals_CapturedInOrder()
     {
         var (args, diags) = Parse("hello", "world");

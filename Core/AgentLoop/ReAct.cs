@@ -80,15 +80,24 @@ public sealed class ReAct
         var usage = TokenUsage.Zero;
         var cost = (UsageCost?)null;
         var iterations = 0;
-        var maxIterations = Math.Max(1, _options.MaxIterations);
+        if (_options.MaxIterations < 0)
+            throw new ArgumentOutOfRangeException(nameof(_options.MaxIterations), "MaxIterations must be zero (unlimited) or positive.");
+        var maxIterations = _options.MaxIterations;
 
-        while (iterations < maxIterations)
+        while (maxIterations == 0 || iterations < maxIterations)
         {
-            // 相位边界 B0/B2：进入模型相位<b>之前</b>检查软停止。未开始的工作不启动——
-            // 已完成的工具结果照常保留在轨迹里，本回合以 Interrupted 优雅收敛。
+            cancellationToken.ThrowIfCancellationRequested();
+            // Preserve the user's explicit soft-stop request ahead of the context safety pause.
             if (_interrupt?.IsStopRequested == true)
                 return StopInterrupted(trajectory, usage, cost, iterations, request.History);
-
+            var context = BuildContext(request, trajectory);
+            if (request.ContextTokenBudget is < 0)
+                throw new ArgumentOutOfRangeException(nameof(request.ContextTokenBudget));
+            if (request.ContextTokenBudget is { } contextBudget &&
+                (contextBudget == 0 || EstimateRequestTokens(context, request.Tools) > contextBudget))
+                return StopContextLimit(trajectory, usage, cost, iterations, request.History);
+            // 相位边界 B0/B2：进入模型相位<b>之前</b>检查软停止。未开始的工作不启动——
+            // 已完成的工具结果照常保留在轨迹里，本回合以 Interrupted 优雅收敛。
             iterations++;
 
             // 模型调用发起（日志时间线的"发起"点）：在同一模型 await 前发布，
@@ -101,7 +110,7 @@ public sealed class ReAct
                 var modelRequest = new ModelRequest
                 {
                     SessionId = request.SessionId,
-                    Messages = BuildContext(request, trajectory),
+                    Messages = context,
                     Tools = request.Tools,
                     ReasoningEffort = _options.ReasoningEffort,
                     MaxTokens = _options.MaxTokens,
@@ -120,6 +129,7 @@ public sealed class ReAct
             usage = usage.Add(response.Usage);
             cost = CombineCost(cost, response.Cost);
             trajectory.Add(response.Message);   // decision
+            request.CheckpointMessage?.Invoke(response.Message);
             Emit(new AgentLoopEvent.TurnCompleted(iterations, usage, cost, response.FinishReason));
 
             var toolCalls = response.Message.ToolCalls;
@@ -161,15 +171,19 @@ public sealed class ReAct
                 }
 
                 // 预算已耗尽：常规工具不再执行（其结果不会被下一次模型调用消费）。
-                if (iterations >= maxIterations)
+                if (maxIterations > 0 && iterations >= maxIterations)
                     break;
 
                 var validated = request.Validator?.Validate(call) ?? call;
                 request.BeforeToolExecution?.Invoke(trajectory);
+                cancellationToken.ThrowIfCancellationRequested();
+                request.CheckpointToolStarted?.Invoke(call);
                 Emit(new AgentLoopEvent.ToolStarted(call));
                 var (observation, isError) = await ExecuteToolAsync(request.ToolExecutor, validated, cancellationToken);
                 Emit(new AgentLoopEvent.ToolCompleted(call, observation, isError));
-                trajectory.Add(ChatMessage.Tool(call.Id, observation));
+                var toolResult = new ToolResultMessage(call.Id, observation, isError);
+                trajectory.Add(toolResult);
+                request.CheckpointToolCompleted?.Invoke(toolResult);
             }
         }
 
@@ -184,6 +198,56 @@ public sealed class ReAct
             StopReason = AgentStopReason.MaxIterations,
         };
     }
+
+    internal static int EstimateRequestTokens(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatTool>? tools)
+    {
+        // ChatMessage/IContentBlock are abstract and serialize incompletely as base types; count each concrete payload.
+        // UTF-8 bytes / 3 intentionally overestimates many scripts; this is a guard, not provider tokenizer billing.
+        var bytes = 0;
+        foreach (var message in messages)
+        {
+            bytes += message switch
+            {
+                SystemMessage system => Utf8Bytes(system.Text),
+                UserMessage user => user.Content.Sum(BlockBytes),
+                AssistantMessage assistant => assistant.Content.Sum(BlockBytes),
+                ToolResultMessage tool => Utf8Bytes(tool.Content) + Utf8Bytes(tool.ToolCallId),
+                _ => 0,
+            } + 24;
+        }
+        if (tools is not null)
+            bytes += tools.Sum(tool => Utf8Bytes(tool.Name) + Utf8Bytes(tool.Description) + Utf8Bytes(tool.Parameters.ToJsonString()) + 48);
+        return (int)Math.Ceiling(bytes / 3.0);
+    }
+
+    private static int Utf8Bytes(string value) => System.Text.Encoding.UTF8.GetByteCount(value);
+
+    private static int BlockBytes(IContentBlock block) => block switch
+    {
+        TextBlock text => Utf8Bytes(text.Text),
+        ReasoningBlock reasoning => Utf8Bytes(reasoning.Text),
+        ToolCallBlock call => Utf8Bytes(call.Id) + Utf8Bytes(call.Name) + Utf8Bytes(call.Arguments),
+        ToolResultBlock result => Utf8Bytes(result.ToolCallId) + Utf8Bytes(result.Content),
+        ImageBlock image => Utf8Bytes(image.AttachmentId) + Utf8Bytes(image.Detail ?? "") + 384,
+        FileBlock file => Utf8Bytes(file.AttachmentId) + Utf8Bytes(file.Filename ?? "") + 192,
+        OpaqueBlock opaque => Utf8Bytes(opaque.RawJson),
+        _ => 384,
+    };
+
+    private static AgentResult StopContextLimit(IReadOnlyList<ChatMessage> trajectory, TokenUsage usage,
+        UsageCost? cost, int iterations, IReadOnlyList<ChatMessage>? history) => new()
+    {
+        Answer = trajectory.Skip(Math.Min(trajectory.Count, (history?.Count ?? 0) + 1))
+            .OfType<AssistantMessage>()
+            .Select(ChatMessageExtensions.GetText)
+            .LastOrDefault() ?? "",
+        Trajectory = trajectory,
+        History = history,
+        Usage = usage,
+        Cost = cost,
+        Iterations = iterations,
+        StopReason = AgentStopReason.ContextLimit,
+    };
 
     /// <summary>
     /// 流式调用模型：消费事件流，把每个文本增量发布为 <see cref="AgentLoopEvent.TextDelta"/>，

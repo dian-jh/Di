@@ -98,11 +98,13 @@ public sealed class AgentRunnerBudgetTrimmingTests
         model.Enqueue(_ => new ModelResponse { Message = ChatMessage.Assistant(new string('X', 10_000)), FinishReason = new FinishReason.Stop(), Usage = TokenUsage.Zero });
         await runner.RunAsync("甲");   // 单回合 ≈ 2501t > 700，但 userCount=1 → 全保留
         EnqueueTinyTurn(model);
-        await runner.RunAsync("乙");
+        var paused = await runner.RunAsync("乙");
 
-        var second = model.Requests[1];
-        var userTexts = second.Messages.OfType<UserMessage>().Select(ChatMessageExtensions.GetText).ToArray();
-        Assert.Equal(["甲", "乙"], userTexts);   // 超预算也不全丢
+        Assert.Equal(AgentStopReason.ContextLimit, paused.StopReason);
+        Assert.Single(model.Requests);
+        Assert.Contains(paused.Trajectory, m => m is UserMessage && m.GetText() == "甲");
+        Assert.Contains(paused.Trajectory, m => m is AssistantMessage && m.GetText().Length == 10_000);
+        Assert.Contains(paused.Trajectory, m => m is UserMessage && m.GetText() == "乙");
     }
 
     [Fact]
@@ -119,9 +121,9 @@ public sealed class AgentRunnerBudgetTrimmingTests
         for (var i = 1; i <= 7; i++)
         {
             EnqueueHundredTokenTurn(budgeted);
-            await policyRunner.RunAsync($"a{i}");   // 7 回合 = 700 ≤ 700 soft → 不裁
+            await policyRunner.RunAsync($"a{i}");   // 每次请求均按完整上下文估算裁剪历史。
         }
-        Assert.Equal(7, budgeted.Requests[^1].Messages.OfType<UserMessage>().Count());
+        Assert.Equal(5, budgeted.Requests[^1].Messages.OfType<UserMessage>().Count());
 
         var flat = new FakeChatModel();
         var legacyRunner = new AgentRunner(
@@ -133,10 +135,10 @@ public sealed class AgentRunnerBudgetTrimmingTests
         for (var i = 1; i <= 7; i++)
         {
             EnqueueHundredTokenTurn(flat);
-            await legacyRunner.RunAsync($"a{i}");   // 7 回合 = 700 > 500 → 历史丢 2 最旧
+            await legacyRunner.RunAsync($"a{i}");   // 旧比例路径也按实际请求内容估算。
         }
-        // 请求 = 裁剪后的历史(最近 5 轮) + 当前回合 = 6 个 user。
-        Assert.Equal(6, flat.Requests[^1].Messages.OfType<UserMessage>().Count());
+        // 请求中保留的 user 数量由完整上下文预算决定。
+        Assert.Equal(4, flat.Requests[^1].Messages.OfType<UserMessage>().Count());
     }
 
     [Fact]
@@ -155,8 +157,8 @@ public sealed class AgentRunnerBudgetTrimmingTests
             EnqueueHundredTokenTurn(model);
             await runner.RunAsync($"a{i}");
         }
-        // 请求 = 裁剪后的历史(最近 5 轮) + 当前回合 = 6 个 user（旧路径契约未变）。
-        Assert.Equal(6, model.Requests[^1].Messages.OfType<UserMessage>().Count());
+        // 请求中保留的 user 数量由完整上下文预算决定（旧路径）。
+        Assert.Equal(4, model.Requests[^1].Messages.OfType<UserMessage>().Count());
     }
 
     [Fact]

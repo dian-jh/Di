@@ -63,13 +63,12 @@ API Key：环境变量 `DEEPSEEK_API_KEY`，或写进 `~/.di/config.json`。常�
 ```json
 {
   "DeepSeek": { "ApiKey": "sk-..." },
-  "AgentLoop": { "MaxIterations": 24 }
+  "AgentLoop": { "MaxIterations": 0 }
 }
 ```
 
-`AgentLoop:MaxIterations` 是单回合的迭代预算（一次迭代 ≈ 一次模型往返，通常含一次工具调用），
-默认 24 轮——复杂分析/测试-修复循环动辄 10-20 轮；DeepSeek 上下文 1M token + 前缀缓存，
-放宽上限的边际成本极低。要更宽或更紧（脚本控成本）都可以在这里调。
+`AgentLoop:MaxIterations` 是单回合的迭代预算（一次迭代约一次模型往返，通常含一次工具调用）；
+默认 `0` 表示不限轮数。设置正整数可启用显式上限；轮数限制之外，每次模型调用前还有上下文预算检查，超限会以 `context_limit` 暂停并保留轨迹。
 
 `AgentLoop:HistoryBudgetRatio`（默认 0.5）是**跨回合记忆**占模型上下文窗口的比例上限：
 超限自动丢最旧整回合，防止长会话把上下文撑爆。窗口来自模型目录（DeepSeek 为 1M token）。

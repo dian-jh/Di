@@ -21,7 +21,7 @@
 | **进程退出** | 结束整个会话 | 生命周期 token（`InterruptCoordinator.Lifetime`） | 无回合时按下 Ctrl+C |
 
 **软停止与硬取消正交，不能互相替代**：软停止救不了卡死的工具（`python` 死循环、`npm test` 挂起），
-所以必须保留硬取消作为升级手段；而硬取消会丢状态，所以常态应当是软停止。
+所以必须保留硬取消作为升级手段。启用会话 checkpoint 时，硬取消会保留已完成步骤；若工具已开始但结果未持久化，恢复会明确拒绝自动继续并要求核查副作用。
 
 ## 3. 状态机：回合的相位与边界
 
@@ -72,7 +72,7 @@ B2 ◄── 检查点：回到模型相位前（= B0）
 - 同时发布 **`AgentLoopEvent.Interrupted`** 事件，供流式 UI（TUI）即时提示。
 
 **落盘**：因为软停止是正常返回，宿主的既有路径自然生效 —— `SessionLog.AppendTurn` 照常记录该回合
-（这与硬取消不同：硬取消走 `OperationCanceledException` 异常路径）。`AgentRunner` 的
+（这与硬取消不同：硬取消走 `OperationCanceledException` 异常路径；启用 checkpoint 时异常处理会尝试恢复已持久化轨迹，工具结果未知则锁住同进程重试）。`AgentRunner` 的
 `SanitizeHistory` 会把尾部"未被响应的 tool_calls"按良构规则处理掉（见 §7）。
 
 ## 6. 实现与接线
@@ -111,9 +111,7 @@ B2 ◄── 检查点：回到模型相位前（= B0）
 
 - **RPC / TUI 的软停止**：RPC `interrupt` 目前是硬取消（协议契约 `stop_reason:"cancelled"` 未变）。
   要接软停止需协议协调（TUI 侧二次按下语义），`ResultPayload` 已预留 `interrupted` 映射。
-- **B1 停止的历史保真**：停在 B1 时轨迹尾部是"未被响应的 tool_calls"，`SanitizeHistory` 会丢弃该
-  assistant 消息（连文本）。模型文本已随流式事件显示给用户，但**不进跨回合记忆**。与
-  `MaxIterations` / `FinalOutputTool` 的既有行为一致（`SanitizeHistory` 正是为它们而设）。
+- **硬取消与恢复边界**：启用 checkpoint 时，每条 assistant 响应和工具 started/completed 状态同步持久化。异常/硬取消后 Runner 尝试从 checkpoint 更新内存历史；已完成工具结果不会因同进程重试而丢失。若日志中存在 started 但无 completed 的工具，结果未知，Runner 锁住继续请求，直到调用方核查副作用后显式重置/新建会话。未开始的工具调用在恢复轨迹中以“未执行”观察补齐，模型不会收到可直接重放的悬空调用。没有配置 checkpoint（如 `--no-session`）时，硬取消不会提供此恢复保证。
 - **一批多工具调用的粒度**：软停止在**批边界**观测，不打断批内已开始的工具；整批跑完才收敛。
 - **在途模型调用不打断**：模型相位中途按下软停止，等模型跑完（避免半截 assistant 消息）。
   要立刻断流用第二次 Ctrl+C（硬取消）。

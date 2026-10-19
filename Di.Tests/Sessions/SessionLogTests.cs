@@ -39,6 +39,131 @@ public sealed class SessionLogTests : IDisposable
     }
 
     [Fact]
+    public void CheckpointToolStart_IsDurableBeforeToolCanRun()
+    {
+        var log = NewLog();
+        log.BeginCheckpointTurn("run deployment", DateTimeOffset.UtcNow);
+        log.CheckpointToolStarted(new ToolCallBlock("call-7", "deploy", "{}"));
+
+        var records = ReadRecords(log.LogFilePath);
+        Assert.Contains(records, r => r.GetProperty("type").GetString() == "checkpoint_tool_started" &&
+            Payload(r).GetProperty("call_id").GetString() == "call-7");
+    }
+
+    [Fact]
+    public void LoadRecovery_RejectsToolWithStartedMarkerButNoOutcome()
+    {
+        var log = NewLog();
+        log.BeginCheckpointTurn("continue", DateTimeOffset.UtcNow);
+        log.AppendCheckpointMessage(ChatMessage.Assistant("", toolCalls: [new ToolCallBlock("call-9", "write", "{}") ]));
+        log.CheckpointToolStarted(new ToolCallBlock("call-9", "write", "{}"));
+
+        var ex = Assert.Throws<InvalidOperationException>(() => SessionLog.LoadRecovery(log.LogFilePath));
+
+        Assert.Contains("call-9", ex.Message);
+    }
+
+    [Fact]
+    public void LoadRecovery_ProvidesExplicitObservationForToolThatNeverStarted()
+    {
+        var log = NewLog();
+        var request = new ToolCallBlock("call-10", "read", "{}");
+        log.BeginCheckpointTurn("inspect", DateTimeOffset.UtcNow);
+        log.AppendCheckpointMessage(ChatMessage.Assistant("working", toolCalls: [request]));
+
+        var trajectory = SessionLog.LoadRecovery(log.LogFilePath);
+
+        var result = Assert.Single(trajectory.OfType<ToolResultMessage>());
+        Assert.Equal("call-10", result.ToolCallId);
+        Assert.Contains("not executed", result.Content);
+    }
+
+    [Fact]
+    public void LoadRecovery_HandlesSameCallIdInSeparateAssistantBatches()
+    {
+        var log = NewLog();
+        log.BeginCheckpointTurn("repeat", DateTimeOffset.UtcNow);
+        log.AppendCheckpointMessage(ChatMessage.Assistant("first", toolCalls: [new ToolCallBlock("same", "read", "{}")]));
+        log.CheckpointToolStarted(new ToolCallBlock("same", "read", "{}"));
+        log.CheckpointToolCompleted(new ToolResultMessage("same", "first result"));
+        log.AppendCheckpointMessage(ChatMessage.Assistant("second", toolCalls: [new ToolCallBlock("same", "read", "{}")]));
+
+        var trajectory = SessionLog.LoadRecovery(log.LogFilePath);
+
+        Assert.Equal(2, trajectory.OfType<ToolResultMessage>().Count());
+        Assert.Equal("first result", trajectory.OfType<ToolResultMessage>().First().Content);
+        Assert.Contains("not executed", trajectory.OfType<ToolResultMessage>().Last().Content);
+    }
+
+    [Fact]
+    public void LoadRecovery_RejectsLegacyLogWithoutCheckpoints()
+    {
+        var log = NewLog();
+        log.StartSession();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => SessionLog.LoadRecovery(log.LogFilePath));
+
+        Assert.Contains("older versions", ex.Message);
+    }
+
+    [Fact]
+    public void LoadRecovery_RejectsOrphanToolStartRecord()
+    {
+        var log = NewLog();
+        log.BeginCheckpointTurn("inspect", DateTimeOffset.UtcNow);
+        log.CheckpointToolStarted(new ToolCallBlock("orphan", "write", "{}"));
+
+        var ex = Assert.Throws<InvalidDataException>(() => SessionLog.LoadRecovery(log.LogFilePath));
+
+        Assert.Contains("Orphan", ex.Message);
+    }
+
+    [Fact]
+    public void LoadRecovery_EachToolCheckpointPrefixIsSafe()
+    {
+        var log = NewLog();
+        var request = new ToolCallBlock("prefix-call", "write", "{}");
+        log.BeginCheckpointTurn("do it", DateTimeOffset.UtcNow);
+        log.AppendCheckpointMessage(ChatMessage.Assistant("writing", toolCalls: [request]));
+        var assistantPrefix = File.ReadAllLines(log.LogFilePath);
+        log.CheckpointToolStarted(request);
+        var startedPrefix = File.ReadAllLines(log.LogFilePath);
+        log.CheckpointToolCompleted(new ToolResultMessage("prefix-call", "written"));
+        var completedPrefix = File.ReadAllLines(log.LogFilePath);
+
+        var assistantOnly = Path.Combine(_root, "assistant-only.jsonl");
+        File.WriteAllLines(assistantOnly, assistantPrefix);
+        var repaired = SessionLog.LoadRecovery(assistantOnly);
+        Assert.Contains(repaired.OfType<ToolResultMessage>(), r => r.ToolCallId == "prefix-call" && r.Content.Contains("not executed"));
+
+        var startedOnly = Path.Combine(_root, "started-only.jsonl");
+        File.WriteAllLines(startedOnly, startedPrefix);
+        var unknown = Assert.Throws<InvalidOperationException>(() => SessionLog.LoadRecovery(startedOnly));
+        Assert.Contains("prefix-call", unknown.Message);
+
+        var completed = Path.Combine(_root, "completed.jsonl");
+        File.WriteAllLines(completed, completedPrefix);
+        Assert.Contains(SessionLog.LoadRecovery(completed), m => m is ToolResultMessage { ToolCallId: "prefix-call", Content: "written" });
+    }
+
+    [Fact]
+    public void LoadRecovery_IgnoresOnlyTornFinalLineAndRejectsCorruptInteriorLine()
+    {
+        var log = NewLog();
+        log.BeginCheckpointTurn("safe", DateTimeOffset.UtcNow);
+        log.AppendCheckpointMessage(ChatMessage.Assistant("answer"));
+        var valid = File.ReadAllText(log.LogFilePath);
+
+        var tornTail = Path.Combine(_root, "torn-tail.jsonl");
+        File.WriteAllText(tornTail, valid + "{\"type\":\"checkpoint_turn_started\"");
+        Assert.Contains(SessionLog.LoadRecovery(tornTail), m => m.GetText() == "safe");
+
+        var corruptInterior = Path.Combine(_root, "corrupt-interior.jsonl");
+        File.WriteAllText(corruptInterior, valid + "{invalid}\n" + valid);
+        Assert.Throws<InvalidDataException>(() => SessionLog.LoadRecovery(corruptInterior));
+    }
+
+    [Fact]
     public void StartSession_FileLivesUnderDateDirectory()
     {
         var log = NewLog();

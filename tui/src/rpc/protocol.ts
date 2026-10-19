@@ -186,7 +186,7 @@ export interface TokenUsage {
   reasoning_tokens?: number;
 }
 
-export type StopReason = "answer" | "final_output_tool" | "max_iterations" | "error" | "cancelled";
+export type StopReason = "answer" | "final_output_tool" | "max_iterations" | "error" | "interrupted" | "context_limit" | "cancelled";
 
 export interface AgentResult {
   answer: string;

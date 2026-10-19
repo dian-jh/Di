@@ -53,4 +53,7 @@ public enum AgentStopReason
     /// 见 <see cref="IInterruptSignal"/>；与硬取消（异常路径）不同，这是正常收敛，携带部分轨迹与已发生用量。
     /// </summary>
     Interrupted,
+
+    /// <summary>完整请求预计超过上下文预算；保留轨迹，等待缩短或重建任务。</summary>
+    ContextLimit,
 }

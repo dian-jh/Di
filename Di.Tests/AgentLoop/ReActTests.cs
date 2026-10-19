@@ -274,6 +274,187 @@ public sealed class ReActTests
     }
 
     [Fact]
+    public async Task RunAsync_DefaultIterationLimit_AllowsMoreThanTwentyFourIterations()
+    {
+        var model = new FakeChatModel();
+        model.Fallback(_ => model.Requests.Count <= 25
+            ? Response("working", new ToolCallBlock($"c{model.Requests.Count}", "echo", "{}"))
+            : Response("done"));
+        var loop = new ReAct(model, new AgentLoopOptions { SystemPrompt = SystemPrompt });
+
+        var result = await loop.RunAsync(Request(executor: new FakeToolExecutor(_ => "ok")));
+
+        Assert.Equal(AgentStopReason.Answer, result.StopReason);
+        Assert.Equal(26, result.Iterations);
+    }
+
+    [Fact]
+    public async Task RunAsync_ContextBudgetExceededBeforeModelCall_ReturnsContextLimit()
+    {
+        var model = new FakeChatModel();
+        var loop = new ReAct(model, Options());
+        var request = new AgentRequest
+        {
+            UserMessage = "this request is too large",
+            ToolExecutor = new FakeToolExecutor(_ => ""),
+            ContextTokenBudget = 1,
+        };
+
+        var result = await loop.RunAsync(request);
+
+        Assert.Equal(AgentStopReason.ContextLimit, result.StopReason);
+        Assert.Empty(model.Requests);
+        Assert.Contains(request.UserMessage, ChatMessageExtensions.GetText(result.Trajectory[0]));
+    }
+
+    [Fact]
+    public async Task RunAsync_ContextLimitDoesNotReturnAnOldHistoryAnswer()
+    {
+        var model = new FakeChatModel();
+        var result = await new ReAct(model, new AgentLoopOptions { SystemPrompt = "", MaxIterations = 0 }).RunAsync(new AgentRequest
+        {
+            UserMessage = "large current task",
+            History = [ChatMessage.User("previous question"), ChatMessage.Assistant("previous answer")],
+            ToolExecutor = new FakeToolExecutor(_ => ""),
+            ContextTokenBudget = 1,
+        });
+
+        Assert.Equal(AgentStopReason.ContextLimit, result.StopReason);
+        Assert.Equal("", result.Answer);
+        Assert.Empty(model.Requests);
+    }
+
+    [Fact]
+    public async Task RunAsync_ContextBudgetCountsHistoryReasoningAndToolSchema()
+    {
+        var model = new FakeChatModel();
+        var loop = new ReAct(model, new AgentLoopOptions { SystemPrompt = "", MaxIterations = 0 });
+        var largeTool = ChatTool.Create("inspect", new string('d', 200), new JsonObject { ["description"] = new string('s', 200) });
+        var result = await loop.RunAsync(new AgentRequest
+        {
+            UserMessage = "x",
+            History = [ChatMessage.Assistant("", reasoning: new string('r', 400))],
+            ToolExecutor = new FakeToolExecutor(_ => ""),
+            Tools = [largeTool],
+            ContextTokenBudget = 20,
+        });
+
+        Assert.Equal(AgentStopReason.ContextLimit, result.StopReason);
+        Assert.Empty(model.Requests);
+    }
+
+    [Fact]
+    public async Task RunAsync_ContextBudgetCountsLargeHistoryEvenWhenCurrentRequestIsSmall()
+    {
+        var model = new FakeChatModel();
+        var loop = new ReAct(model, new AgentLoopOptions { SystemPrompt = "", MaxIterations = 0 });
+        var result = await loop.RunAsync(new AgentRequest
+        {
+            UserMessage = "x",
+            History = [ChatMessage.User(new string('h', 1000))],
+            ToolExecutor = new FakeToolExecutor(_ => ""),
+            ContextTokenBudget = 20,
+        });
+
+        Assert.Equal(AgentStopReason.ContextLimit, result.StopReason);
+        Assert.Empty(model.Requests);
+    }
+
+    [Fact]
+    public async Task RunAsync_ContextBudgetCountsUtf8BytesForChineseInput()
+    {
+        var model = new FakeChatModel();
+        var loop = new ReAct(model, new AgentLoopOptions { SystemPrompt = "", MaxIterations = 0 });
+        var result = await loop.RunAsync(new AgentRequest
+        {
+            UserMessage = new string('汉', 100),
+            ToolExecutor = new FakeToolExecutor(_ => ""),
+            ContextTokenBudget = 50,
+        });
+
+        Assert.Equal(AgentStopReason.ContextLimit, result.StopReason);
+        Assert.Empty(model.Requests);
+    }
+
+    [Fact]
+    public async Task RunAsync_ZeroContextBudgetPausesBeforeModelCall()
+    {
+        var model = new FakeChatModel();
+        var result = await new ReAct(model, Options()).RunAsync(new AgentRequest
+        {
+            UserMessage = "tiny",
+            ToolExecutor = new FakeToolExecutor(_ => ""),
+            ContextTokenBudget = 0,
+        });
+
+        Assert.Equal(AgentStopReason.ContextLimit, result.StopReason);
+        Assert.Empty(model.Requests);
+    }
+
+    [Fact]
+    public async Task RunAsync_ContextBudgetCountsToolArgumentsFromHistory()
+    {
+        var model = new FakeChatModel();
+        var loop = new ReAct(model, new AgentLoopOptions { SystemPrompt = "", MaxIterations = 0 });
+        var history = new ChatMessage[] { ChatMessage.Assistant("", toolCalls: [new ToolCallBlock("id", "tool", new string('a', 1000))]) };
+        var result = await loop.RunAsync(new AgentRequest
+        {
+            UserMessage = "x",
+            History = history,
+            ToolExecutor = new FakeToolExecutor(_ => ""),
+            ContextTokenBudget = 20,
+        });
+
+        Assert.Equal(AgentStopReason.ContextLimit, result.StopReason);
+        Assert.Empty(model.Requests);
+    }
+
+    [Fact]
+    public async Task RunAsync_CheckpointFailureBeforeTool_PreventsToolExecution()
+    {
+        var model = new FakeChatModel();
+        model.Enqueue(_ => Response("work", new ToolCallBlock("c1", "danger", "{}")));
+        var executor = new FakeToolExecutor(_ => "ran");
+        var loop = new ReAct(model, Options());
+        var request = new AgentRequest
+        {
+            UserMessage = "do it",
+            ToolExecutor = executor,
+            CheckpointToolStarted = _ => throw new IOException("disk full"),
+        };
+
+        await Assert.ThrowsAsync<IOException>(() => loop.RunAsync(request));
+
+        Assert.Empty(executor.Calls);
+    }
+
+    [Fact]
+    public async Task RunAsync_UnlimitedLoopChecksCancellationBetweenToolAndNextModelCall()
+    {
+        using var cts = new CancellationTokenSource();
+        var model = new FakeChatModel();
+        model.Fallback(_ => Response("working", new ToolCallBlock($"c{model.Requests.Count}", "echo", "{}")));
+        var executor = new CancelAfterToolExecutor(cts);
+        var loop = new ReAct(model, new AgentLoopOptions { SystemPrompt = "", MaxIterations = 0 });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => loop.RunAsync(Request(executor: executor), cts.Token));
+
+        Assert.Single(model.Requests);
+        Assert.Equal(1, executor.Count);
+    }
+
+    private sealed class CancelAfterToolExecutor(CancellationTokenSource source) : IToolExecutor
+    {
+        public int Count { get; private set; }
+        public Task<string> ExecuteAsync(ToolCallBlock call, CancellationToken cancellationToken = default)
+        {
+            Count++;
+            source.Cancel();
+            return Task.FromResult("done");
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_FinalOutputTool_ReturnsArgumentsAsAnswerWithoutExecuting()
     {
         var model = new FakeChatModel();

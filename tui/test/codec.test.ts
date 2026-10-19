@@ -157,8 +157,13 @@ describe("parseMessage（parse + validate）", () => {
       /is_error/,
     );
   });
+  it("accepts the context budget pause stop reason", () => {
+    const msg = parseMessage('{"type":"result","seq":2,"result":{"answer":"","stop_reason":"context_limit","iterations":0,"usage":{"input_tokens":0,"output_tokens":0}}}');
+    assert.equal(msg.type, "result");
+    if (msg.type !== "result") throw new Error("unreachable");
+    assert.equal(msg.result.stop_reason, "context_limit");
+  });
 });
-
 describe("MessageQueue（FIFO）", () => {
   it("保留模型命令返回的完整目录，并拒绝无效条目", () => {
     const message = parseMessage(JSON.stringify({ type: "command_ran", name: "model", lines: [], exit: false,

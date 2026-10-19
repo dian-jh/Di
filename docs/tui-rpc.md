@@ -70,7 +70,7 @@
 ```json
 {"type":"result","seq":<int>,"result":{
   "answer": string,
-  "stop_reason": "answer"|"final_output_tool"|"max_iterations"|"error"|"cancelled"|"interrupted",
+  "stop_reason": "answer"|"final_output_tool"|"max_iterations"|"context_limit"|"error"|"cancelled"|"interrupted",
   "iterations": int,
   "usage": { ...TokenUsage },
   "cost"?: number,
@@ -84,6 +84,7 @@
   `AgentStopReason` 无此值，故由宿主层映射，不落 Core）。
 - 软停止 → `stop_reason: "interrupted"`（`AgentStopReason.Interrupted` 直接映射，Core 原生；
   回合在相位边界收敛，先发一个 `interrupted` 事件再发 `result`）。见 `docs/interrupt.md`。
+- 上下文预算不足 → `stop_reason: "context_limit"`。本轮在模型调用前暂停，checkpoint 保留完整轨迹；增大预算后显式继续，避免丢弃原任务。
 
 ### 2.4 `error`
 

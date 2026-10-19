@@ -242,7 +242,9 @@ export class TurnStateMachine {
     this.state = "idle";
     // 左下角状态行记录本回合统计摘要（对齐 REPL 展示，EventRenderer.cs:140 同源；cost F6）。
     // 取消回合不产生有效统计，单独提示。
-    if (result.stop_reason === "cancelled") {
+    if (result.stop_reason === "context_limit") {
+      this.statusText = "\u4e0a\u4e0b\u6587\u9884\u7b97\u5df2\u7528\u5c3d\uff0c\u8f68\u8ff9\u5df2\u4fdd\u7559\uff1b\u8bf7\u5148\u63d0\u70bc\u72b6\u6001\u518d\u7ee7\u7eed";
+    } else if (result.stop_reason === "cancelled") {
       this.statusText = "已取消";
     } else {
       const cost = typeof result.cost === "number" ? ` · cost:$${result.cost.toFixed(6)}` : "";

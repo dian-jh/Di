@@ -2,6 +2,7 @@ using Common.Events;
 using Core.ContextManagement;
 using Core.Llm;
 using Core.Skills;
+using Core.Sessions;
 
 namespace Core.AgentLoop;
 
@@ -15,6 +16,8 @@ namespace Core.AgentLoop;
 /// </summary>
 public sealed class AgentRunner : IAgentRunner
 {
+    /// <summary>Optional synchronous recovery log. A checkpoint write failure prevents pending tools from executing.</summary>
+    public SessionLog? CheckpointLog { get; set; }
     private readonly string _sessionId = Guid.NewGuid().ToString("N");
     private readonly Func<string, IChatModel> _modelFactory;
     private readonly AgentLoopOptions _options;
@@ -30,6 +33,8 @@ public sealed class AgentRunner : IAgentRunner
     private readonly InputBudgetTracker? _budgetTracker;
     private IReadOnlyList<ChatMessage> _history = [];
     private int? _lastHistoryBudget;
+    private bool _preserveHistoryUntilReset;
+    private string? _recoveryBlockedReason;
 
     /// <summary>最近一次追加进历史的快照文本。快照只在内容变化时追加（见 <see cref="RunAsync"/>），
     /// 未变时不重复注入 → 已进入历史的快照留在字节稳定前缀里，跨回合持续命中缓存。</summary>
@@ -82,13 +87,30 @@ public sealed class AgentRunner : IAgentRunner
     public void ResetHistory()
     {
         _history = [];
+        _preserveHistoryUntilReset = false;
+        _recoveryBlockedReason = null;
         _lastHistoryBudget = null;
         _lastSnapshotText = null;   // 重置后快照应重新注入
         _budgetTracker?.Update(0);  // B_current holder 同步归零（见 RunAsync 末尾的写入点）
     }
 
+    /// <summary>Restores a validated session trajectory before the next explicit user turn.</summary>
+    public void RestoreHistory(IReadOnlyList<ChatMessage> history)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+        _history = history.ToArray();
+        _preserveHistoryUntilReset = true;
+        _recoveryBlockedReason = null;
+        _lastHistoryBudget = null;
+        _lastSnapshotText = _history.OfType<SystemMessage>().LastOrDefault()?.Text;
+    }
+
     public async Task<AgentResult> RunAsync(string userMessage, CancellationToken cancellationToken = default)
     {
+        if (_recoveryBlockedReason is { } blockedReason)
+            throw new InvalidOperationException("会话恢复检测到工具执行结果未知。请先核查副作用并调用 ResetHistory() 或启动新会话。" + blockedReason);
+
+        var turnStartedAt = DateTimeOffset.UtcNow;
         // 用户输入的日志记录点（与 ReAct.Emit 同款旁路、fire-and-forget）：REPL / headless / RPC
         // 所有前端都经本方法进入，在此一处发布 RunStarted 即全覆盖。事件不属于 AgentLoopEvent
         // 家族（避免扩进 RPC 线协议，见 RunEvents.cs），日志订阅者据此记 run: started。
@@ -96,7 +118,7 @@ public sealed class AgentRunner : IAgentRunner
 
         var model = _modelFactory(CurrentModel);
         var budgetPolicy = _budgetPolicyProvider is null ? _budgetPolicy : _budgetPolicyProvider();
-        if (budgetPolicy is not null && (_lastHistoryBudget is null || budgetPolicy.SoftThreshold < _lastHistoryBudget))
+        if (!_preserveHistoryUntilReset && budgetPolicy is not null && (_lastHistoryBudget is null || budgetPolicy.SoftThreshold < _lastHistoryBudget))
         {
             _history = SanitizeHistory(TrimHistoryByTokens(_history, budgetPolicy.SoftThreshold));
             // These are previous turns only; the new user message is added below.
@@ -141,17 +163,73 @@ public sealed class AgentRunner : IAgentRunner
                 : systemContext + "\n\n" + skillContext;
         }
 
-        var result = await react.RunStreamingAsync(new AgentRequest
+        int? requestTokenBudget = budgetPolicy?.SoftThreshold;
+        if (requestTokenBudget is null)
         {
-            SessionId = _sessionId,
-            UserMessage = userMessage,
-            History = _history,   // 上一回合的完整轨迹 → 模型"记得"之前的对话
-            Tools = _tools,
-            ToolExecutor = _toolExecutor,
-            SystemContext = systemContext,
-            BeforeToolExecution = _budgetTracker is null ? null : trajectory =>
-                _budgetTracker.Update(EstimateTokens(trajectory)),
-        }, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                requestTokenBudget = _contextWindowProvider?.Invoke(CurrentModel) is { } requestWindow
+                    ? (int?)Math.Max(1, requestWindow * _options.HistoryBudgetRatio)
+                    : null;
+            }
+            catch
+            {
+                // Unknown model window: keep compatibility and rely on provider overflow handling.
+            }
+        }
+
+        if (!_preserveHistoryUntilReset && requestTokenBudget is > 0)
+        {
+            // History trimming must use the same whole-request estimate as ReAct's final guard,
+            // otherwise fixed message/schema overhead can pause a request that should fit after trimming.
+            while (_history.Count(m => m is UserMessage) > 1 &&
+                   EstimateIncomingRequestTokens(_history, userMessage, systemContext) > requestTokenBudget.Value)
+            {
+                _history = DropOldestTurns(_history, 1);
+            }
+        }
+
+        CheckpointLog?.BeginCheckpointTurn(userMessage, turnStartedAt, _history);
+
+        AgentResult result;
+        try
+        {
+            result = await react.RunStreamingAsync(new AgentRequest
+            {
+                SessionId = _sessionId,
+                UserMessage = userMessage,
+                History = _history,   // 传入上一回合的完整轨迹
+                Tools = _tools,
+                ToolExecutor = _toolExecutor,
+                SystemContext = systemContext,
+                ContextTokenBudget = requestTokenBudget,
+                CheckpointMessage = CheckpointLog is { } log ? log.AppendCheckpointMessage : null,
+                CheckpointToolStarted = CheckpointLog is { } logForStart ? logForStart.CheckpointToolStarted : null,
+                CheckpointToolCompleted = CheckpointLog is { } logForResult ? logForResult.CheckpointToolCompleted : null,
+                BeforeToolExecution = _budgetTracker is null ? null : trajectory =>
+                    _budgetTracker.Update(EstimateTokens(trajectory)),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            if (CheckpointLog is { } recoveryLog)
+            {
+                try
+                {
+                    _history = SessionLog.LoadRecovery(recoveryLog.LogFilePath);
+                    _preserveHistoryUntilReset = true;
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("outcome is unknown", StringComparison.OrdinalIgnoreCase))
+                {
+                    _recoveryBlockedReason = ex.Message;
+                }
+                catch
+                {
+                    _recoveryBlockedReason = "Recovery checkpoint could not be validated; inspect the session log before continuing.";
+                }
+            }
+            throw;
+        }
 
         // 累加本回合轨迹作为下一回合的记忆，按整回合（user 消息为界）裁剪（预算独占）：
         // - token 预算非 null（注入 BudgetPolicy 或窗口 × ratio）→ 预算裁剪独占，轮数裁剪完全不参与
@@ -178,15 +256,26 @@ public sealed class AgentRunner : IAgentRunner
                 // 目录/窗口解析失败（第三方 provider 异常等）：tokenBudget 保持 null → 走显式轮数兜底。
             }
         }
-        var trimmed = tokenBudget is not null
-            ? TrimHistoryByTokens(result.Trajectory, tokenBudget)   // 预算独占
-            : TrimHistory(result.Trajectory, _maxHistoryTurns);     // 显式 maxHistoryTurns 兜底（0 = 无上限）
-        _history = SanitizeHistory(trimmed);
+        if (result.StopReason == AgentStopReason.ContextLimit)
+        {
+            _history = result.Trajectory.ToArray();
+            _preserveHistoryUntilReset = true;
+        }
+        else
+        {
+            var trimmed = tokenBudget is not null
+                ? TrimHistoryByTokens(result.Trajectory, tokenBudget)
+                : TrimHistory(result.Trajectory, _maxHistoryTurns);
+            _history = SanitizeHistory(trimmed);
+            _preserveHistoryUntilReset = false;
+        }
         _lastHistoryBudget = tokenBudget;
         // 裁剪可能把最早注入的快照裁出历史：重置标记，让下一回合重新注入（否则长期会话会失去环境上下文）。
         if (_lastSnapshotText is not null && !_history.OfType<SystemMessage>().Any(m => m.Text == _lastSnapshotText))
             _lastSnapshotText = null;
         // 回合末同步裁剪后的记忆；工具执行前另按实时轨迹更新。稳定前缀由 B_margin 覆盖。
+        // Commit in-memory state before the final audit marker; earlier checkpoints remain recoverable if this append fails.
+        CheckpointLog?.CompleteCheckpointTurn(result);
         _budgetTracker?.Update(EstimateTokens(_history));
         return result;
     }
@@ -213,6 +302,18 @@ public sealed class AgentRunner : IAgentRunner
                 return trajectory.Skip(i).ToArray();
         }
         return trajectory;
+    }
+
+    private int EstimateIncomingRequestTokens(IReadOnlyList<ChatMessage> history, string userMessage, string? systemContext)
+    {
+        var context = new List<ChatMessage>(history.Count + 3);
+        if (!string.IsNullOrWhiteSpace(_options.SystemPrompt))
+            context.Add(ChatMessage.System(_options.SystemPrompt));
+        context.AddRange(history);
+        context.Add(ChatMessage.User(userMessage));
+        if (!string.IsNullOrWhiteSpace(systemContext))
+            context.Add(ChatMessage.System(systemContext));
+        return ReAct.EstimateRequestTokens(context, _tools);
     }
 
     /// <summary>

@@ -81,6 +81,10 @@ public sealed class CliHost : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(workspace);
         ArgumentNullException.ThrowIfNull(stderr);
 
+        var resumeHistory = args.Resume is { } resumeFile
+            ? SessionLog.LoadRecovery(Path.GetFullPath(resumeFile))
+            : null;
+
         var diHome = DiHome.Resolve();
         var configuration = DiConfig.Load(workspace, diHome.RootDirectory);
 
@@ -197,7 +201,13 @@ public sealed class CliHost : IDisposable
             CurrentModel = defaultModelName,
         };
 
-        var sessionLog = new SessionLog(new SessionLogOptions { RootDirectory = diHome.RootDirectory });
+        SessionLog? sessionLog = args.NoSession
+            ? null
+            : new SessionLog(new SessionLogOptions { RootDirectory = diHome.RootDirectory });
+        if (sessionLog is not null && runner is AgentRunner checkpointRunner)
+            checkpointRunner.CheckpointLog = sessionLog;
+        if (resumeHistory is not null && runner is AgentRunner resumableRunner)
+            resumableRunner.RestoreHistory(resumeHistory);
 
         // 运行日志（jcode 格式，~/.di/logs/di-YYYY-MM-DD.log）：事件总线旁路订阅回合生命周期事件。
         // DiLog 内部静默兜底（IO 失败只丢行、绝不抛），这里无需 try/catch；跟随宿主 Dispose 写

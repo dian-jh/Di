@@ -142,7 +142,11 @@ public static class PrintMode
         var doc = new Dictionary<string, object?>
         {
             ["answer"] = result.Answer,
-            ["stop_reason"] = result.StopReason.ToString().ToLowerInvariant(),
+            ["stop_reason"] = result.StopReason switch
+            {
+                AgentStopReason.ContextLimit => "context_limit",
+                _ => result.StopReason.ToString().ToLowerInvariant(),
+            },
             ["iterations"] = result.Iterations,
             ["usage"] = new { input_tokens = result.Usage.InputTokens, output_tokens = result.Usage.OutputTokens },
         };

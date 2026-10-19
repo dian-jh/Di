@@ -78,6 +78,43 @@ public sealed class CliAppTests
     }
 
     [Fact]
+    public async Task Resume_UsesReplWithoutTryingTui()
+    {
+        var bus = new InMemoryEventBus();
+        var host = new CliHost(new FakeRunner { Bus = bus }, bus, new FakeLlm([]), [], new ReplOptions(), null);
+        var spawnCalls = 0;
+        var tui = new TuiLauncher.Context
+        {
+            GetEnv = _ => "",
+            UserHome = Path.GetTempPath(),
+            ResolveEntry = _ => "fake-entry.js",
+            NodeAvailable = () => true,
+            Spawn = _ => { spawnCalls++; return 0; },
+        };
+        var (app, stdout, stderr, factory) = Setup(host, tui);
+
+        var code = await app.RunAsync(["--resume", "checkpoint.jsonl"], TextReader.Null, stdout, stderr, Tty, Tty);
+
+        Assert.Equal(0, code);
+        Assert.Equal(0, spawnCalls);
+        Assert.Equal(1, factory.Calls);
+    }
+
+    [Fact]
+    public async Task ResumeHostFailure_UsesJsonErrorEnvelopeInJsonMode()
+    {
+        var (app, stdout, stderr, factory) = Setup();
+
+        var code = await app.RunAsync(["--mode", "json", "--resume", "broken.jsonl"], TextReader.Null, stdout, stderr, Tty, Tty);
+
+        Assert.Equal(1, code);
+        Assert.Contains("\"error\"", stdout.ToString());
+        Assert.Contains("session_resume", stdout.ToString());
+        Assert.Empty(stderr.ToString());
+        Assert.Equal(1, factory.Calls);
+    }
+
+    [Fact]
     public async Task ShortHelp_PrintsUsage_ExitsZero()
     {
         var (app, stdout, _, factory) = Setup();

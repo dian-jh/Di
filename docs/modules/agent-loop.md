@@ -17,7 +17,7 @@ harness 的核心执行引擎：
 
 - **轨迹** = 历史 + 用户消息；循环内：模型决策 → 追加 → 有工具调用则执行并回填观察 → 再决策。
 - **停止条件**（`AgentStopReason`，`Core/AgentLoop/AgentResult.cs`）：无工具调用的回答 / 最终输出工具 /
-  达到 `MaxIterations`（`AgentLoopOptions`，默认 24）/ 不可重试模型错误 / 软停止 `Interrupted`。
+  达到显式正整数 `MaxIterations` / 上下文预算暂停 `ContextLimit` / 不可重试模型错误 / 软停止 `Interrupted`。默认迭代上限为 0（不限轮数）。
 - **软停止（相位边界）**：可选构造参数 `IInterruptSignal? interrupt`（`Core/AgentLoop/IInterruptSignal.cs`）。
   循环在**两个相位边界**轮询 `IsStopRequested`：进入模型相位前（不发起模型调用）、执行工具前（不执行任何工具），
   命中则经 `StopInterrupted` **正常返回** `AgentStopReason.Interrupted`（携带已有轨迹 / 文本 / usage / cost），
@@ -72,10 +72,11 @@ harness 的核心执行引擎：
 ## 关键符号
 
 - `ReAct`、`AgentRunner`、`IAgentRunner`
-- `AgentRequest`、`AgentResult`、`AgentStopReason`（`Answer` / `FinalOutputTool` / `MaxIterations` / `Error` / `Interrupted`）
+- `AgentRequest`、`AgentResult`、`AgentStopReason`（`Answer` / `FinalOutputTool` / `MaxIterations` / `ContextLimit` / `Error` / `Interrupted`）
 - `IInterruptSignal`（`IsStopRequested`）、`ReAct.StopInterrupted`、`IAgentRunner.InterruptSignal`
 - `AgentLoopOptions`（含 `HistoryBudgetRatio`）、`EnvironmentSnapshot`
 - `AgentRunner.TrimHistoryByTokens`（token 预算裁剪）、`Core.Llm.TokenEstimator`（估算口径 ~4 字符/token）
+- `AgentRequest.ContextTokenBudget` / `AgentStopReason.ContextLimit`：模型调用前估算完整 history、reasoning、tool-call arguments 和工具 schema；超预算时暂停并保留完整轨迹。估算使用 UTF-8 字节数除以 3 加固定开销及 schema 近似，非 tokenizer 精算，不能保证不超窗；未知上下文窗口时没有请求级预算保护。ContextLimit 后不裁掉暂停任务；换用更大预算继续，或显式 `ResetHistory()` 后另开任务。
 - `Core.ContextManagement.BudgetPolicy`（预算制裁剪：soft 水位线为预算）、`InputBudgetTracker`（B_current 共享 holder）
 - `IToolExecutor`、`IToolValidator`
 

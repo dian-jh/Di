@@ -137,6 +137,8 @@ public sealed class EventRenderer
             _output.WriteLine("⏹ 已中断：未开始的工作不再执行。");
         }
 
+        if (result.StopReason == AgentStopReason.ContextLimit)
+            _output.WriteLine("\u4e0a\u4e0b\u6587\u9884\u7b97\u5df2\u7528\u5c3d\uff0c\u5f53\u524d\u8f68\u8ff9\u5df2\u4fdd\u7559\u3002\u8bf7\u5148\u63d0\u70bc\u72b6\u6001\uff0c\u518d\u4ee5\u65b0\u4efb\u52a1\u7ee7\u7eed\u3002");
         _output.Write($"（{result.StopReason} · {result.Iterations} 轮 · tokens: {result.Usage}");
         if (result.Cost is { } cost)
             _output.Write($" · cost:${cost.Total:F6}");

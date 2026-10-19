@@ -10,13 +10,10 @@ public sealed class AgentLoopOptions
     public string SystemPrompt { get; set; } = "";
 
     /// <summary>
-    /// 循环上限，防止模型无限循环。到达后以 <see cref="AgentStopReason.MaxIterations"/> 结束。
-    /// 默认 24：一次迭代 = 一次模型往返（通常含一次工具调用）；复杂分析/测试-修复循环动辄
-    /// 10-20 轮，8 轮会截断信息收集。DeepSeek 上下文 1M token + 前缀缓存命中率 ~75%，
-    /// 每轮边际成本极低，放宽上限几乎无代价；真正防失控的是成本/上下文预算（见 docs/roadmap.md §3 缺口 #4）。
+    /// 0 表示不限制迭代轮数，正整数表示最大轮数；上下文大小由 HistoryBudgetRatio 预算保护。
     /// 可由配置覆盖：AgentLoop:MaxIterations（~/.di/config.json）。
     /// </summary>
-    public int MaxIterations { get; set; } = 24;
+    public int MaxIterations { get; set; } = 0;
 
     /// <summary>
     /// 跨回合记忆占模型上下文窗口的比例上限（0~1，roadmap §3 缺口 #4）。

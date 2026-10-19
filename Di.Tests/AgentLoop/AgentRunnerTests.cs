@@ -5,6 +5,7 @@ using Core.AgentLoop;
 using Core.ContextManagement;
 using Core.Llm;
 using Core.Skills;
+using Core.Sessions;
 
 namespace Di.Tests;
 
@@ -14,6 +15,174 @@ namespace Di.Tests;
 /// </summary>
 public sealed class AgentRunnerTests
 {
+    [Fact]
+    public async Task LongToolRun_CheckpointsAndRecoversEveryResultInOrder()
+    {
+        const int toolCount = 256;
+        var temp = Directory.CreateTempSubdirectory("di-runner-long-recovery-");
+        try
+        {
+            var session = new SessionLog(new SessionLogOptions { RootDirectory = temp.FullName });
+            var model = new ScriptedModel(index => index < toolCount
+                ? new ModelResponse
+                {
+                    Message = ChatMessage.Assistant($"step {index}", toolCalls: [new ToolCallBlock($"call-{index:D3}", "step", $"{{\"index\":{index}}}")]),
+                    FinishReason = new FinishReason.ToolCalls(),
+                    Usage = TokenUsage.Zero,
+                }
+                : new ModelResponse { Message = ChatMessage.Assistant("finished"), FinishReason = new FinishReason.Stop(), Usage = TokenUsage.Zero });
+            var executor = new global::Di.Tests.FakeToolExecutor(call => $"result {call.Id}");
+            var runner = new AgentRunner(_ => model, executor, new AgentLoopOptions(), new InMemoryEventBus(),
+                budgetPolicyProvider: () => new BudgetPolicy(1_000_000, outputReserveTokens: 0)) { CheckpointLog = session };
+
+            var result = await runner.RunAsync("run all steps");
+            var recovered = SessionLog.LoadRecovery(session.LogFilePath);
+            var toolResults = recovered.OfType<ToolResultMessage>().ToArray();
+            var ordinals = File.ReadLines(session.LogFilePath)
+                .Select(line => System.Text.Json.JsonDocument.Parse(line))
+                .Select(document => document.RootElement.GetProperty("ordinal").GetInt64())
+                .ToArray();
+
+            Assert.Equal(AgentStopReason.Answer, result.StopReason);
+            Assert.Equal(toolCount, executor.Calls.Count);
+            Assert.Equal(toolCount + 1, model.Requests.Count);
+            Assert.Equal(Enumerable.Range(0, toolCount).Select(i => $"call-{i:D3}"), executor.Calls.Select(call => call.Id));
+            Assert.Equal(Enumerable.Range(0, toolCount).Select(i => $"call-{i:D3}"), toolResults.Select(message => message.ToolCallId));
+            Assert.Equal(Enumerable.Range(0, toolCount).Select(i => $"result call-{i:D3}"), toolResults.Select(message => message.Content));
+            Assert.Equal(Enumerable.Range(0, ordinals.Length).Select(i => (long)i), ordinals);
+        }
+        finally
+        {
+            Directory.Delete(temp.FullName, recursive: true);
+        }
+    }
+    [Fact]
+    public async Task Checkpoints_RestoreCompletedToolWhenLaterModelCallFails()
+    {
+        var temp = Directory.CreateTempSubdirectory("di-runner-recovery-");
+        var session = new SessionLog(new SessionLogOptions { RootDirectory = temp.FullName });
+        var model = new global::Di.Tests.FakeChatModel();
+        model.Enqueue(_ => new ModelResponse
+        {
+            Message = ChatMessage.Assistant("checking", toolCalls: [new ToolCallBlock("c1", "read", "{}")]),
+            FinishReason = new FinishReason.ToolCalls(),
+            Usage = TokenUsage.Zero,
+        });
+        model.Enqueue(_ => throw new IOException("model stopped"));
+        var executor = new global::Di.Tests.FakeToolExecutor(_ => "tool output");
+        var runner = new AgentRunner(_ => model, executor, new AgentLoopOptions(), new InMemoryEventBus())
+        {
+            CheckpointLog = session,
+        };
+
+        await Assert.ThrowsAsync<IOException>(() => runner.RunAsync("inspect"));
+
+        var recovered = SessionLog.LoadRecovery(session.LogFilePath);
+        var toolResult = Assert.Single(recovered.OfType<ToolResultMessage>());
+        Assert.Equal("tool output", toolResult.Content);
+        Assert.Single(executor.Calls);
+        Directory.Delete(temp.FullName, recursive: true);
+    }
+
+    [Fact]
+    public async Task ContextLimit_PreservesRestoredTaskAndToolResultUntilLargerBudgetContinues()
+    {
+        var model = new global::Di.Tests.FakeChatModel();
+        BudgetPolicy policy = new(1, outputReserveTokens: 0);
+        var runner = new AgentRunner(_ => model, new FakeToolExecutor(), new AgentLoopOptions(), new InMemoryEventBus(),
+            budgetPolicyProvider: () => policy);
+        runner.RestoreHistory([
+            ChatMessage.User("original task"),
+            ChatMessage.Assistant("running", toolCalls: [new ToolCallBlock("c1", "read", "{}")]),
+            ChatMessage.Tool("c1", "important tool output"),
+        ]);
+
+        var paused = await runner.RunAsync("continue");
+        Assert.Equal(AgentStopReason.ContextLimit, paused.StopReason);
+        Assert.Contains(paused.Trajectory, m => m.GetText() == "original task");
+        Assert.Contains(paused.Trajectory, m => m is ToolResultMessage { Content: "important tool output" });
+
+        policy = new BudgetPolicy(100_000, outputReserveTokens: 0);
+        model.Enqueue(_ => new ModelResponse { Message = ChatMessage.Assistant("done"), FinishReason = new FinishReason.Stop(), Usage = TokenUsage.Zero });
+        await runner.RunAsync("continue with room");
+
+        var sent = model.Requests.Single().Messages;
+        Assert.True(sent.Any(m => m.GetText() == "original task"), string.Join(" | ", sent.Select(m => $"{m.Role}:{m.GetText()}")));
+        Assert.Contains(sent, m => m is ToolResultMessage { Content: "important tool output" });
+    }
+
+    [Fact]
+    public async Task FailedModelCall_RefreshesInMemoryHistoryBeforeSameRunnerContinues()
+    {
+        var temp = Directory.CreateTempSubdirectory("di-runner-live-recovery-");
+        var session = new SessionLog(new SessionLogOptions { RootDirectory = temp.FullName });
+        var model = new global::Di.Tests.FakeChatModel();
+        model.Enqueue(_ => new ModelResponse
+        {
+            Message = ChatMessage.Assistant("checking", toolCalls: [new ToolCallBlock("c1", "read", "{}")]),
+            FinishReason = new FinishReason.ToolCalls(), Usage = TokenUsage.Zero,
+        });
+        model.Enqueue(_ => throw new IOException("model stopped"));
+        model.Enqueue(_ => new ModelResponse { Message = ChatMessage.Assistant("done"), FinishReason = new FinishReason.Stop(), Usage = TokenUsage.Zero });
+        var executor = new global::Di.Tests.FakeToolExecutor(_ => "tool output");
+        var runner = new AgentRunner(_ => model, executor, new AgentLoopOptions(), new InMemoryEventBus()) { CheckpointLog = session };
+
+        await Assert.ThrowsAsync<IOException>(() => runner.RunAsync("inspect"));
+        await runner.RunAsync("continue");
+
+        Assert.Single(executor.Calls);
+        Assert.Contains(model.Requests[2].Messages, m => m is ToolResultMessage { Content: "tool output" });
+        Directory.Delete(temp.FullName, recursive: true);
+    }
+
+    [Fact]
+    public async Task UnknownToolOutcome_BlocksInProcessRetryUntilHistoryReset()
+    {
+        var temp = Directory.CreateTempSubdirectory("di-runner-unknown-outcome-");
+        var session = new SessionLog(new SessionLogOptions { RootDirectory = temp.FullName });
+        using var cts = new CancellationTokenSource();
+        var model = new global::Di.Tests.FakeChatModel();
+        model.Enqueue(_ => new ModelResponse
+        {
+            Message = ChatMessage.Assistant("writing", toolCalls: [new ToolCallBlock("c1", "write", "{}")]),
+            FinishReason = new FinishReason.ToolCalls(), Usage = TokenUsage.Zero,
+        });
+        var executor = new global::Di.Tests.FakeToolExecutor(_ =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        var runner = new AgentRunner(_ => model, executor, new AgentLoopOptions(), new InMemoryEventBus()) { CheckpointLog = session };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runner.RunAsync("write file", cts.Token));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => runner.RunAsync("continue"));
+
+        Assert.Contains("unknown", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(model.Requests);
+        Assert.Single(executor.Calls);
+        Directory.Delete(temp.FullName, recursive: true);
+    }
+
+    [Fact]
+    public async Task ResetHistory_NextRecoveryCheckpointDoesNotReviveClearedTurns()
+    {
+        var temp = Directory.CreateTempSubdirectory("di-runner-clear-recovery-");
+        var session = new SessionLog(new SessionLogOptions { RootDirectory = temp.FullName });
+        var model = new global::Di.Tests.FakeChatModel();
+        model.Enqueue(_ => new ModelResponse { Message = ChatMessage.Assistant("old answer"), FinishReason = new FinishReason.Stop(), Usage = TokenUsage.Zero });
+        model.Enqueue(_ => new ModelResponse { Message = ChatMessage.Assistant("new answer"), FinishReason = new FinishReason.Stop(), Usage = TokenUsage.Zero });
+        var runner = new AgentRunner(_ => model, new FakeToolExecutor(), new AgentLoopOptions(), new InMemoryEventBus()) { CheckpointLog = session };
+
+        await runner.RunAsync("old task");
+        runner.ResetHistory();
+        await runner.RunAsync("new task");
+
+        var recovered = SessionLog.LoadRecovery(session.LogFilePath);
+        Assert.Contains(recovered, m => m is UserMessage && m.GetText() == "new task");
+        Assert.DoesNotContain(recovered, m => m.GetText() == "old task" || m.GetText() == "old answer");
+        Directory.Delete(temp.FullName, recursive: true);
+    }
+
     [Fact]
     public async Task SessionAffinity_IsStableAcrossTurnsAndIsolatedAcrossRunners()
     {
@@ -28,15 +197,17 @@ public sealed class AgentRunnerTests
         Assert.NotEqual(first.Requests[0].SessionId, second.Requests[0].SessionId);
     }
     [Fact]
-    public async Task UnchangedBudget_StillPreservesMostRecentTurn()
+    public async Task ContextLimit_PreservesOversizedCurrentTaskWithoutCallingModel()
     {
         var model = new FakeChatModel();
         var policy = new BudgetPolicy(100, outputReserveTokens: 0);
         var runner = new AgentRunner(_ => model, new FakeToolExecutor(), new AgentLoopOptions(), new InMemoryEventBus(),
             budgetPolicyProvider: () => policy);
-        await runner.RunAsync(new string('x', 10_000));
-        await runner.RunAsync("next");
-        Assert.Contains(model.Requests[1].Messages, m => m.GetText().Length >= 10_000);
+        var oversizedTask = new string('x', 10_000);
+        var paused = await runner.RunAsync(oversizedTask);
+        Assert.Equal(AgentStopReason.ContextLimit, paused.StopReason);
+        Assert.Empty(model.Requests);
+        Assert.Contains(paused.Trajectory, m => m.GetText() == oversizedTask);
     }
     [Fact]
     public async Task ModelSwitch_UsesNewBudgetBeforeSendingExistingHistory()
@@ -161,7 +332,7 @@ public sealed class AgentRunnerTests
             new AgentLoopOptions { SystemPrompt = "sys", HistoryBudgetRatio = 1.0 },
             new InMemoryEventBus(),
             maxHistoryTurns: 99,
-            contextWindowProvider: _ => 40);   // 预算 = 40 token
+            contextWindowProvider: _ => 115);   // 完整请求预算容纳最近两轮与当前输入
 
         for (var i = 1; i <= 5; i++)
             await runner.RunAsync($"问{i}{new string('x', 57)}");
@@ -183,7 +354,7 @@ public sealed class AgentRunnerTests
             new AgentLoopOptions { SystemPrompt = "sys", HistoryBudgetRatio = 1.0 },
             new InMemoryEventBus(),
             maxHistoryTurns: 99,
-            contextWindowProvider: _ => 8);
+            contextWindowProvider: _ => 75);
 
         for (var i = 1; i <= 3; i++)
             await runner.RunAsync($"问{i}{new string('x', 57)}");

@@ -54,6 +54,7 @@ public static class CliInfo
           --stats <文件>         聚合一个会话 JSONL 的用量 / 缓存命中率 / 成本
           --skill-eval <文件>    用带标签用例集评估 skill 匹配器（精确率 / 召回率）
           --no-session          headless 不写会话日志（默认写入 ~/.di/sessions/）
+          --resume <file>       恢复 checkpoint 会话并进入交互模式
           --no-ansi             禁用 ANSI 控制序列（脚本友好）
           -h, --help            显示本帮助
           --version             显示版本

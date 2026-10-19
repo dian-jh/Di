@@ -18,6 +18,15 @@ const RESULT: AgentResult = {
 };
 
 describe("TurnStateMachine：状态转移", () => {
+  it("context_limit keeps the turn and explains that its trajectory is preserved", () => {
+    const s = new TurnStateMachine();
+    s.startTurn("continue");
+    s.finishTurn({ ...RESULT, stop_reason: "context_limit", iterations: 0, answer: "" });
+    assert.equal(s.state, "idle");
+    assert.equal(s.turns[0]?.userMessage, "continue");
+    assert.match(s.statusText, /上下文预算已用尽/);
+    assert.match(s.statusText, /轨迹已保留/);
+  });
   it("显示缓存写入量，避免把写缓存误读成普通未命中输入", () => {
     const state = new TurnStateMachine();
     state.startTurn("hi");

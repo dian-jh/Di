@@ -46,6 +46,9 @@ public sealed record CliArgs
     /// <summary>--no-session：headless 不写会话日志。</summary>
     public bool NoSession { get; init; }
 
+    /// <summary>--resume &lt;file&gt;：载入持久化轨迹并进入交互模式；继续仅在用户输入后发生。</summary>
+    public string? Resume { get; init; }
+
     /// <summary>--no-ansi：禁用 ANSI 控制序列。</summary>
     public bool NoAnsi { get; init; }
 
@@ -75,7 +78,7 @@ public static class CliArgsParser
         var positionals = new List<string>();
         var unknown = new List<string>();
         var diagnostics = new List<CliDiagnostic>();
-        string? model = null, provider = null, mode = null, thinking = null;
+        string? model = null, provider = null, mode = null, thinking = null, resume = null;
         string? listModels = null, stats = null, skillEval = null;
         bool print = false, version = false, info = false, help = false, noSession = false, noAnsi = false;
         var listModelsSet = false;
@@ -116,6 +119,10 @@ public static class CliArgsParser
 
                 case "--no-session":
                     noSession = true;
+                    break;
+
+                case "--resume":
+                    if (TryTakeValue(args, ref i, "--resume", diagnostics, out var resumePath)) resume = resumePath;
                     break;
 
                 case "--no-ansi":
@@ -189,6 +196,7 @@ public static class CliArgsParser
             SkillEval = skillEval,
             Thinking = thinking,
             NoSession = noSession,
+            Resume = resume,
             NoAnsi = noAnsi,
             UnknownFlags = unknown,
         }, diagnostics);

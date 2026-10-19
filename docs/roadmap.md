@@ -108,13 +108,13 @@ MVP 至此收尾。接下来的重心转向工业级路线图（§4）：对会�
   见 `docs/modules/context-management.md`）；基础版的"丢最旧整回合"已按该设计升级为预算制
   （AgentRunner 注入 BudgetPolicy 以 soft 水位线为历史预算 + B_current 经 InputBudgetTracker
   接入 L1 预测判定）。L2-L5 随阶段二/三/四上线。
-- **`/resume` 会话恢复**：`SessionLog` 已可重放，接回 UI（`--resume [session-id]`）。
+- **文件会话恢复**：`di --resume <file>` 已实现，可从 checkpoint 恢复并要求用户显式输入后才继续；旧版无 checkpoint 日志拒绝恢复，工具结果未知时禁止自动重放。后续仍需会话选择器、`/resume` slash 命令及更友好的恢复 UI。
 - **项目记忆与 AGENTS.md**：`~/.di/memory/<project>.md` 长期事实（跨会话）；项目级
   `AGENTS.md` 作为指令注入（当前是代码内默认 `CoreTools.BuildInstructions` 的输出）。
 - **缓存友好深化**：✅ 基础版已实现——`task_complete` 落盘 `usage`（含 cache_read/cache_write 与
   命中率），`di --stats <file>` 做会话级聚合（DeepSeek 已给 cache_read/cache_write token，
   `CostCalculator` 已按缓存价计费）——命中率可观测，优化有依据。
-- 验收：连续 50 回合的会话 token 不超窗；`/resume` 后模型记得上一会话关键结论。
+- 验收（后续）：摘要/上下文重建、连续 50 回合 token 稳定；当前 ContextLimit 会安全暂停并保留完整轨迹，估算非 tokenizer 精算，未知窗口无请求级保护。
 
 ### Phase D —— 生态扩展（Ecosystem）
 
@@ -151,7 +151,7 @@ MVP（已达成，5 个缺口全补齐）    工业级
 ───────────────             ──────────────
 循环/流式/工具/skills/会话   A 分发与 UX（分发/headless/Ctrl+C ✅，TS TUI M1 ✅ + 默认交互前端 M4 ✅，readline 补全等后续）
 成本/目录/认证/元数据        B 安全与可信（权限审批/撤销/注入防御）★
-事件总线/分层配置/838 测试    C 上下文与记忆（token 预算阶段一 ✅，压缩/resume 后续）
+事件总线/分层配置/838 测试    C 上下文与记忆（token 预算阶段一 ✅，摘要压缩与会话选择器/命令后续；文件 checkpoint 恢复已实现）
                             D 生态（MCP/子代理/第二 provider/命令注册表）
                             E 可观测与产品化（遥测/评估/运维命令）
 ```

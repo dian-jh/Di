@@ -84,7 +84,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 
 | 段 | 绑定到 | 主要键 |
 |---|---|---|
-| `AgentLoop` | `AgentLoopOptions` | `SystemPrompt`、`MaxIterations`、`HistoryBudgetRatio` |
+| `AgentLoop` | `AgentLoopOptions` | `SystemPrompt`、`MaxIterations`（默认 0 = unlimited；正整数启用上限）、`HistoryBudgetRatio` |
 | `ContextManagement` | `ContextManagementOptions`（`Core.ContextManagement`） | `Enabled`、`MarginRatio`、`OutputReserveTokens`、`NextOutputReserveTokens`、`SoftRatio` / `HardRatio` / `BlockingRatio`（详见 `docs/modules/context-management.md`） |
 | `Model` | `ModelOptions` | `Provider`、`DefaultModel` |
 | `Repl` | `ReplOptions` | `Prompt`、`WorkingStatusText`、`UseAnsi` |

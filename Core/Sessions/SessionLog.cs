@@ -41,6 +41,8 @@ public sealed class SessionLogOptions
 /// </summary>
 public sealed class SessionLog
 {
+    /// <summary>Loads the latest durable trajectory checkpoint; incomplete tool intents fail closed.</summary>
+    public static IReadOnlyList<ChatMessage> LoadRecovery(string filePath) => SessionRecovery.Load(filePath);
     private static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
@@ -129,6 +131,8 @@ public sealed class SessionLog
                 Type = "task_complete",
                 TurnId = turnId,
                 LastAgentMessage = result.Answer,
+                StopReason = result.StopReason.ToString(),
+                result.Iterations,
                 CompletedAt = now.ToUnixTimeMilliseconds(),
                 DurationMs = (long)Math.Max(0, (now - startedAt).TotalMilliseconds),
                 Cost = result.Cost,   // 无费率时 null → 序列化省略该字段
@@ -136,6 +140,90 @@ public sealed class SessionLog
             });
         }
     }
+
+    /// <summary>Writes the current user request as a recovery checkpoint before model work starts.</summary>
+    public void BeginCheckpointTurn(string userMessage, DateTimeOffset startedAt, IReadOnlyList<ChatMessage>? history = null)
+    {
+        ArgumentNullException.ThrowIfNull(userMessage);
+        lock (_lock)
+        {
+            StartSession();
+            Append("checkpoint_turn_started", new
+            {
+                StartedAt = startedAt.ToUnixTimeMilliseconds(),
+                History = (history ?? []).Select(SerializeCheckpointMessage).ToArray(),
+                User = SerializeCheckpointMessage(ChatMessage.User(userMessage)),
+            });
+        }
+    }
+
+    /// <summary>Writes and flushes a complete message checkpoint as one JSONL record.</summary>
+    public void AppendCheckpointMessage(ChatMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        lock (_lock)
+        {
+            StartSession();
+            Append("trajectory_checkpoint", new { Message = SerializeCheckpointMessage(message) });
+        }
+    }
+
+    /// <summary>Durably records tool intent. Callers must not execute the tool if this write fails.</summary>
+    public void CheckpointToolStarted(ToolCallBlock call)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+        lock (_lock)
+        {
+            StartSession();
+            Append("checkpoint_tool_started", new { CallId = call.Id, Name = call.Name, Arguments = call.Arguments });
+        }
+    }
+
+    /// <summary>Durably records a tool outcome, closing its pending intent.</summary>
+    public void CheckpointToolCompleted(ToolResultMessage result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        lock (_lock)
+        {
+            StartSession();
+            Append("checkpoint_tool_completed", new
+            {
+                CallId = result.ToolCallId,
+                Message = SerializeCheckpointMessage(result),
+            });
+        }
+    }
+
+    /// <summary>Records a recoverable turn boundary and its stop details.</summary>
+    public void CompleteCheckpointTurn(AgentResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        lock (_lock)
+        {
+            StartSession();
+            Append("checkpoint_turn_completed", new { StopReason = result.StopReason.ToString(), result.Iterations });
+        }
+    }
+
+    private static object SerializeCheckpointMessage(ChatMessage message) => message switch
+    {
+        SystemMessage system => new { Role = "system", Text = system.Text },
+        UserMessage user => new { Role = "user", Blocks = user.Content.Select(SerializeCheckpointBlock).ToArray() },
+        AssistantMessage assistant => new { Role = "assistant", Blocks = assistant.Content.Select(SerializeCheckpointBlock).ToArray() },
+        ToolResultMessage tool => new { Role = "tool", CallId = tool.ToolCallId, Text = tool.Content, tool.IsError },
+        _ => throw new InvalidOperationException($"Unsupported checkpoint message {message.GetType().Name}"),
+    };
+
+    private static object SerializeCheckpointBlock(IContentBlock block) => block switch
+    {
+        TextBlock text => new { Type = "text", text.Text },
+        ReasoningBlock reasoning => new { Type = "reasoning", reasoning.Text },
+        ToolCallBlock call => new { Type = "tool_call", call.Id, call.Name, call.Arguments },
+        ImageBlock image => new { Type = "image", image.AttachmentId, image.Detail },
+        FileBlock file => new { Type = "file", file.AttachmentId, file.Filename },
+        OpaqueBlock opaque => new { Type = "opaque", opaque.UnknownType, opaque.RawJson },
+        _ => new { Type = "unknown", Value = block.ToString() },
+    };
 
     /// <summary>
     /// 记录一个<b>失败</b>回合（模型调用抛异常，Repl 打印"✗ 运行失败"后没有产生 <see cref="AgentResult"/>）。

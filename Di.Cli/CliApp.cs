@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Core.AgentLoop;
 using Core.Configuration;
 using Core.Llm;
@@ -71,14 +72,31 @@ public sealed class CliApp
 
             default:
                 // 需要真实运行的路径：构建宿主（组合根）后分派；宿主释放工具会话与 DI 容器。
-                using (var host = _hostFactory(cliArgs, workspace, stderr, useAnsi))
+                CliHost host;
+                try
+                {
+                    host = _hostFactory(cliArgs, workspace, stderr, useAnsi);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    if (cliArgs.Mode == "json")
+                        await stdout.WriteLineAsync(JsonSerializer.Serialize(new { error = new { code = "session_resume", message = ex.Message } }));
+                    else
+                        await stderr.WriteLineAsync($"无法启动 CLI：{ex.Message}");
+                    return 1;
+                }
+                using (host)
                 {
                     return mode switch
                     {
                         AppMode.ListModels => await ListModelsAsync(host, cliArgs.ListModels, stdout, stderr, cancellationToken),
                         AppMode.SkillEval => await SkillEvalAsync(host, cliArgs.SkillEval, stdout, stderr, cancellationToken),
                         AppMode.Interactive => await InteractiveAsync(host, stdin, stdout, stderr, stdinTty, stdoutTty,
-                            interrupt, cancellationToken, _tuiContext),
+                            interrupt, cancellationToken, _tuiContext, skipTui: cliArgs.Resume is not null),
                         AppMode.Rpc => await RpcMode.RunAsync(host, cliArgs, stdin, stdout, stderr, cancellationToken),
                         _ => await PrintMode.RunAsync(host, cliArgs, stdin, stdout, stderr, stdoutTty, cancellationToken),
                     };
@@ -231,11 +249,11 @@ public sealed class CliApp
     /// </summary>
     private static async Task<int> InteractiveAsync(CliHost host, TextReader stdin, TextWriter stdout,
         TextWriter stderr, bool stdinTty, bool stdoutTty, InterruptCoordinator? interrupt,
-        CancellationToken cancellationToken, TuiLauncher.Context? tui)
+        CancellationToken cancellationToken, TuiLauncher.Context? tui, bool skipTui = false)
     {
         // M4：交互默认交 TS TUI（node <entry>，继承 stdio）。仅双 TTY 下尝试；
         // 逃生门 DI_UI=repl / 入口缺失 / 无 node / spawn 异常/非零退出 → 回退 REPL（下方既有逻辑不动）。
-        if (stdinTty && stdoutTty)
+        if (stdinTty && stdoutTty && !skipTui)
         {
             var decision = TuiLauncher.TryLaunch(tui);
             if (decision.Managed)
