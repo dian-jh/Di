@@ -19,6 +19,8 @@ Pi 检出路径仅便于查阅，不能出现在产品导入、安装脚本或�
 
 ## 阅读顺序与唯一职责
 
+**执行 AI 先读 [逐单元执行规则](operator-guide.md)**：一次只完成一个任务卡，保存实际测试证据，再推进下一项。下列专题提供该任务所需的契约，不要求一次实现整个阶段。
+
 | 顺序 | 文档 | 职责 |
 |---|---|---|
 | 1 | [docs/migration/typescript-core/architecture.md](architecture.md) | 包边界、模块映射、共用接口、Pi 借鉴决策 |
@@ -63,4 +65,4 @@ npm.cmd --prefix tui run build
 - **旧缺陷**用明确输入、预期和回归测试记录；不能默默改协议、丢功能或降低安全边界。
 - **未决定细节**在对应最小任务内核实并记录，不以“待定”冒充已实现。
 
-接手 AI 的第一个动作是 [execution-plan.md 的 P0](execution-plan.md#p0-冻结参考与行为清单)，不是删除 `.cs` 或复制整个 Pi。
+接手 AI 从 [逐单元执行规则](operator-guide.md) 开始，再完成 [execution-plan.md 的 P0](execution-plan.md#p0-冻结参考与行为清单)。

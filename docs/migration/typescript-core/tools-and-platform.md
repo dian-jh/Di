@@ -58,7 +58,7 @@ glob/grep/shell/powershell/python。all/coding/read-only 集合与名称别名�
 |---|---|---|
 | 字面量、`.`、字符类/范围、`^`/`$`、常用量词 | 支持 | 逐项跑跨平台 fixture，确认换行与 Unicode 行为后可标兼容 |
 | 捕获/非捕获组、alternation、贪婪/懒惰量词 | 支持 | 比较命中位置与重复/空匹配行为；未验证为阻断 |
-| `\w`、``、大小写忽略 | `RegexOptions.CultureInvariant`，可选 `IgnoreCase` | .NET 与 JS Unicode/文化折叠不同；需固定 Unicode fixture，未通过明确标不兼容 |
+| `\w`、`\b`、大小写忽略 | `RegexOptions.CultureInvariant`，可选 `IgnoreCase` | .NET 与 JS Unicode/文化折叠不同；需固定 Unicode fixture，未通过明确标不兼容 |
 | lookahead/lookbehind、named group、反向引用 | .NET 支持其自身语法版本 | Node 当前语法/命名引用差异逐项确认；不支持项是 blocker，禁止静默降级 |
 | 多行/单行选项、孤立 CR/LF、非法语法错误 | 由 .NET 默认及当前 options 决定 | 对应 JS flags/解析错误不保证同义；显式验证后才可兼容 |
 | 灾难回溯与超时 | C# 当前 Regex 没有在此工具内配置统一超时 | JS 正则同步且不可中断；worker 超时 terminate 是 TS 新安全边界，作为行为改进记录 |
@@ -99,6 +99,10 @@ glob/grep/shell/powershell/python。all/coding/read-only 集合与名称别名�
 
 `child_process` 只提供进程创建能力，不能替代现有 `ProcessRunner` 与 `ShellSession` 的行为。建议在
 未来 `packages/coding-agent/src/core/tools/process-runner.ts` 实现独立的异步 runner：
+
+Di 当前 `ProcessRunner.Kill(Process)` 与 `ShellSession.Kill()` 调用 `.NET Process.Kill(entireProcessTree:true)`；
+超时路径先终止进程树再回传 partial output。Node 的 `ChildProcess.kill()` 只表示发信号给该子进程，不能
+当作此现状的等价 API。
 
 1. 用 `spawn(file, args, {cwd, env, stdio, shell:false, windowsHide:true})`；只有明确执行 cmd
    命令的边界才按 cmd 规则组装 command line。其他命令优先参数数组，避免引入 shell quoting 注入。
@@ -180,6 +184,43 @@ Pi 是协议形态参考，Di 当前工具契约仍由 C# 代码/文档决定。
 在复用 Pi 实现前，核对该提交目录实际 API、依赖许可（MIT）、平台实现与 Di 差异；只提取小型可理解
 算法并在 Di tests 下重新验证。不得使用 E 盘路径，不得以 whole Pi package/runtime 代替 Di 包边界。
 Pi 没有 Di 当前 Python/cmd 语义等价物，不能用 Pi 全量工具覆盖这些功能。
+
+## 最小实施顺序与停止条件
+
+按单元逐个完成测试与实现；每条“停止”都表示不要跳过、mock 成绿或继续接入宿主：
+
+1. **registry/schema**：先写 8 工具 schema 和注册顺序 fixture，再实现 definitions/executor 共用注册表。
+   停止：平台 shell 名、必填字段、默认值或 schema/executor 集合不一致时，不进入工具实现。
+2. **异步文件工具**：依次 read、write、edit；edit 测 CRLF、LF、孤立 CR、UTF-8 BOM，原子写若实现必须另
+   作为改进 case 测 ACL/attributes。停止：路径解析或观察文本变化未说明、取消后文件可能半写、权限/只读
+   属性语义未决时，不接入 loop。
+3. **glob 与 grep**：先冻结 .NET→TS regex matrix 和 glob fixture，逐语法批准兼容范围；regex worker 做
+   可终止 job。停止：Di 既有表达式的结果仍未知、超时不能 terminate worker、或被忽略目录被报成“无匹配”时，
+   搜索阶段不得标绿。没有等价的未支持语法必须列为显式迁移 blocker，不能静默返回空结果。
+4. **ProcessRunner**：先做 POSIX runner，再做 Windows tree-kill adapter；选择 Windows taskkill 或 Job Object
+   后记录真实实现和系统版本。停止：任一孙进程存活、taskkill 失败后只杀父进程、pipe drain 无界等待，均为
+   blocker；不能把 `child.kill()` 单独算通过。
+5. **编码适配**：先探测 ICU `TextDecoder` 编码支持，再实现 OEM code page discovery adapter；在 936 与一个
+   非 GBK OEM 上验收。停止：系统 code page 无法取得或 decoder 不支持时，返回显式解码错误并保留有界 raw
+   bytes 供诊断；禁止静默以 UTF-8 替换字符输出并宣称兼容。
+6. **ShellSession**：单独实现随机 nonce、marker parser、stdin encoding、stdout/stderr drain、会话 mutex 和
+   kill/recreate。停止：无换行输出粘 marker、命令输出包含伪 marker、并发命令、超时后 cwd/env 状态任一不符，
+   不接到 ReAct。
+7. **host/RPC**：最后接进 `coding-agent/src/core/tools/`，沿既有 RPC 传同形观察字符串。停止：RPC event loop
+   被工具 IO/regex/目录扫描阻塞，或旧 TUI 的工具状态/错误显示变形，不切本地 Runner。
+
+### 平台能力与未决依赖门
+
+本规划尚未锁定 Windows ACL、跨平台 advisory lock、系统 OEM code page discovery 或 regex engine 的新增
+依赖/native binding。执行代理必须先提交一页决策记录：候选准确版本、MIT/兼容许可、Node `>=22.19`/ESM
+支持、Windows 构建可用性、Unix/Windows 能力对应、维护/安装失败策略。确认前不允许通过临时 shell 命令、
+未锁定包或“CI 此机恰好可用”写入正式实现。若原生 binding 未能在支持平台安装，必须停止对应能力，不得
+降级成直接子进程 kill、UTF-8 猜测、JS event loop 同步 regex、或无锁凭据写入。
+
+Windows process tree 的默认可实现基线是以 argv 调 `taskkill /PID pid /T /F` 并等待整树退出；如果部署
+策略不允许 taskkill 或验证失败，则 Job Object 需作为显式 native API 决策，不得悄悄回退 `child.kill()`。
+OEM fallback 同理：`TextDecoder` 只证明某个编码别名当前可解码，不负责取得 Windows 系统 OEM id；两步均
+通过真实 Windows 集成测试才算就绪。
 
 ## 红测试清单与实施顺序
 

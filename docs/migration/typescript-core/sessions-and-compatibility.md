@@ -1,4 +1,4 @@
-﻿# 会话持久化、恢复与兼容契约（迁移目标）
+# 会话持久化、恢复与兼容契约（迁移目标）
 
 > 状态：迁移蓝图；目标 TypeScript 文件、命令和测试尚未创建。本文描述 Di 基线 `09f4e0816c1b2dc42461e79a968b46e811d3880c`，不宣称 TypeScript 实现已具备这些能力。迁移架构及包边界见 [`architecture.md`](architecture.md)；执行阶段与总 gate 见 [`execution-plan.md`](execution-plan.md)。
 
@@ -10,7 +10,7 @@
 
 Pi 只读参考固定在 `7f9e1198f2f7a8cf5ea18d5010ba081d4d60c333`。其 [`session-manager.ts`](https://github.com/earendil-works/pi/blob/7f9e1198f2f7a8cf5ea18d5010ba081d4d60c333/packages/coding-agent/src/core/session-manager.ts) 定义 versioned session header 和带 `id`/`parentId` 的 append-only JSONL entry tree；版本迁移见 `migrateSessionEntries`，文件恢复/解析见 `loadEntriesFromFile` 与 `parseSessionEntryLine`。对应 [`load-entries.test.ts`](https://github.com/earendil-works/pi/blob/7f9e1198f2f7a8cf5ea18d5010ba081d4d60c333/packages/coding-agent/test/session-manager/load-entries.test.ts) 覆盖坏行跳过、有效未换行尾记录补 LF、无效非 session 文件不修改及版本迁移；[`file-operations.test.ts`](https://github.com/earendil-works/pi/blob/7f9e1198f2f7a8cf5ea18d5010ba081d4d60c333/packages/coding-agent/test/session-manager/file-operations.test.ts) 覆盖 append 保留旧内容及拒绝覆盖非空无效文件。Pi 的宽容读/尾行修复服务于它自己的 session tree，Di 的 started/completed checkpoint 含副作用执行证据，不能照搬“跳坏行后继续”策略。本文只借鉴固定提交中可见的 append-only、显式格式版本与 fixture 测试做法；没有据此引入 Pi 的分支/compaction 等 feature。
 
-首期跨语言兼容是发布门槛：TS 必须读取 Di `09f4e08` 已知 checkpoint 子集，并写出该同一子集，使固定 C# reference 能读取；通过双向互读 fixture 和 C# reader 验收后才能发布。普通 C# 审计事件能否由 TS 统计，与能否恢复分开验收。`cli_version` 不是 schema version，首期不增加新 record/block/schema；未来 schema 扩展不属于首期承诺。未知 checkpoint record 或 block 一律拒绝恢复并报告行号/type，不得跳过，因为该记录可能是工具完成凭据，跳过会把执行状态误判。普通 audit-only 文件可由独立统计器尽力跳过未知审计记录。
+首期跨语言兼容是发布门槛：TS 必须读取 Di `09f4e08` 已知 checkpoint 子集，并写出该同一子集，使固定 C# reference 能读取；通过双向互读 fixture 和 C# reader 验收后才能发布。普通 C# 审计事件能否由 TS 统计，与能否恢复分开验收。`cli_version` 不是 schema version，首期不增加新 record/block/schema；未来 schema 扩展不属于首期承诺。resume reader 遇到任何未知顶层 record type、未知 checkpoint record 或未知 checkpoint block，一律拒绝并报告行号/type，不得跳过，因为该记录可能是工具完成凭据，跳过会把执行状态误判。普通 audit-only 文件可由独立统计器尽力跳过未知审计记录。
 
 ## Di 文件布局与逐行 envelope
 
@@ -52,9 +52,9 @@ checkpoint message 的 block 白名单为 `text{text}`、`reasoning{text}`、`to
 
 ## 原子性、恢复状态机与错误处理
 
-单行记录是恢复提交单元：writer 先序列化一条记录，再 append 并关闭本次写入；这不等于 OS、存储设备或掉电层面的原子/持久性保证，也不是多行事务。进程被杀或掉电可能留下无 LF 的 partial tail；恢复只丢弃这一条未完整尾行，完整 LF 行中的损坏则拒绝。工具调用必须维持 `assistant intent -> started -> execute -> completed` 次序，具体 `call_id` 与原始 arguments 必须逐字保留。若进程在 started 之后、completed 之前崩溃，工具可能已产生副作用，恢复必须 fail closed，列出 call id/name 并要求检查副作用；禁止自动重放或补成功结果。尚未写 started 的 assistant tool call 可用合成 `tool` observation 明确标注“not executed before checkpoint”，模型之后可重新判断是否仍需调用。completed 缺少 started、孤立 started、重复 started/completed、call_id 不匹配、同一 assistant batch 重复 call id、孤立 tool result 均为损坏并拒绝。相同 call id 在不同 assistant batch 允许出现，不能全文件全局去重。
+单行记录是恢复提交单元：writer 先序列化一条记录，再 append 并关闭本次写入；这不等于 OS、存储设备或掉电层面的原子/持久性保证，也不是多行事务。进程被杀或掉电可能留下无 LF 的 partial tail；恢复只丢弃这一条未完整尾行，完整 LF 行中的损坏则拒绝。工具调用必须维持 `assistant intent -> started -> execute -> completed` 次序，具体 `call_id` 与原始 arguments 必须逐字保留。若进程在 started 之后、completed 之前崩溃，工具可能已产生副作用，恢复必须 fail closed，列出 call id/name 并要求检查副作用；禁止自动重放或补成功结果。尚未写 started 的 assistant tool call 可用合成 `tool` observation 明确标注“工具调用在 checkpoint 前未开始”；完整固定英文 observation 文本见下方 `assistant-before-start.jsonl` fixture，模型之后可重新判断是否仍需调用。completed 缺少 started、孤立 started、重复 started/completed、call_id 不匹配、同一 assistant batch 重复 call id、孤立 tool result 均为损坏并拒绝。相同 call id 在不同 assistant batch 允许出现，不能全文件全局去重。
 
-恢复时只接受完整 LF 结尾记录。无 LF 的最后字节视为 torn append，整行忽略；若文件没有任何完整记录则报无有效 checkpoint。完整行中任何 JSON 错误、缺字段、类型错误、未知 checkpoint 类型或内部坏行都拒绝，并带行号；不可把“坏行当空白跳过”。空白行策略应在 fixtures 中固定（当前 `RemoveEmptyEntries` 会忽略空行）。恢复只重建最后一个 `checkpoint_turn_started` 起的轨迹：其 `history` + `user`，之后按序追加完整消息和结果。遇到新 turn start 时若仍有未决 started，应拒绝。没有任何 checkpoint 的 legacy session 明确拒绝，错误应说明旧审计文件不含可恢复 checkpoint。
+恢复时只接受完整 LF 结尾记录。无 LF 的最后字节视为 torn append，整行忽略；若文件没有任何完整记录则报无有效 checkpoint。完整行中任何 JSON 错误、缺字段、类型错误、未知顶层 record type、未知 checkpoint 类型或内部坏行都拒绝，并带行号；不可把“坏行当空白跳过”。空白行策略应在 fixtures 中固定（当前 `RemoveEmptyEntries` 会忽略空行）。恢复只重建最后一个 `checkpoint_turn_started` 起的轨迹：其 `history` + `user`，之后按序追加完整消息和结果。遇到新 turn start 时若仍有未决 started，应拒绝。没有任何 checkpoint 的 legacy session 明确拒绝，错误应说明旧审计文件不含可恢复 checkpoint。
 
 同进程恢复也是正式行为：模型错误、普通工具错误 observation、硬取消、checkpoint 写入失败各走其真实路径。`ExecuteToolAsync` 将普通工具异常转为 `is_error=true` 的 observation；随后仍追加 `checkpoint_tool_completed`，此结果可安全恢复，不锁住 runner。`OperationCanceledException` 在 cancellation token 已取消时向外抛出，不会生成 completed；其他情况下若 started 已写但 completed 缺失（例如进程中断、结果 checkpoint 写失败），结果未知，host 必须锁住继续请求直到显式 `/clear`/reset。模型调用失败但已完成工具都具有 completed 时，可重新载入历史并同进程继续，不能重复执行工具。`/clear` 清空 runner 历史；下一次 `checkpoint_turn_started` 写空 history，因此恢复不得复活 clear 之前轮次。遇到 `ContextLimit` 时保留完整当前任务和已完成工具结果作为暂停状态；扩充预算后可显式继续，不能修剪掉原始任务或伪报成功。`--resume <file>` 创建新宿主/runner 并载入历史；默认模式推导、显式 `--mode`、`--print` 和 positionals 仍遵循 `CliMode.Resolve` 优先级，所以它不总是进入 REPL。`--resume` 不回连旧进程，也不得自动再跑未完成工具。CLI 参数解析失败、旧日志、损坏文件须在调用模型前退出并展示可诊断错误。
 
@@ -62,7 +62,26 @@ checkpoint message 的 block 白名单为 `text{text}`、`reasoning{text}`、`to
 
 ## 测试证据与迁移 TDD 矩阵
 
-以下是 Di `09f4e08` 现有具体测试，不是要求 TS 按测试数量复制。先将最小语言中立 JSONL fixtures 提取到**未来路径** `packages/coding-agent/test/fixtures/sessions/`（尚未创建），覆盖：审计成功轮、checkpoint 完整工具轮、assistant-only 前缀、started-only 不确定前缀、completed、torn tail、interior corruption、legacy no checkpoint、unknown record/block。每个红绿单元先新增 `node:test` 测试，再实现，执行 `npm test --workspace @di/coding-agent`（命令为未来 package script 草案，当前不存在）。
+以下是 Di `09f4e08` 现有具体测试，不是要求 TS 按测试数量复制。先将最小语言中立 JSONL fixtures 提取到**未来路径** `packages/coding-agent/test/fixtures/sessions/`（尚未创建），覆盖：审计成功轮、checkpoint 完整工具轮、多轮 history snapshot、assistant-only 前缀、started-only 不确定前缀、completed、torn tail、interior corruption、legacy no checkpoint、unknown record/block。每个红绿单元先新增 `node:test` 测试，再实现，执行 `npm test --workspace @di/coding-agent`（命令为未来 package script 草案，当前不存在）。测试必须读取 fixture 文件并验证下面列出的具体状态/消息；只断言“没有 throw”、只断言 object truthy、或只把 TS writer 输出喂回 TS reader，均不足以通过兼容 gate。
+
+### Fixture 的构造与精确预期
+
+fixture 使用上文完整示例作为基础，保留 LF、从 0 单调递增的 ordinal、`call-01`、`read_file` 与 `{"path":"build.log"}` 原始 arguments。时间、cwd、session id 可按对比规则规范化，但不能删减或重排记录。每个文件旁放一个未来 `manifest.json`，字段名固定为 `input_file`、`expected_status`、`expected_messages`（role/text/call id/args/is_error）、`expected_error_class`、`expected_error_mentions`、`expected_model_calls`、`expected_executor_calls`、`expected_side_effect_count`。fixture parser 和 test host 共用这些字段，避免另造 `errorContains` 等别名。完整成功读档 case 还应明确 `expected_error_class=null`、model/executor/side effect count 为 0。
+
+| fixture（未来文件名） | 可复现构造（保留合法 JSON 与行尾） | `expected_status` 与必须观察到的结果 |
+|---|---|---|
+| `complete-tool.jsonl` | 原样保留 7 行完整示例 | `recovered`；恢复到 user、assistant reasoning+tool call、tool result、assistant text；tool result 的 call id=`call-01`、文本=`error CS1002`、`is_error=false`；model/executor/side effect count 均为 0 |
+| `assistant-before-start.jsonl` | 截取完整示例到 ordinal 2，确保最后一行有 LF | `recovered_with_not_executed`；返回 assistant call `call-01`，并补 `tool` 消息：call id=`call-01`、`is_error=false`、文本精确等于 `Recovery note: this tool call was not executed before the checkpoint. Decide whether it is still needed.`；不能声称工具已运行 |
+| `started-no-completion.jsonl` | 截取到 ordinal 3（含 started，有 LF） | `reject_unknown_outcome`；恢复错误含 `call-01`；不返回可继续轨迹，不调用模型或 executor |
+| `legacy-audit-only.jsonl` | 仅含 `session_meta`、`event_msg`（payload.type=`task_started`）、`turn_context`、user `response_item`、`event_msg`（payload.type=`task_complete`），不含任何 checkpoint record | `reject_legacy_no_checkpoint`；`--resume` 明确拒绝，错误指出没有 recovery checkpoint；不得从 audit message 合成 resume history |
+| `torn-tail.jsonl` | 完整示例后追加 `{"type":"checkpoint_tool_completed"`，末尾不加 LF | `recovered`；只丢弃这一段不完整尾字节，仍得到完整示例同样的四个恢复消息；ordinal 0–6 不变 |
+| `complete-corrupt-interior.jsonl` | 在 ordinal 3 前插入 `{bad json}\n` | `reject_corrupt`；抛数据损坏错误，包含物理行号；不得跳过后返回可执行轨迹 |
+| `unknown-checkpoint.jsonl` | 在完整示例 ordinal 2 后插入 `{"timestamp":"...Z","ordinal":3,"type":"checkpoint_tool_aborted","payload":{"call_id":"call-01"}}`；将原 ordinal 3–6 各加 1，保持物理顺序与 ordinal 单调 | `reject_unknown_record`；TS reader 报未知 checkpoint type 与行号；不得当作无关审计行跳过 |
+| `unknown-top-level.jsonl` | 同样在 ordinal 2 后插入 `{"timestamp":"...Z","ordinal":3,"type":"future_state_marker","payload":{"call_id":"call-01"}}`，并将后续 ordinal 加 1 | `reject_unknown_record`；resume reader 报任何未知顶层 type 与行号；不得按“非 checkpoint audit”过滤 |
+| `unknown-block.jsonl` | 把 assistant blocks 中一个 block type 改为 `future_tool_state`，其余记录不变 | `reject_unknown_block`；报未知 block；不得删掉 block 后继续，也不得自动执行该 call |
+| `duplicate-start.jsonl` / `orphan-result.jsonl` | 重复一条 started；或移除对应 started 再保留 completed | `reject_corrupt`；均拒绝并指出 call id；不能产出两个结果或伪造一个结果 |
+
+上面 manifest 和 fixture 均为未来测试资产，不是当前已有文件。添加每个 fixture 时，先运行对应测试确认它因目标行为缺失而红；实现后同一输入转绿。torn-tail、unknown checkpoint、legacy 等安全边界还必须断言无模型调用和无 executor 副作用，不能只验错误文案。
 
 | 需求 | Di 当前证据（路径::方法） | TypeScript 首期测试/红绿断言 |
 |---|---|---|
@@ -76,9 +95,9 @@ checkpoint message 的 block 白名单为 `text{text}`、`reasoning{text}`、`to
 | torn tail 与坏 interior、legacy 明确拒绝 | `Di.Tests/Sessions/SessionLogTests.cs::LoadRecovery_IgnoresOnlyTornFinalLineAndRejectsCorruptInteriorLine`、`LoadRecovery_RejectsLegacyLogWithoutCheckpoints` | 分别构造无换行破尾与有 LF 的坏行；前者只忽略最后不完整行，后者拒绝；纯旧审计文件明确 unsupported |
 | clear 与 checkpoint 基点 | `Di.Tests/AgentLoop/AgentRunnerTests.cs::ResetHistory_NextRecoveryCheckpointDoesNotReviveClearedTurns`；REPL 入口 `Di.Cli.Tests/ReplTests.cs::ClearCommand_ResetsConversationMemory` | 两轮后 clear 再写新轮，reload 只含新任务；另外断言 UI 的 clear RPC/command 不要求删除历史文件 |
 | ContextLimit 保留任务/工具结果 | `Di.Tests/AgentLoop/AgentRunnerTests.cs::ContextLimit_PreservesRestoredTaskAndToolResultUntilLargerBudgetContinues`、`ContextLimit_PreservesOversizedCurrentTaskWithoutCallingModel`；`Di.Tests/AgentLoop/ReActTests.cs::RunAsync_ContextBudgetExceededBeforeModelCall_ReturnsContextLimit` | faux model 断言超限前无请求，恢复任务和 tool result 保留，扩大预算后继续请求仍带必要原任务/工具结果 |
-| `--resume` 新宿主和旧文件错误入口 | `Di.Cli.Tests/cli/CliArgsTests.cs::Parse_ResumePath_EntersInteractiveMode`、`Di.Cli.Tests/cli/CliAppTests.cs::Resume_UsesReplWithoutTryingTui`、`ResumeHostFailure_UsesJsonErrorEnvelopeInJsonMode` | CLI 层测试新 runner 初始化、恢复消息载入、错误发生在模型调用前；保留现有 RPC/TUI 交互边界 |
+| `--resume` 新宿主和旧文件错误入口 | `Di.Cli.Tests/cli/CliArgsTests.cs::Parse_ResumePath_EntersInteractiveMode`、`Di.Cli.Tests/cli/CliAppTests.cs::Resume_UsesReplWithoutTryingTui`、`ResumeHostFailure_UsesJsonErrorEnvelopeInJsonMode` | P5 用 host test harness 检查恢复数据；P7/P9 等生产 CLI 存在后再测实际命令。对无 positionals 默认交互、显式 `--mode json/rpc/print`、有 positional prompt、无效 session 分别断言解析模式、stdout/stderr 和 model 调用数；错误 fixture 的 model 调用数必须为 0 |
 
-快照：用户提供的验收记录为 943 项 .NET 非集成测试和 116 项 TUI 测试；这只是某次基线快照，不是未来 TS 的固定数量门槛，也不能以数量相等替代行为覆盖。不要调用真实商业模型做单测。更高层验证可开本机 fake SSE HTTP server，按固定 stream chunk/usage/error 返回并记录 request body；覆盖 adapter 到 session checkpoint 的真实本地 HTTP 路径。进程崩溃测试使用 child process + 临时 `DI_HOME`，由 fixture tool 写入外部 marker 后在 started/completed 两个边界通过测试专用 failpoint 强制终止。marker 存在且日志无 completed 时，reload 必须 fail closed 且不再次执行；这比只在内存抛异常更能验证 crash window。所有 failpoint 仅为未来测试工具，不加入产品行为。模型请求对比需规范化时间、随机 session/turn id；必须保留和比较 tool call id、name、arguments 字符串及消息/记录顺序。
+上一轮验收记录为 943 项 .NET 非集成测试和 116 项 TUI 测试；这只是基线快照，不是未来 TS 的固定数量门槛，也不能以数量相等替代行为覆盖。不要调用真实商业模型做单测。P5 是真实 session store + child test host 的进程边界测试，不要求尚未到 P7 的生产 CLI；P7/P9 再补真实 CLI/RPC 的恢复和 kill/restart 路径，二者不可互相替代。关键故障的操作步骤和强制预期见 [`validation-and-release.md`](validation-and-release.md) 的 crash matrix。模型请求对比需规范化时间、随机 session/turn id；必须保留和比较 tool call id、name、arguments 字符串及消息/记录顺序。
 
 CI、Node/npm pinning、P0–P9 阶段 gate、发布证据、隔离安装及回退步骤统一见 [`validation-and-release.md`](validation-and-release.md) 与 [`execution-plan.md`](execution-plan.md)。本节不重复维护第二份 CI/发布方案。协议阶段为 P5；工具链和后续宿主阶段按 execution plan 安排。基线审查使用固定 Di SHA 的 `git show`/只读 worktree，不以可变工作分支代替。
 

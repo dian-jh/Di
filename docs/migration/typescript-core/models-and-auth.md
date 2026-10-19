@@ -51,6 +51,8 @@ Di 当前已有 DeepSeek 与 ChatGPT provider。迁移是协议保真重写：�
 - assembler 按块 index 装配；多个 tool call 并发交错时不能串到同一个 buffer。没有 response id 时保持
   null。对 loop/TUI 暴露的 `ModelEvent` 仅是高层 text/reasoning/tool-call delta 与 `completed`；
   completed 携带一次模型调用完整 `ModelResponse`（本次 usage/cost），Agent loop 再计算回合累计值。
+  TS 高层不再单独发 `Usage` event；它留在 `completed.response.usage`，避免把低层 provider protocol
+  事件泄漏到 loop。
 - C# 的可空字段在 TS 表达成 `T | undefined`/可选字段；序列化时省略未设置值，不要改成 `null`、
   `0`、`[]` 或空字符串。显式 null 与未提供若 wire DTO 有区别，需分别建模。
 
@@ -139,6 +141,11 @@ Pi pinned 参考：[`openai-responses.ts`](https://github.com/earendil-works/pi/
 
 `ChatGptAuth` 的本机授权为宿主能力，不属于通用模型词汇。必须保持：
 
+现有实现入口明确：`ChatGptCredentialStore.LockAsync` 在 Windows 上给目录设置当前用户 ACL、Unix
+目录 0700，并用 `FileShare.None` 持有 `session.lock`；`UpdateAsync` 在锁内读、执行 refresh/login/logout
+变更并写临时文件，Unix 临时文件为 0600 后原子替换 `credentials.json`。迁移要保留这些保证，但 Node
+没有相同的跨平台 API；不能把 `open('wx')` 文件存在性误说成等价于 `FileShare.None`。
+
 1. 注册/登录只用 loopback `127.0.0.1` 的随机端口，限时回调；校验回调 path、随机 `state`、授权
    code、issued client ID、PKCE verifier/challenge、必需令牌字段、正数 expires_in 和
    `chatgpt.tokens.use.direct` scope。ID token 只作授权提示保存，不把它说成已验证身份；不增加 JWKS
@@ -193,6 +200,28 @@ Streams、`node:crypto` 和小型自有 DTO。Pi 包可作为对照源码，不�
 6. 重试：429/Retry-After、超时/连接/5xx；AbortSignal 不重试；对外发布过 delta 的流不重放；工具已运行后 loop 不重跑。
 7. OAuth：state/PKCE/path/client id/scope/token 字段校验，拒绝坏响应时旧凭据不变；expiry 3 分钟边界、轮换令牌并发竞争只刷新一次。
 8. 文件持久层：原子替换中断、临时文件清理、Unix mode/Windows ACL adapter、多个进程更新无丢失、过期锁回收不误删活锁、日志脱敏。
+
+### 分片实施与停止条件
+
+每个分片独立完成红测、实现、绿测，再开始下一片；不得把模拟成功当作平台能力证明。
+
+1. 先只实现 `ProviderChunk` 和 assembler 的内存单测。停止条件：完成事件缺失/重复、usage 不在
+   `completed`、raw tool JSON 被重序列化或 finish 后仍有数据时，禁止接 provider。
+2. 接 DeepSeek fixture 与注入式 fetch。停止条件：请求 JSON 有任何缺省字段漂移、SSE 缺 `[DONE]` 被判
+   成成功，或传输错误被裸异常吞掉时，禁止接 TUI。
+3. 接 ChatGPT Responses fixture。停止条件：raw output 回放改变、failed/incomplete 被改成 Stop、缺终态
+   成功、unsupported 参数被静默丢弃时，禁止进入账户能力工作。
+4. 单独实现 retry wrapper。停止条件：首个 `ModelEvent` 后仍重试、取消被重试、工具执行记录大于 1 时，
+   禁止合入 provider 集成。
+5. OAuth 先完成纯回调/PKCE/令牌响应验证，不读取任何真实凭据。停止条件：坏响应覆盖旧数据、错误 scope
+   被接受、真实账户/token 出现在测试或日志中时，立即停止该单元。
+6. credential storage 的跨进程 advisory lock 与 Windows ACL 是未决平台依赖门：先完成依赖/API 选型记录
+   （确切 npm 版本、许可、Node 22.19 ESM/Windows 构建方式、目标平台 OS-lock 语义），再写 adapter。
+   当前没有已核准的跨 Windows/POSIX Node advisory-lock 依赖；若不能提供真实 OS 锁和 ACL 设置/回读，
+   停止 ChatGPT login/refresh 文件存储实现，保持 fail closed。不得用 mkdir/lockfile TTL、PID-only 判断、
+   内存 mutex 或只记录 ACL warning 的实现替代。
+7. 最后才接 `@di/coding-agent`。停止条件：任一 provider fixture、跨进程竞争、权限拒绝、retry 安全门失败，
+   不得标记模型/auth 阶段完成。
 
 完成判据：C# 现有 provider/auth 测试矩阵在 TS 有等价的无账号离线 fixture；协议边界全通过；deepseek
 与 ChatGPT 的调用经模拟服务可流式完成；缺终态为失败；reasoning/raw output/cache/null 保真；并发

@@ -1,4 +1,4 @@
-﻿# TypeScript Core 验证与发布蓝图
+# TypeScript Core 验证与发布蓝图
 
 > 状态：未来迁移方案；当前没有 TypeScript Core 可执行脚本，也没有 tracked CI workflow。阶段与统一 gate 见 [`execution-plan.md`](execution-plan.md)；架构/包职责见 [`architecture.md`](architecture.md)。本文仅规范协议验证、兼容验收和切换风险控制。
 
@@ -18,6 +18,8 @@ TS 与 C# 比较时规范化易变的 timestamp、cwd、随机 session id 和随
 
 `node:test` 单测至少覆盖：envelope 顺序/ordinal、snake_case、UTF-8/no BOM、null 省略、audit 与 checkpoint 分离、checkpoint 读取/写入、工具调用参数逐字保存、每种 crash prefix、安全恢复与 fail closed、unknown 类型、坏行、历史 clear、ContextLimit。测试应直接检查模型 fake 收到的消息和 fake executor 调用记录。
 
+每个 fixture 测试都从文件读取输入，不允许在测试内部调用 writer 生成被测输入再调用 reader 验收自身 round-trip 来替代固定 fixture。`manifest.json` 统一使用 [会话兼容契约](sessions-and-compatibility.md) 定义的字段名。例如 `started-no-completion.jsonl` 期望 `expected_status=reject_unknown_outcome`、`expected_error_mentions=["call-01"]`、`expected_model_calls=0`、`expected_executor_calls=0`、`expected_side_effect_count=0`；`assistant-before-start.jsonl` 期望恢复 user + assistant call + 合成 not-executed result；完整工具轮期望逐条列出角色、call id、arguments、结果文本。错误测试不能只断言 `assert.throws()`，还需断言 `expected_error_class`、行号或 call id，并断言没有发生模型请求和副作用。
+
 ### faux model / faux executor loop 测试
 
 复用可控脚本模型返回确定的 assistant/tool-call/assistant 响应，不接外部服务。fake executor 记录开始与完成、call id/name/args、次数及可选磁盘 marker。注入每个持久化边界的故障，断言：started write 失败时工具完全没被调用；普通工具异常变为 `is_error=true` observation 并写 completed，随后可继续；取消 token 已取消且 started 后无 completed、或 completed 写失败，则执行结果未知，同 runner 后续调用被拒绝；completed 已写后模型再次失败，同进程继续使用保存结果且不重复副作用；不同 assistant batches 可复用相同 call id，但同一批重复不接受。模型 request 列表逐条按消息顺序比对。
@@ -26,16 +28,31 @@ TS 与 C# 比较时规范化易变的 timestamp、cwd、随机 session id 和随
 
 ### 本地 HTTP SSE 集成与真实进程崩溃
 
-在未来 `packages/coding-agent/test/integration/` 用 Node 内建 HTTP server 仿 SSE provider，逐片返回固定响应/usage/异常，并把接收的 request body 保存到测试日志。它验证 provider adapter→loop→tool→session writer 的接线、stream 结束和错误路径，不需要真实模型、网络服务或 API key。用断言核对工具调用 JSON 文本和 request 次序；临时监听本机回环地址。
+在未来 `packages/coding-agent/test/integration/` 用 Node 内建 HTTP server 仿 SSE provider，逐片返回固定响应/usage/异常，并把接收的 request body 保存到测试日志。它验证 provider adapter→loop→tool→session writer 的接线、stream 结束和错误路径，不需要真实模型、网络服务或 API key。测试必须实际启动目标 provider adapter，指向本机 server；只 mock `ChatModel` 不算 SSE 集成。server 需记录请求次数和完整 JSON body，并按固定分片边界发送真实 SSE framing；断言请求数为预期值、请求包含原始 user/tool history、事件顺序与 checkpoint JSONL 顺序一致、tool call id/name/arguments 原样对应、最终 result 与用量一致。另返回一次分片 JSON 错误/过早 EOF，断言该回合失败且 session 没写出虚假的 tool completed。临时监听回环地址并在 finally 关闭 server。
 
-进程崩溃采用 child process，临时 `DI_HOME`，只用 test-only failpoint 或测试 executor 控制退出点：
+P5 在真实 session store 上做 child test host；这是独立测试入口，不冒充尚未实现的 production CLI。父测试创建新的临时根目录，把它通过 `DI_HOME` 传给子进程；子进程直接调用 session writer/reader 与测试用 loop host。子进程 stdout 发出阶段握手行后，父进程才执行 kill，避免靠 sleep 猜 race。每个 case 必须用全新子进程重新读取文件，并检查外部副作用 marker：
 
-- 在 `checkpoint_tool_started` flush 后、工具执行前 kill：reload 得到 unknown intent 并拒绝自动执行；
-- fake 外部副作用 marker 已落盘、`checkpoint_tool_completed` 尚未写入时 kill：reload 仍拒绝重试，并保留 marker 证明副作用窗口真实存在；
-- completed flush 后、下一模型请求前 kill：reload 保留唯一一份结果，继续时 executor 不重复调用；
-- 写入半条 JSON 后 kill：只忽略无 LF 的最后行；同样字节若加 LF 成完整坏行则拒绝。
+| case | 子进程操作顺序 | 父进程 kill/重启操作 | 强制预期 |
+|---|---|---|---|
+| started 尚未执行 | 写 turn start、assistant intent、`checkpoint_tool_started`；输出 `STARTED\n` 后等待 | 收到握手立即强制终止；再启动 recovery child | 文件有 started、无 completed；恢复报 unknown 且含 call id；executor 次数与副作用 marker 均为 0 |
+| 副作用后结果未知 | 写 started；fake executor 先以 `wx` 创建唯一 marker（内容含 call id），再输出 `EFFECT\n` 并等待，尚未写 completed | 收到 `EFFECT` 后 kill；启动新的 recovery child | marker 存在、日志无 completed；恢复拒绝并含 call id；第二进程不得再次调用 executor，marker 创建次数仍为 1 |
+| 完成结果后崩溃 | 写 started、创建 marker、写 completed 并重新读取确认 completed 行完整；输出 `COMPLETED\n` 后等待 | 收到握手后 kill；新进程 reload 并显式继续 | 恢复出同 call id 的唯一 tool result；executor 不再次执行，marker 次数仍为 1 |
+| completed 写入失败 | fake executor 创建 marker 后，注入仅限测试的 writer 故障使 completed append 抛错 | 让子进程结束；在全新进程 reload/continue | started 存在而 completed 缺失；拒绝继续，marker 次数为 1。不能把异常转成普通工具 error observation，因为这里失败的是持久化结果 |
+| 行尾撕裂 | 先写至少两条完整 LF 记录，再直接 append 一段无 LF 的 JSON 前缀并等待 | kill 子进程；新进程读取 | 只舍弃尾部片段，返回此前完整状态；若把相同片段补 LF，必须报坏行和精确物理行号 |
 
-父进程要有 timeout、捕获 exit code/stderr 并清理 temp root；Windows child kill 及文件句柄释放单独纳入平台验证。不要用 `process.exit()` 的正常清理路径冒充 crash test。failpoint 只属于测试构建/依赖注入。
+P7/P9 的真实 CLI gate 另用已启动的 production `di-ts --resume <fixture>`（命令名按架构文档）和明确模式组合运行；一个 host test harness 通过不代表 CLI/RPC/TUI 已通过。实测至少覆盖默认交互、`--mode json`、`--mode rpc`、`--print`、带 positional prompt、legacy/损坏输入；检查实际 exit code、stdout/stderr、RPC result 数、model 请求数及 executor marker。无效 session 必须在模型请求前退出。所有崩溃测试要断言子进程未运行正常 `finally` 清理（可用“正常退出才创建”的 sentinel），并核对退出码/信号；不能用同进程 throw、mock recovery 或 `process.exit()` 正常结束冒充 kill。父进程需设超时、收集 stdout/stderr、释放 server/子进程并清理 temp root。Windows 强制终止行为及文件句柄释放需在 Windows runner 实测，不能由 POSIX 结果推断。
+
+各层 gate 不互相替代：固定 fixture 单测验证状态机；P5 child host 验证真实进程/文件边界；本地 SSE 集成验证真实 provider adapter；C# harness 验证跨语言读取；P7/P9 验证实际 CLI/RPC/TUI 接线；10 小时 soak 验证实际墙钟期间资源曲线。一个 TS 内的 mock-to-mock、一次 `npm test` 绿、短时快循环或单一平台通过，都不得在报告中折算成上述其他 gate 的通过。每个 gate 报告应列出 fixture 名/提交、命令、退出码、OS/Node、关键断言、失败与未执行项；未执行必须保留为未通过/待验证，不能默认为通过。
+
+### 十小时持续运行与资源观察
+
+10 小时是实际墙钟 soak gate，不是快速 fake loop 的等价次数。使用隔离机器、临时 `DI_HOME`、本地确定性 fake model 和 fake tool；执行至少 10 小时并记录实际起止 UTC。每次模型响应与工具执行可按稳定节奏加入真实延时，但不从延时间隔推导最低完成轮数。不得接真实 provider。循环中让模型/工具有限产生并结束子进程，定期真实 resume/reload 子进程，并记录 checkpoint 文件 bytes/lines、成功/失败 turn、内存 RSS、打开文件/句柄数、子进程数量和重启耗时。保留 machine/OS/Node 版本、采样 CSV、JSONL、退出码及异常日志作为 gate artifact。
+
+soak 使用现有有限 context/token budget 配置，避免测试因为无界历史输入而要求无界内存；按已有 `ContextLimit` 语义安排暂停和扩预算续跑，另按已有 reset/clear 接口周期性验证 clear 后 history 快照行为。不要新增自动摘要、隐式清理或别的产品功能来让 soak 变绿。session 文件随持久化事件增长是预期；常驻 runner memory 应按配置预算和当前 pause task 解释，不能要求它在无限历史下固定不变。子进程/句柄在每轮收尾后应回到稳定基线附近。
+
+资源阈值必须在 soak 开始前冻结到测试 manifest：先在同一 OS/Node/机器等级跑至少 30 分钟 warm-up，选定并记录 `rss_max_delta_bytes`、`handle_max_delta`、`child_process_max`、`resume_p95_max_ms` 和采样间隔；阈值与 baseline JSON/CSV 一同提交或作为不可变 CI artifact 引用，跑完后不得按结果回调阈值。若 10 小时中 RSS 超限、多个采样窗口单调增长、句柄数不回落、子进程残留、失败/恢复错误递增或 resume 延迟超限，gate 失败并保留数据定位。阈值用于发现回归，不证明零泄漏或零风险；最终报告附实际曲线和偏差。soak 不属于每次 PR 快测，可由夜间/发布候选运行，但 P9 完成证据必须引用真实墙钟至少 10 小时结果；快速循环只补充状态覆盖，不能替代 soak，也不以轮数推算时长。
+
+至少在每个受支持 OS 各运行一次完整 10 小时 soak。测试期间记录实际起止 UTC，不从迭代数估算时长；若资源曲线越过预先冻结阈值，需定位、修复并用新 run id 重跑，不得只以机器差异豁免。
 
 ### C# reference 与双向互通
 
@@ -49,9 +66,27 @@ TS 与 C# 比较时规范化易变的 timestamp、cwd、随机 session id 和随
 
 现行 C# session tests 可在固定 SHA 上运行 `dotnet test Di.Tests/Di.Tests.csproj --filter FullyQualifiedName~Sessions` 作 reference check；实际是否执行由实现任务决定，本文未运行。C# writer 的 `session_meta.cli_version` 默认 0.1.0，而 reader 不以版本分支。不要以改 `cli_version` 宣称新 schema。若将来确需扩展 record/block，先定义明确 `schema_version` 和迁移矩阵；reader 对支持版本逐项校验，未知版本拒绝，不得把 unknown record 静默跳过。
 
+上面的现有 C# 测试本身不读取 TS 本轮生成的任意临时文件，因此仅运行这条 `dotnet test` 不能证明 TS→C#。P5 需用独立 C# reference harness 做实际交叉读取，避免 TS writer/reader 自测：
+
+1. 测试脚本在 OS 临时目录生成临时 SDK project，`ProjectReference` 指向固定 checkout 的 `Core/Core.csproj`，不改 Di tracked source。生成的 harness 有两个明确操作：`write <root>` 用真实 `SessionLog`、`BeginCheckpointTurn`、`AppendCheckpointMessage`、`CheckpointToolStarted`、`CheckpointToolCompleted` 写一条已知工具轮并将实际日志完整路径输出；`read <file>` 用真实 `SessionLog.LoadRecovery` 读取并断言 user text、assistant tool call id/name/原始 arguments、tool result call id/text/is_error，任一不符非零退出。
+2. **C#→TS：**执行 harness `write` 取得它实际写出的 JSONL；把该路径作为 TS parser 输入；断言规范化消息数组逐项等于 fixture manifest。TS 不能重写输入文件（比较读取前后 SHA-256）。
+3. **TS→C#：**由独立 TS writer 写完整 known-subset fixture；执行 harness `read <file>`；断言进程零退出，并从 harness 的逐消息 canonical stdout 与 manifest 精确比较。不得只以 C# parser“不抛异常”作通过条件。
+4. **负例：**向 TS 输出文件加 unknown checkpoint type 或删掉 completed；C# reader 对首期已知子集内损坏必须拒绝 unknown outcome/无效结构；TS 自身也必须拒绝 unknown checkpoint。此处只断言 09f4e08 C# reader 实际能表达的错误，不要求旧 C# 拒绝它当前静默忽略的未知顶层 record；该已知缺口由 TS fail-closed gate 单独拦截。
+
+命令模板（路径和测试 harness 均为未来测试脚本生成，不能在当前仓库直接运行）：
+
+```powershell
+$env:DI_HOME = Join-Path $env:TEMP 'di-ts-csharp-compat'
+dotnet run --project <temp-harness>/Reference.csproj -- write $env:DI_HOME
+# 将上条 stdout 的 JSONL 路径传给 TS fixture reader；再由 TS writer 生成另一份文件：
+dotnet run --project <temp-harness>/Reference.csproj -- read <ts-writer-session.jsonl>
+```
+
+实际脚本需保存两侧 stdout/stderr、退出码、JSONL、hash 前后值与规范化消息 diff；如果 `dotnet` 不存在则 compatibility gate 标为未执行/阻塞该发布门槛，不能跳过后报告整体通过。`Core/Core.csproj` 是 Di 基线中已核实存在的项目路径。
+
 ## 平台 CI 蓝图（尚不存在）
 
-仓库当前没有 tracked workflow。未来 CI 在 P0–P9 总计划指定的工具链/集成阶段创建，建议 Windows、macOS、Linux 三平台矩阵，Node 最低支持版本 22.19 与 24.x，执行 `npm ci`、typecheck、单元测试、本地 SSE 集成、build。首期版本固定建议从源 lock 已核实值出发：TypeScript `5.9.3`、`@types/node` `22.20.5`、`pi-tui` `1.2.0`；具体 workspace manifests 与 root lockfile 尚不存在，在相应阶段再提交。包 manager 为 npm workspaces，测试为 `node:test`，模块 ESM strict、TypeScript `noUncheckedIndexedAccess`、erasable TS；这些是已批准方案，不是当前仓库配置事实。
+仓库当前没有 tracked workflow。未来 CI 在 P0–P9 总计划指定的工具链/集成阶段创建，建议 Windows、macOS、Linux 三平台矩阵，Node 最低支持版本 22.19 与 24.x。执行顺序必须是 `npm ci` → build 依赖 workspace 的 JS 与 `.d.ts` → typecheck → unit/integration tests；typecheck 若先于依赖 build 可能误用旧产物或失败在 workspace exports。首期版本固定建议从源 lock 已核实值出发：TypeScript `5.9.3`、`@types/node` `22.20.5`、`pi-tui` `1.2.0`；具体 workspace manifests 与 root lockfile 尚不存在，在相应阶段再提交。包 manager 为 npm workspaces，测试为 `node:test`，模块 ESM strict、TypeScript `noUncheckedIndexedAccess`、erasable TS；这些是已批准方案，不是当前仓库配置事实。
 
 未来 workflow 结构草案（文件尚未创建，不能直接运行；action ref 为待核实 SHA 占位符，不代表已选版本）：
 
@@ -73,9 +108,9 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - run: npm run build
       - run: npm run typecheck
       - run: npm test
-      - run: npm run build
 ```
 
 这是 pipeline 形状提案，不是可复制即用的 workflow：实现者需核对 action pin 策略、Node 最低 patch 版本可用性、各 workspace scripts，并将 action pin 到仓库安全策略要求的版本/SHA。若最低 Node 22.19 无可用 runner，增加一个显式版本安装 smoke，而不是把 engine 声明悄悄提高。依赖更新必须更新 lockfile、在三平台跑完矩阵并检查 SSE/crash fixtures 未改变语义。

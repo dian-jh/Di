@@ -7,8 +7,8 @@
 `@di/agent` 的循环每次运行只拥有本回合 trajectory、usage、cost、iteration 和 loop 控制；它不保存下轮历史，也不访问 Node。`@di/coding-agent` 的 `AgentSession` 持有跨回合历史、当前 model、skill 激活、budget tracker、session checkpoint / recovery 和 stop controller。调用图：
 
 ```text
-AgentRunner.runTurn
-  └─ AgentSession.runTurn (串行化同一 session 的 turn)
+CLI / RPC mode / LocalAgentRunnerAdapter
+  └─ AgentSession.runTurn (唯一 session turn entry; 串行化同一 session)
        ├─ resolve model, active skills, environment snapshot, budget
        ├─ prepare loop input: stable system prompt + memory + user + volatile skill context + tools
        └─ runAgentLoop(request, dependencies, signal)
@@ -20,7 +20,11 @@ AgentRunner.runTurn
        └─ await terminal checkpoint marker; update tracker
 ```
 
-建议公开的最小 loop types；名字可以随实现统一风格调整，字段语义须一致：
+`AgentRunner` 是当前 C# 的组装/策略事实，不在 TS 中再包一层可变 session facade；把相应职责并入 `AgentSession` 私有方法或纯 helper。`LocalAgentRunnerAdapter.prompt`、RPC mode 与 print/json mode 都调用同一个 `AgentSession.runTurn`，不得各自维护历史副本。
+
+以下是跨包契约草图，不是可复制后即可编译的完整源码。未在此定义的 `AgentMessage`、`ToolResultMessage`、`ToolCall`、`ToolSpec`、`ModelRequest`、`ModelResponse`、`ModelEvent`、`ChatModel`、`TokenUsage`、`UsageCost`、`FinishReason`、`LlmFailure` 必须从 `@di/ai` 公共入口导入。`ModelRequest.tools` 使用 `readonly ToolSpec[]`；`ToolSpec` 只描述模型工具 schema，不含 executor/validator。具体归属和定义任务见 [迁移架构](architecture.md#ai-provider-流与模型事件分层)。正式实现时先完成并导出 AI 类型，再实现 loop。
+
+建议公开的最小 loop types；下面的 `AgentRequest`、`AgentDependencies`、`AgentEvent`、`AgentResult`、`StopReason`、`ToolObservation`、`ToolExecutor`、`ToolValidator`、`LoopCheckpoint` 必须由 `packages/agent/src/types.ts` 或 `tools.ts` 定义，并从 `packages/agent/src/index.ts` 导出。`ToolResultMessage` 是 `@di/ai` 的 `AgentMessage` union 成员，只能在 `@di/ai` 定义并导出，以避免依赖反转。代码块仅画接口边界，省略 imports、错误类和 wire/JSON Schema runtime 验证实现：
 
 ```ts
 export interface AgentRequest {
@@ -29,12 +33,56 @@ export interface AgentRequest {
   userMessage: string;
   history: readonly AgentMessage[];
   systemContext?: string;
-  tools: readonly ToolSpec[];
+  tools: readonly ToolSpec[]; // import AI model-vocabulary type from @di/ai
   contextTokenBudget?: number; // 宿主给的估算 guard；不是供应商 tokenizer 的精确 token limit
   maxIterations?: number; // 缺省 0；0 = unlimited，正整数 = 最多模型调用次数
   maxTokens?: number; // 每次模型调用的最大输出 tokens；省略 = provider/model default
   reasoningEffort?: string; // opaque provider/model value; adapter validates support
   finalOutputTool?: string;
+}
+
+export type StopReason =
+  | "answer" | "final_output_tool" | "max_iterations"
+  | "error" | "interrupted" | "context_limit";
+
+export interface ToolObservation {
+  text: string;
+  isError: boolean;
+}
+
+export type AgentEvent =
+  | { type: "textDelta"; delta: string }
+  | { type: "reasoningDelta"; delta: string }
+  | { type: "toolCallDelta"; id: string; name: string; arguments: string }
+  | { type: "turnCompleted"; iteration: number; usage: TokenUsage; cost?: UsageCost; finishReason: FinishReason }
+  | { type: "toolStarted"; call: ToolCall }
+  | { type: "toolCompleted"; call: ToolCall; observation: string; isError: boolean }
+  | { type: "runFailed"; failure: LlmFailure }
+  | { type: "interrupted" };
+
+export interface AgentResult {
+  answer: string;
+  trajectory: readonly AgentMessage[];
+  history: readonly AgentMessage[];
+  usage: TokenUsage;
+  cost?: UsageCost;
+  iterations: number;
+  stopReason: StopReason;
+  failure?: LlmFailure;
+}
+
+export interface ToolExecutor {
+  execute(call: ToolCall, signal?: AbortSignal): Promise<ToolObservation>;
+}
+
+export interface ToolValidator {
+  validate(call: ToolCall, signal?: AbortSignal): void | Promise<void>;
+}
+
+export interface LoopCheckpoint {
+  appendMessage(message: AgentMessage): void | Promise<void>;
+  toolStarted(call: ToolCall): void | Promise<void>;
+  toolCompleted(result: ToolResultMessage): void | Promise<void>;
 }
 
 export interface AgentDependencies {
@@ -43,20 +91,10 @@ export interface AgentDependencies {
   estimateRequestTokens: (request: ModelRequest) => number; // pure or injected helper; never Node Buffer API
   toolValidator?: ToolValidator;
   events?: (event: AgentEvent) => void | Promise<void>; // observer only; exceptions isolated and diagnosed
-  onObserverError?: (error: unknown, event: AgentEvent) => void; // diagnostic side channel; its own errors swallowed
+  onObserverError?: (error: unknown, event: AgentEvent) => void | Promise<void>; // ordered diagnostic side channel; its own errors swallowed
   checkpoint?: LoopCheckpoint;
   interruptRequested?: () => boolean; // 软停止，在模型/工具相位尚未开始時检查
   beforeToolExecution?: (trajectory: readonly AgentMessage[]) => void | Promise<void>;
-}
-
-export interface ToolExecutor {
-  execute(call: ToolCall, signal?: AbortSignal): Promise<ToolObservation>;
-}
-
-export interface LoopCheckpoint {
-  appendMessage(message: AgentMessage): void | Promise<void>;
-  toolStarted(call: ToolCall): void | Promise<void>;
-  toolCompleted(result: ToolResultMessage): void | Promise<void>;
 }
 
 export function runAgentLoop(
@@ -66,22 +104,24 @@ export function runAgentLoop(
 ): Promise<AgentResult>;
 ```
 
-`AgentResult` 包含 `answer`、本回合完整 `trajectory`、输入 `history` 的只读快照/引用语义、累计 `usage`、可得时 `cost`、`iterations`、`stopReason` 和可选 `failure`。`stopReason` 延续 `answer | final_output_tool | max_iterations | error | interrupted | context_limit`；hard abort 通过 `AbortError` rejection 表达（RPC 宿主可映射成原 `cancelled` 结果）。不要把 canceled 与 phase-boundary `interrupted` 混为一个状态。
+`ToolSpec` 是 `@di/ai` 的模型词汇，`ModelRequest.tools` 为 `readonly ToolSpec[]`；TS 类型保留 `name`、`description`、`parameters` JSON Schema 对象和可选 `strict`，schema 内容作为 JSON 对象数据传递，首期不另建验证语言或执行字段。`ToolObservation` 是 `@di/agent` executor 结果（文本与 `isError`）；`ToolResultMessage` 是 `@di/ai` message union 中的工具结果成员，loop 仅构造该成员，不在 agent 包重定义消息词汇。正式实现时从 `@di/ai` 导入该 union 的 tool-result 成员，并用它定义 checkpoint 参数。
 
-checkpoint 回调可以异步，但必须在副作用之前逐个 `await`：模型完整 assistant message 被接受后先 `await appendMessage`，才处理工具调用；执行工具前先 `await toolStarted(call)`，写入失败时工具绝不运行；工具完成后先把观察加入 trajectory，再 `await toolCompleted(result)`，之后才准发起下一次模型请求。checkpoint 的错误原样中止 loop 并交 AgentSession recovery。validator、预算更新和其他明确的 before-tool 控制 hook 异常也必须中止，不得越过授权 / 校验继续运行工具。
+`AgentResult` 包含 `answer`、本回合完整 `trajectory`、原样传入且 loop 不修改的只读 `history`、累计 `usage`、可得时 `cost`、`iterations`、`stopReason` 和可选 `failure`。`stopReason` 延续 `answer | final_output_tool | max_iterations | error | interrupted | context_limit`；hard abort 通过 `AbortError` rejection 表达（RPC 宿主可映射成原 `cancelled` 结果）。不要把 canceled 与 phase-boundary `interrupted` 混为一个状态。
 
-事件 sink 是观测旁路，不是控制面。为保事件顺序，可 await 每次 listener 返回的 Promise，但必须捕获 listener/UI/logging/telemetry 异常、送到诊断回调，并继续循环；诊断回调异常也要隔离。观测故障不能阻止已经授权的工具执行，也不能将一个成功回合变成失败。不要因 sink 异步就将通知改成无序 fire-and-forget；await sink + catch 实现顺序与异常隔离。
+checkpoint 回调可以异步，但必须在副作用之前逐个 `await`：模型完整 assistant message 被接受后先 `await appendMessage`，才处理工具调用；执行工具前先 `await toolStarted(call)`，写入失败时工具绝不运行。工具完成后按 Di 当前顺序先发 `toolCompleted` 观测事件，再将观察加入 trajectory 并 `await toolCompleted(result)` 写 checkpoint；结果 checkpoint 完成后才准发起下一次模型请求。结果 checkpoint 失败时不启动下一次模型请求，并把已发生但未确认的副作用交 AgentSession recovery。checkpoint 的错误原样中止 loop。validator、预算更新和其他明确的 before-tool 控制 hook 异常也必须中止，不得越过授权 / 校验继续运行工具。
+
+事件 sink 是观测旁路，不是控制面。为保事件顺序，可 await 每次 listener 返回的 Promise，但必须捕获 listener/UI/logging/telemetry 异常、按序 await 诊断回调，并继续循环；诊断回调自身同步抛错或 Promise rejection 都要 catch 并吞掉，不能形成未处理 rejection。观测故障不能阻止已经授权的工具执行，也不能将一个成功回合变成失败。不要因 sink 异步就将通知改成无序 fire-and-forget；await sink + catch 实现顺序与异常隔离。
 
 ## 一回合精确时序
 
 `runAgentLoop` 执行如下顺序：
 
 1. 检查 `signal.aborted`；检查软中断。合成本回合 trajectory：`history + userMessage`。不修改调用者的 history 数组。
-2. 构建每次模型调用上下文：稳定 system prompt、history/当前 trajectory、可选 volatile `systemContext`、tool definitions。context 预算估算须包含实际发送的消息和 tools。
-3. 若 context 估算大于 `contextTokenBudget`（含预算为 0），返回 `context_limit`，保留 trajectory；这一检查在发起下一次模型请求之前。软停止优先于 context pause，与现有 `ReAct.RunCoreAsync` 次序一致。
+2. 构建每次模型调用上下文：稳定 system prompt、history/当前 trajectory、可选 volatile `systemContext`、tool definitions；`ModelRequest.maxTokens` 与 `.reasoningEffort` 使用 `AgentRequest` 中显式传入的值，省略时沿用模型/provider 默认。context 预算估算须包含实际发送的消息和 tools。
+3. 若 `contextTokenBudget === 0`，无条件返回 `context_limit`；否则估算值大于预算时返回 `context_limit`，保留 trajectory。预算未设置时不执行该 loop guard。这一检查在发起下一次模型请求之前。软停止优先于 context pause，与现有 `ReAct.RunCoreAsync` 次序一致。
 4. 进入模型相位，iteration 加一。`ChatModel.stream` 已返回高层 `ModelEvent`：按序转发 text / reasoning / tool-call argument delta；收到唯一 `completed` 后取完整 `ModelResponse`。底层 provider `ProviderChunk` 和 block assembler 不属于 loop API。
-5. 累加 response usage/cost；把完整 assistant message 加到 trajectory；`await checkpoint.appendMessage`；发 `turnCompleted`。遇到不可重试模型故障可返回 `error` 和 failure，重试类/传输异常按模型 retry wrapper 语义处理后仍失败则抛给宿主，不伪装成答案。
-6. 无 tool call 时返回 `answer`。有 tool call 时先检查软停止；若 requested，返回 `interrupted`，绝不启动尚未开始的工具。按模型给出的调用顺序逐个处理：命中 final output tool 则参数作为答案并返回；达到显式正值 max iteration 时不执行剩余调用；否则 validator 校验、await `beforeToolExecution`、检查 hard signal、await checkpoint intent、attempt `toolStarted` notification (observer failure is isolated)、执行工具、把 observation 加 trajectory、await checkpoint result、attempt `toolCompleted` notification (observer failure is isolated)。
+5. 累加 response usage/cost；把完整 assistant message 加到 trajectory；`await checkpoint.appendMessage`；发 `turnCompleted`。该事件对应一次模型调用完成（沿用旧 `AgentLoopEvent.TurnCompleted`），不是整个 session turn 已结束。不可重试 `LlmFailure` 转成 `error` stop result 并发 `runFailed`；retry wrapper 在允许边界重试，最终未处理的 retryable/transport exception 抛给宿主，不伪装成答案。
+6. 无 tool call 时返回 `answer`。有 tool call 时先检查软停止；若 requested，返回 `interrupted`，绝不启动尚未开始的工具。按模型给出的调用顺序逐个处理：命中 final output tool 则参数作为答案并返回；达到显式正值 max iteration 时不执行剩余调用；否则 validator 校验、await `beforeToolExecution`、检查 hard signal、await checkpoint intent、attempt `toolStarted` notification (observer failure is isolated)、执行工具、attempt `toolCompleted` notification (observer failure is isolated)、把 observation 加 trajectory、await checkpoint result。
 7. 已执行工具后回到步骤 1/2；调用所有终止路径返回完整可观察轨迹和已产生 usage。
 
 事件 union 的 Core 内部命名以 camelCase 为准，至少保留 `textDelta`、`reasoningDelta`、`toolCallDelta`、`turnCompleted`、`toolStarted`、`toolCompleted`、`runFailed`、`interrupted`。`toolCallDelta` 的 arguments 是截至目前累计的原始 JSON 字符串，可能不完整；不能提前当有效 JSON parse。RPC 和 TUI local adapter 都显式把内部事件转回现有 `tui/src/rpc/protocol.ts` wire union（保留 `kind` snake_case 与 payload snake_case）；UI 状态机因此不用在本次 Core 迁移中重写。
@@ -120,13 +160,13 @@ recovery 的 checkpoint 时序维护当前 fail-closed 约束：task 开始记�
 |---|---|---|
 | `packages/agent/test/agent-loop.test.ts` | 纯文本结束、两轮 tool cycle、完整轨迹顺序、usage 累加、final tool 答案 | 不引用 Node API；注入假 model/tool；每个请求只累计本次 usage |
 | loop phase / cancellation tests | 模型流开始前 abort；流中 abort；工具中 abort；soft stop 在模型前和 tool-call 后；工具执行途中软停只在工具结束后生效 | hard abort rejection，soft stop 有 `interrupted` partial result；没有越过未启动相位的事件/副作用 |
-| stream / event tests | 累计 tool arguments 分片、reasoning/text 顺序、async sink 顺序、event listener 与诊断回调各自抛错、checkpoint/validator 抛错 | delta 原串保留；await observer 保序且捕获错误后继续；checkpoint/validator 错误停止且未授权工具不执行 |
+| stream / event tests | 累计 tool arguments 分片、reasoning/text 顺序、async sink 顺序、event listener 与诊断回调各自抛错、checkpoint/validator 抛错 | delta 原串保留；await observer 保序且捕获错误后继续；observer 抛错仍执行已授权工具；checkpoint/validator 错误停止且未授权工具不执行 |
 | context / iteration tests | context estimate 恰等预算、超 1、budget=0；默认无限、显式 1；一条 assistant 有多个 tools、N 上限后未执行部分 | 预算检查发生在模型请求前；context_limit 保留轨迹；iteration 不被默认封顶；完成工具数与上限语义明确 |
 | checkpoint tests | message checkpoint 失败；tool intent checkpoint 失败；tool result checkpoint 失败 | assistant 和 intent 写入先于任何相应副作用；结果 checkpoint 失败时下一次模型不启动 |
 | `packages/coding-agent/test/agent-session.test.ts` | 回合 A history 出现在回合 B；model/skills 切换边界；stable snapshot 只变更时追加；同 session 并发 prompt/reset | 有状态只在 host；暂停恢复标志生效；会话 busy 策略一致 |
 | history / recovery tests | 整 user-turn trim、保留最近一轮、未配齐 tool calls sanitize；ContextLimit 之后下一轮不 trim；未知 intent fail-closed | 结果 trajectory 不改写，持久 history 良构；checkpoint/recovery 可重放且未知副作用被阻止 |
 | budget / artifact tests | 无 model window、provider resolver 抛错、估算预算边界、非白名单/写操作不 spill、artifact 写失败 | 预算仅 approximate；无窗口不发明限制；spill 不丢原始结果；安全/错误边界保留现状 |
-| runner seam / RPC contract tests | 同一事件分别经 RpcClient 与 local adapter；ready metadata、prompt、hard interrupt/cancelled、clear history、set model/skills、list/run command、ping、stop；旧 wire fixtures；busy prompt 后仍可处理 interrupt；未知事件兼容 | TUI app 继续消费 protocol.ts wire union；local adapter 显式映射 camelCase Core events；首按 Ctrl+C 仍硬取消；RPC busy prompt 立即拒绝且不阻塞读取；正常逐行协议/seq 保持 |
+| runner seam / RPC contract tests | 同一事件分别经 RpcClient 与 local adapter；subscribe-before-connect、ready 恰好一次且先于 connect resolve；prompt 单次 result callback；hard interrupt/cancelled、clear history、set model/skills、list/run command、ping、stop；旧 wire fixtures；busy prompt 后仍可处理 interrupt；未知事件兼容 | TUI app 继续消费 protocol.ts wire union；local adapter 显式映射 camelCase Core events；首按 Ctrl+C 仍硬取消；RPC busy prompt 立即拒绝且不阻塞读取；正常逐行协议/seq 保持 |
 
 `maxIterations` 验证为整数且 `>= 0`，0 明确表示无限；`maxTokens` 若提供则必须是正整数；`contextTokenBudget` 若提供则必须是整数且 `>= 0`；`reasoningEffort` 是 opaque 字符串，合法值由所选模型/provider adapter 校验，并保留当前未支持值的错误语义。超界在 loop/session 启动时以明确参数错误拒绝，不能静默 clamp。
 

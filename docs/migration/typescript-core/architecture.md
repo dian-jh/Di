@@ -42,7 +42,7 @@
 
 分开定义核心 runner 和 TUI 兼容 facade。公共 Core API 使用 camelCase typed union；TUI 当前 `TurnStateMachine`、view 与 `tui/src/rpc/protocol.ts` 使用 wire 形状（`kind: "text_delta"`、`is_error`、`stop_reason`），首期保留其状态机与渲染逻辑。`RunnerPort` / `runInteractive(port)` 由未来 `tui/src/runner/` 和 `tui/src/interactive.ts` 导出。coding-agent 的 `LocalAgentRunnerAdapter` 放在 `packages/coding-agent/src/adapters/tui-runner.ts`，把 `AgentEvent` / `AgentResult` 显式转换成现有 protocol.ts 事件 / 结果；adapter 使用 TUI 的 wire-shape 类型，Core 内部不可依赖这些类型。RPC client 仍解析 NDJSON 并产出相同 wire union。未来 UI 若单独迁 camelCase，再改 adapter 与状态机，不能把该改造夹在 Core 迁移中。
 
-Core 的宿主 API 表达单次 session 能力，不包含子进程与 wire DTO：
+以下是接口草图，不是自包含的可复制源码；类型须按下表从所属包公共入口导入。Core 的宿主 API 表达单次 session 能力，不包含子进程与 wire DTO：
 
 ```ts
 export interface CoreRunner {
@@ -57,12 +57,23 @@ export interface CoreRunner {
 export interface RunTurnInput { message: string }
 ```
 
-TUI 依赖一個 `RunnerPort`，其方法與目前 `tui/src/rpc/client.ts` 相同；callback payload 沿用 protocol.ts 的 `ReadyMessage`、`AgentEvent`、`AgentResult`、`CommandDescriptor`：
+| 契约名 | 唯一定义 owner / 未来位置 | 依赖关系 |
+|---|---|---|
+| `ModelRef`, `AgentMessage`, `ToolCall`, `ToolResultMessage`, `ToolSpec`, `TokenUsage`, `UsageCost`, `FinishReason`, `LlmFailure`, `ModelRequest`, `ModelResponse`, `ModelEvent`, `ChatModel` | `@di/ai`：`packages/ai/src/types/messages.ts`, `tools.ts`, `stream.ts`、`model.ts` | 不依赖 agent 或 Node；`ToolSpec` 是模型工具词汇，`ModelRequest.tools` 为 `readonly ToolSpec[]`；`ToolResultMessage` 属于 AI message union |
+| `AgentRequest`, `AgentDependencies`, `AgentEvent`, `AgentResult`, `StopReason`, `ToolObservation`, `ToolExecutor`, `ToolValidator`, `LoopCheckpoint`, `runAgentLoop` | `@di/agent`：`packages/agent/src/types.ts`、`tools.ts`、`agent-loop.ts` | 仅导入 `@di/ai` 词汇与 Web API types |
+| `AgentSession`, `CoreRunner`, `RunTurnInput`, `LocalAgentRunnerAdapter` | `@di/coding-agent`：`packages/coding-agent/src/core/agent-session.ts`、`src/adapters/tui-runner.ts` | `CoreRunner.runTurn` 返回 `@di/agent` 的 `AgentResult`；adapter 转成下列 TUI wire result |
+| `RunnerPort`, `RunnerPortHandlers`, `runInteractive`, `Rpc*` wire aliases | `di-tui`：未来 `tui/src/runner/port.ts`、`tui/src/interactive.ts`；wire source 为现存 `tui/src/rpc/protocol.ts` | TUI 不导入 `@di/agent` / coding-agent；`RpcAgentResult` 是 protocol result，不能与 Core `AgentResult` 混用 |
+
+因此上方 CoreRunner 草图中的返回类型应读作 `AgentResult`（来自 `@di/agent`），而 RunnerPort 的返回类型是 protocol wire 的 `RpcAgentResult`。adapter 是两者之间唯一转换点。
+
+以下代码块是跨包契约草图，不是可直接复制编译的完整实现。正式类型定义由各自 owner 阶段创建，并从包公共入口导出；当前现存 wire 类型定义在 `tui/src/rpc/protocol.ts`。TUI 依赖一个 `RunnerPort`，方法覆盖 `tui/src/rpc/client.ts` 的可见操作；callback payload 沿用 protocol.ts 的 `ReadyMessage`、`AgentEvent`、`AgentResult`、`CommandDescriptor`：
 
 ```ts
 import type {
+  AgentEvent as RpcAgentEvent,
   AgentResult as RpcAgentResult,
   CommandDescriptor as RpcCommandDescriptor,
+  ModelInfo,
   ReadyMessage as RpcReadyMessage,
 } from "../rpc/protocol.ts";
 
@@ -93,7 +104,19 @@ export interface RunnerPortHandlers {
 }
 ```
 
-类型前缀 `Rpc` 是对 `tui/src/rpc/protocol.ts` wire union 的 import alias（ready/event/result/command/skill/model metadata），不代表另一份 schema；Core result 在 RunnerPort 签名处也使用 alias `RpcAgentResult`。`RunnerPortHandlers` 沿用现有 `RpcClientOptions` 回调（`onReady`/`onEvent`/`onResult`/`onError`/`onExit`/`onStderr`/`onMalformed`）。coding-agent adapter 从 `CoreRunner.subscribe` 映射 camelCase events 为 `tui/src/rpc/protocol.ts` 的 wire-shape union，并转换结果和 ready metadata；ready 元数据含当前 model、effort、skills、models。`prompt` 绑定一个 AbortController 到 `CoreRunner.runTurn`；TUI `interrupt()` 调用 controller.abort()，将 hard abort 映射成当前 wire `stop_reason: "cancelled"`。不得把该方法直接连到 `CoreRunner.requestSoftStop()`。若后续交互希望 Ctrl+C 做软停，须单独改 UX 与协议语义，并新增测试。`CoreRunner.requestSoftStop()` 供可选择软停的其它宿主使用，回 `interrupted`。
+类型别名直接对应 `tui/src/rpc/protocol.ts` 中真实导出的 `AgentEvent`、`AgentResult`、`CommandDescriptor`、`ModelInfo`、`ReadyMessage`；这些是 `di-tui` 的公开 wire contract，不另造 schema。`NodeJS.Signals` 来自 TUI 已有 Node 类型依赖，Core 包不得引用它。各契约的唯一 owner、位置和依赖方向见上表；本处不提供第二套字段定义。coding-agent adapter 从 `CoreRunner.subscribe` 映射 camelCase events 为 protocol.ts 的 wire union，并转换结果和 ready metadata；ready 元数据含当前 model、effort、skills、models。`prompt` 绑定一个 AbortController 到 `CoreRunner.runTurn`；TUI `interrupt()` 调用 controller.abort()，将 hard abort 映射成当前 wire `stop_reason: "cancelled"`。不得把该方法直接连到 `CoreRunner.requestSoftStop()`。若后续交互希望 Ctrl+C 做软停，须单独改 UX 与协议语义，并新增测试。`CoreRunner.requestSoftStop()` 供可选择软停的其它宿主使用，回 `interrupted`。
+
+### RunnerPort 生命周期与接线顺序
+
+`runInteractive(port)` 负责 TUI 生命周期，调用者只提供已构造的 port。必须按以下顺序接线，避免错过 ready 或首个事件：
+
+1. 创建 terminal、`TurnStateMachine`、view 与键盘回调；把所有 port handlers 注册到 `port.subscribe(handlers)`，保存返回的 unsubscribe。
+2. 调用并等待 `port.connect()`。`connect()` 只在 `onReady(meta)` 已调用一次后 resolve；连接失败走现有 `onError`/退出路径，不进入可输入状态。
+3. `RpcClientPort.subscribe` 在 connect 前缓存 handlers；`connect` 创建/启动底层 `RpcClient` 时将这些 handlers 绑定到 `RpcClientOptions`，ready callback 原样调用 `onReady` 后让 connect resolve。`LocalAgentRunnerAdapter.subscribe` 在内存注册 handlers；其 connect 从已组合的 session 生成等价 `ReadyMessage`，调用 `onReady` 后 resolve。两种实现都不得在订阅前发 ready/event。
+4. `prompt` 时先由 port 建立本 turn 的完成等待，再启动 `CoreRunner.runTurn`；adapter 将同步/异步事件按序发给已订阅者，完成时调用一次 `onResult`，同时让 `prompt()` promise resolve 为同一个 result（调用方不可对 promise 再次更新 UI 状态）；失败时按现有错误约定 reject promise，session 级错误走 `onError`。`interrupt` 可在该等待期间触发硬取消。
+5. `runInteractive` 在退出 `finally` 中先停止接收键盘输入，再 `await port.stop()`，随后 unsubscribe 并释放 view/terminal；`stop` 必须幂等。若 connect 未成功，仍执行 unsubscribe 和本地资源释放。
+
+此顺序要求 terminal/view 构建与订阅发生在 connect 前。改造旧 `tui/src/main.ts` 时，应把现有 `RpcClient` callback 初始化移动到 `RpcClientPort.connect()`，不能在 `runInteractive` 开始后临时订阅。
 
 RunnerPort 必须覆盖现有操作：`connect`/ready meta；`prompt` → 一次 turn events + result；`interrupt` → 当前硬取消；`clearHistory` → reset；`setModel`/`setSkills` → 更新 session；`listCommands` → `command {list:true}` 形状的命令描述；`runCommand` → 命令行、exit、模型状态快照与 turn-not-supported 错误；`ping` → no-op heartbeat；`stop` → graceful teardown。Local adapter 从 Node 组合根注入 `CommandRegistry` / host callbacks，不把命令注册或 protocol JSON 放进 `@di/agent`。
 
@@ -113,17 +136,17 @@ di-ts [--mode interactive|print|json|rpc] [CLI args]
 tui/src/main.ts → legacy standalone RPC launcher → di --mode rpc (旧 C# 兼容 / 协议测试)
 ```
 
-未来导出和入口约束：
+未来导出和入口约束（表中 `types` 指向同一构建产物的 `.d.ts`；生成声明前不得运行跨包 typecheck/test）：
 
 | 包 | 导出 / bin | 说明 |
 |---|---|---|
-| `di-tui`（当前 `tui/` workspace，保留包名） | `package.json.exports["."] → dist/index.js`，`package.json.exports["./protocol"] → dist/rpc/protocol.js`；`index.ts` 导出 `runInteractive`、`RunnerPort` 与 handlers | render-only library；依赖 `@earendil-works/pi-tui`，不依赖 Core/coding-agent；`src/main.ts` 只用于旧 RPC launcher |
-| `@di/coding-agent`（未来 `packages/coding-agent/`） | `bin.di-ts → ./dist/cli/main.js`；`exports["."] → ./dist/index.js`（宿主 API），`exports["./cli"] → ./dist/cli/main.js` | CLI 是唯一生产组合根。workspace dependency 指向 `di-tui`；coding-agent adapter 实现 `RunnerPort`，调用其 `runInteractive` |
-| `@di/agent`, `@di/ai` | 各自 `exports["."] → dist/index.js` | library-only，不声明 CLI/bin |
+| `di-tui`（当前 `tui/` workspace，保留包名） | `package.json.exports["."]` 的 `types` / `import` 指向 `dist/index.d.ts` / `.js`；`exports["./protocol"]` 同理指向 `dist/rpc/protocol.d.ts` / `.js`；`index.ts` 导出 `runInteractive`、`RunnerPort` 与 handlers | render-only library；依赖 `@earendil-works/pi-tui`，不依赖 Core/coding-agent；`src/main.ts` 只用于旧 RPC launcher |
+| `@di/coding-agent`（未来 `packages/coding-agent/`） | `bin.di-ts → ./dist/cli/main.js`；`exports["."]` 与 `exports["./cli"]` 同时含 `types` / `import` 映射到 `.d.ts` / `.js` | CLI 是唯一生产组合根。workspace dependency 指向 `di-tui`；coding-agent adapter 实现 `RunnerPort`，调用其 `runInteractive` |
+| `@di/agent`, `@di/ai` | 各自 `exports["."]` 同时含 `types` / `import` 映射到 `dist/index.d.ts` / `.js` | library-only，不声明 CLI/bin |
 
-`di-ts` 通过 execution plan 中的 `CliMode.Resolve` 继承现有优先级，不把缺省 interactive 提前于位置参数：显式 mode 优先，位置参数 / `--print` / 非 TTY 走 print，只有双 TTY 且未显式选择 headless mode 才进 interactive；`--resume` 无显式模式和 prompt 时进入简单交互并跳过 TUI，详见 execution plan。`print`、`json`、`rpc` 不额外启动 renderer，也不新建另一套 session core。`--mode rpc` 保持既有 NDJSON 协议，内部依旧调用同一 CoreRunner。根 workspace 的 `build`、`test` 先按 `@di/ai` → `@di/agent` → `di-tui` → `@di/coding-agent` 顺序，`start:di-ts` 运行 `npm run start --workspace @di/coding-agent -- --mode interactive`（开发命令显式选择模式）。叶包至少提供 `build`、`test`、`start` scripts；执行顺序/逐阶段命令清单在 [execution plan](execution-plan.md)。
+`di-ts` 通过 execution plan 中的 `CliMode.Resolve` 继承现有优先级，不把缺省 interactive 提前于位置参数：显式 mode 优先，位置参数 / `--print` / 非 TTY 走 print，只有双 TTY 且未显式选择 headless mode 才进 interactive；`--resume` 无显式模式和 prompt 时进入简单交互并跳过 TUI，详见 execution plan。`print`、`json`、`rpc` 不额外启动 renderer，也不新建另一套 session core。`--mode rpc` 保持既有 NDJSON 协议，内部依旧调用同一 CoreRunner。根 workspace 的构建必须先按 `@di/ai` → `@di/agent` → `di-tui` → `@di/coding-agent` 生成依赖的 JS 与 `.d.ts`，再运行跨包测试/typecheck；各包测试可以在 build 后按 package 顺序运行，不要让测试依赖尚不存在的 `dist`。workspace TS 约定 `declaration: true` 和对应 `exports` 的 `types` 映射；现存 `tui/tsconfig.json` 为 `declaration:false`，TUI 接入 workspace 时须按此约定调整。`@di/ai` / `@di/agent` 是 library-only，不设 `start`；只有 `di-tui`（兼容旧 launcher）及 coding-agent CLI 需要可运行入口。命令清单在 [execution plan](execution-plan.md)。
 
-由于 `@di/coding-agent` 在运行时导入 `di-tui`，发布包不可留下 `workspace:` 依赖或引用 `private` 包。沿用当前 TUI 名称 `di-tui` 并设为可发布 workspace package；`@di/ai`、`@di/agent`、`di-tui`、`@di/coding-agent` 作为一个 release group 一起版本 / publish，coding-agent 对前置包用同组版本范围。根 workspaces 安装和本地脚本命令必须使用 npm 实际支持的 workspace dependency specifier，不盲写其他 package manager 的协议。
+由于 `@di/coding-agent` 在运行时导入 `di-tui`，安装包验证时不得留下无法解析的 workspace-only 依赖或指向 private 包。迁移验收先在本地生成 tarball 并在隔离临时项目安装验证依赖解析、入口与类型声明；本地 tarball/隔离安装验证不等同公开发布。不要因规划文档自动执行 npm publish：公开注册表发布仅在已有明确发布授权与包名所有权证据时才可进行；缺少任一项就不发布，但不影响本地迁移验收。`di-tui` 当前是未 scoped 名称，不得假设该名称可由本项目占有。根 workspaces 安装和本地脚本命令必须使用 npm 实际支持的 workspace dependency specifier，不盲写其他 package manager 的协议。
 
 迁移顺序仍先 RPC 再 local adapter：P7 让现有 `tui/src/main.ts` 用旧 `RpcClient` 启动 `di-ts --mode rpc`，P9 才开放生产 CLI 的 local interactive 接线。只接线 TUI shell 边界：把当前 `tui/src/main.ts` 中“创建 terminal / state / ChatView / 输入键盘 / stop 生命周期”提取到 `tui/src/interactive.ts` 的 `runInteractive(port, options?)`；`tui/src/index.ts` 公开它和 `RunnerPort`。`tui/src/runner/rpc-port.ts` 提供 `RpcClientPort`：持有原 `tui/src/rpc/client.ts` 的 `RpcClient`，将 `RunnerPort.subscribe(handlers)` 映射到现有 `RpcClientOptions` callbacks；`tui/src/main.ts` 留下 `resolveDiBin`、创建 `RpcClientPort`、调用 `runInteractive(rpcPort)`。coding-agent 的 `src/cli/main.ts` 解析 args、构建 host、按 Resolve 结果选 mode；interactive 时创建 `CoreRunner` 和 `LocalAgentRunnerAdapter`，再传到 `runInteractive`。不改 `tui/src/app/state.ts` / `chat-view.ts` 的 wire types 和渲染状态机。这样依赖图固定为 coding-agent → di-tui，di-tui → coding-agent 不存在。
 
@@ -133,7 +156,7 @@ tui/src/main.ts → legacy standalone RPC launcher → di --mode rpc (旧 C# 兼
 
 ## AI Provider 流与模型事件分层
 
-provider 层不直接输出 loop 事件。低层 `ProviderChunk` 描述一次 provider 流的 block 生命周期、原始增量和 usage/finish；assembler 按 block index 组装为内部消息，`ChatModel.stream` 向 agent loop 输出高层 `ModelEvent`：
+以下也是接口草图，类型的正式定义与导出任务属于 `@di/ai` 的模型类型/stream 实现阶段；不要作为一段自包含源码直接粘贴。provider 层不直接输出 loop 事件。低层 `ProviderChunk` 描述一次 provider 流的 block 生命周期、原始增量和 usage/finish；assembler 按 block index 组装为内部消息，`ChatModel.stream` 向 agent loop 输出高层 `ModelEvent`：
 
 ```ts
 type ProviderChunk =
@@ -151,12 +174,27 @@ type ModelEvent =
   | { type: "toolCallDelta"; id: string; name: string; arguments: string }
   | { type: "completed"; response: ModelResponse };
 
+interface ToolSpec {
+  name: string;
+  description: string;
+  parameters: Readonly<Record<string, unknown>>; // JSON Schema object payload
+  strict?: boolean;
+}
+
+interface ModelRequest {
+  messages: readonly AgentMessage[];
+  tools?: readonly ToolSpec[];
+  maxTokens?: number;
+  reasoningEffort?: string;
+  // Other preserved C# request options are specified in models-and-auth.md.
+}
+
 interface ChatModel {
   stream(request: ModelRequest, signal?: AbortSignal): AsyncIterable<ModelEvent>;
 }
 ```
 
-名称只作本迁移接口草案，但两层边界固定：provider 的 `blockStart/blockEnd/usage/finish` 不向 `@di/agent` 泄漏；assembler 最终恰好产出一条 `completed`，其中 `ModelResponse` 是本次调用的完整 assistant message、usage、可得时 cost、finish reason 和 request metadata。usage/cost 是本次模型调用值；loop 对每个 completed 累加，并在 `turnCompleted` 事件/result 给出回合累计值。provider wire DTO/SSE 留在 `@di/ai` adapters。
+名称只作本迁移接口草案，但两层边界固定：provider 的 `blockStart/blockEnd/usage/finish` 不向 `@di/agent` 泄漏；正式类型所有者为 `@di/ai`：`ProviderChunk`、`ProviderBlockStart`、`TokenUsage`、`FinishReason`、`ModelRequest`、`ModelResponse`、`ModelEvent`、`ChatModel`。这些类型从 `@di/ai` 公共入口导出，逐项实现在模型类型/stream assembler 单元。assembler 最终恰好产出一条 `completed`，其中 `ModelResponse` 是本次调用的完整 assistant message、usage、可得时 cost、finish reason 和 request metadata。usage/cost 是本次模型调用值；loop 对每个 completed 累加，并在 `turnCompleted` 事件/result 给出回合累计值。provider wire DTO/SSE 留在 `@di/ai` adapters。无 Node runtime 的 `@di/ai` / `@di/agent` 使用 `AbortSignal`、`TextEncoder` 等 Web API 类型时，workspace `tsconfig` 明确包含 `ES2022`, `DOM`, `DOM.Iterable` libs；网络访问通过注入的 fetch 函数，不直接读 Node globals。宿主可以注入 `globalThis.fetch`。
 
 ## TypeScript 与包约束
 
