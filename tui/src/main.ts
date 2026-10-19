@@ -22,7 +22,7 @@ import { cycleTurnGroup, toggleLatestReasoning, toggleLatestTurnGroup } from "./
 import { toggleLatestToolCall } from "./app/tool-call.ts";
 import { selectFoldItem, toggleSelectedFoldItem } from "./app/fold-navigation.ts";
 import { normalizeSlash } from "./app/commands.ts";
-import { terminalScreenMode } from "./app/terminal-mode.ts";
+import { startInteractiveScreen, terminalScreenMode } from "./app/terminal-mode.ts";
 import { TurnStateMachine } from "./app/state.ts";
 import { CommandError, RpcClient, resolveDiBin } from "./rpc/client.ts";
 
@@ -139,7 +139,7 @@ async function main(): Promise<number> {
   });
 
   tui.terminal.setTitle("di — TUI");
-  tui.start();
+  startInteractiveScreen(tui);
   // 启动即同步一次视图：ready 握手已有元数据，模型徽标 / 状态行无需等第一次对话。
   view.sync(state);
   view.focusInput();

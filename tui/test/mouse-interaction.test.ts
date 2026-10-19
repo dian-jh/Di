@@ -4,6 +4,7 @@ import { TuiAltScreen, type Terminal } from "@earendil-works/pi-tui";
 
 import { ChatView } from "../src/app/chat-view.ts";
 import { TurnStateMachine } from "../src/app/state.ts";
+import { startInteractiveScreen } from "../src/app/terminal-mode.ts";
 
 class FakeTerminal implements Terminal {
   columns = 80;
@@ -26,6 +27,50 @@ class FakeTerminal implements Terminal {
   setProgramStatus(): void {}
   send(data: string): void { this.input?.(data); }
 }
+
+class ResettingMouseTerminal extends FakeTerminal {
+  mouseReporting = false;
+  override start(onInput: (data: string) => void): void {
+    super.start(onInput);
+    // Windows raw-input setup can clear reporting enabled before terminal.start().
+    this.mouseReporting = false;
+  }
+  override write(data: string): void {
+    super.write(data);
+    for (const mode of data.matchAll(/\x1b\[\?100[023]([hl])/g)) {
+      this.mouseReporting = mode[1] === "h";
+    }
+  }
+  override send(data: string): void {
+    if (this.mouseReporting) super.send(data);
+  }
+}
+
+describe("Windows mouse reporting after input initialization", () => {
+  it("keeps Thinking clickable when raw-input setup clears earlier reporting", () => {
+    const terminal = new ResettingMouseTerminal();
+    const tui = new TuiAltScreen(terminal, undefined, undefined, { mouse: true });
+    const state = new TurnStateMachine();
+    const view = new ChatView(tui, () => {});
+    state.startTurn("prompt");
+    state.applyEvent({ kind: "reasoning_delta", delta: "probe reasoning" });
+    view.sync(state);
+    startInteractiveScreen(tui, "win32");
+    view.focusInput();
+    tui.renderNow(true);
+    try {
+      const row = tui.getScreenLines().findIndex(line => line.includes("Thinking")) + 1;
+      assert.ok(row > 0);
+      terminal.send(`\x1b[<0;2;${row}M`);
+      terminal.send(`\x1b[<0;2;${row}m`);
+      tui.renderNow(true);
+      assert.ok(tui.getScreenLines().some(line => line.includes("probe reasoning")));
+    } finally {
+      tui.stop();
+    }
+    assert.equal(terminal.mouseReporting, false, "exit must disable mouse reporting");
+  });
+});
 
 describe("alternate-screen mouse input", () => {
   it("dispatches complete SGR click pairs repeatedly without focusing away from the editor", () => {

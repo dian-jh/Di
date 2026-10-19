@@ -80,7 +80,7 @@ tui/
 │       ├── chat-view.ts    # 聊天视口：transcript + 错误横幅 + 输入框 + 输入框下状态行，装载到全屏布局根
 │       ├── chat-layout.ts  # 全屏布局装配（纯函数）：root = VStack[transcript ScrollView + dock]，输入框后固定状态行
 │       ├── badge.ts        # 输入框下方独立徽标行（右对齐，不与输入框同处一行；委托鼠标/键盘）
-│       ├── terminal-mode.ts# 终端模式检测：经典 conhost（cmd）vs 现代终端（WT/TERM_PROGRAM/ConEmuANSI）
+│       ├── terminal-mode.ts# 全屏模式选择与 Windows 输入初始化后的鼠标上报恢复
 │       ├── message.ts      # 用户/助手消息组件（用户输入整行灰底）
 │       ├── rule.ts         # 浅灰框线（消息分隔 / 用户条形框 / 输入框边框，颜色可配）
 │       ├── commands.ts     # 斜杠命令文本解析 + skill: 前缀归一（纯函数，可单测）
@@ -102,6 +102,7 @@ tui/
 
 ### TUI 展示行为（`tui/src/app/`）
 
+- Windows 启动通过 `tui/src/app/terminal-mode.ts` 的 `startInteractiveScreen()`：先完成 TUI 与 raw-input 初始化，再重新开启按钮鼠标与 SGR 上报，避免输入初始化重置提前开启的鼠标模式。退出时仍由 `TuiAltScreen` 关闭上报；实际事件传递取决于终端支持，单独选择全屏模式不代表鼠标兼容性已经得到验证。
 - 用户消息以 `>` 前缀显示为整行 `#373737` 灰底浅色文字，包含 CJK 与换行内容；助手正文使用 `@earendil-works/pi-tui` 的 `Markdown` 组件增量更新。状态行固定在输入框下方，左侧显示 Cache/Cost，右侧仅显示模型名。历史回合不重复显示用户输入标题，折叠导航键仍可用。
 - 可见内容块之间由 `tui/src/app/spacing.ts` 的 `SpacedBlock` 插入一行普通背景留白：用户灰条与思考/工具/答案、思考展开内容与后续工具/答案、相邻回合之间至少一行；空组件不占行，流式更新重用同一组件而不会累积空行。间隔行不会继承用户灰底，也不改变 Markdown 内部排版。
 - 标准 `diff` fenced block 中新增行使用绿色背景、删除行使用红色背景（跳过 `+++` / `---` 文件头）；普通代码块和正文行不按首字符染色。
