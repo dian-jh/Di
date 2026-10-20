@@ -119,3 +119,31 @@ export type {
   DeepSeekWireDelta,
   DeepSeekWireUsage,
 } from "./providers/deepseek/index.ts";
+
+// ChatGPT Responses provider adapter (P8a request/response translation). The
+// module-internal `toWireRequest` / `serializeRequest` / `mapHttpErrorBody`
+// names are re-exported under provider-scoped aliases to avoid colliding with
+// the DeepSeek exports above.
+export {
+  chatgptDefaults,
+  chatgptErrorCodes,
+  createChatGptTranslator,
+  toWireRequest as toChatGptWireRequest,
+  serializeRequest as serializeChatGptRequest,
+  mapHttpErrorBody as mapChatGptHttpErrorBody,
+  ChatGptError,
+  ChatGptAdapter,
+} from "./providers/chatgpt/index.ts";
+export type { ChatGptAdapterOptions } from "./providers/chatgpt/index.ts";
+export type {
+  ChatGptWireRequest,
+  ChatGptWireInputItem,
+  ChatGptWireReasoning,
+  ChatGptWireToolNamespace,
+  ChatGptWireTool,
+  ChatGptWireUserContentPart,
+  ChatGptWireAssistantContentPart,
+  ChatGptWireSseEvent,
+  ChatGptWireResponse,
+  ChatGptWireUsage,
+} from "./providers/chatgpt/index.ts";

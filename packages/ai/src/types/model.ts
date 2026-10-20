@@ -55,6 +55,25 @@ export interface ModelRequest {
   readonly tools?: readonly ToolSpec[];
   readonly maxTokens?: number;
   readonly reasoningEffort?: string;
+  /**
+   * Sampling temperature. Providers that do not support it reject the request
+   * with `UNSUPPORTED_OPTION` before sending (C# `GenerateOptions.Temperature`).
+   */
+  readonly temperature?: number;
+  /** Nucleus sampling (C# `GenerateOptions.TopP`). */
+  readonly topP?: number;
+  /** Frequency penalty (C# `GenerateOptions.FrequencyPenalty`). */
+  readonly frequencyPenalty?: number;
+  /** Presence penalty (C# `GenerateOptions.PresencePenalty`). */
+  readonly presencePenalty?: number;
+  /** Stop sequences (C# `GenerateOptions.Stop`). */
+  readonly stop?: readonly string[];
+  /**
+   * Business session id used to derive a stable provider prompt-cache key
+   * (C# `GenerateOptions.SessionId` → `prompt_cache_key`). Advisory: the key is a
+   * cache-affinity hint, never a hit guarantee (docs/modules/chatgpt.md).
+   */
+  readonly sessionId?: string;
 }
 
 /** One complete response to a model call (from `Core/Llm/ModelResponse.cs`). */
