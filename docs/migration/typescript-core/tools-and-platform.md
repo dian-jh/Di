@@ -1,6 +1,10 @@
 # TypeScript Core 迁移：工具与平台执行
 
-> 状态：迁移实施指南；TS 路径为未来路径，不代表代码已实现。
+> 状态：迁移实施指南。文件工具（read/write/edit）、glob、grep、one-shot 进程 runner
+> （P4.4 `process-runner.ts`）与一次性 shell 工具（Windows cmd / 其他 bash，P4.5
+> `bash.ts`，经 `runProcess` 的 `shell` 模式复用同一生命周期）已按本契约实现并接入组合根；
+> 持久 ShellSession、powershell、python 工具仍为未来路径。契约表以 C# 基线为准，实现
+> 证据与 gate 见 [`progress.md`](progress.md)。
 > 基线 Di：`09f4e0816c1b2dc42461e79a968b46e811d3880c`；Pi 只读参考：
 > `7f9e1198f2f7a8cf5ea18d5010ba081d4d60c333`。共享包边界见
 > [`architecture.md`](architecture.md)。模型中的 `ToolSpec` / `ProviderChunk` / `ModelEvent` 和 loop 的
@@ -97,8 +101,9 @@ glob/grep/shell/powershell/python。all/coding/read-only 集合与名称别名�
 
 ## 子进程：one-shot 超时、取消、输出和树终止
 
-`child_process` 只提供进程创建能力，不能替代现有 `ProcessRunner` 与 `ShellSession` 的行为。建议在
-未来 `packages/coding-agent/src/core/tools/process-runner.ts` 实现独立的异步 runner：
+`child_process` 只提供进程创建能力，不能替代现有 `ProcessRunner` 与 `ShellSession` 的行为。独立的异步
+runner 已在 `packages/coding-agent/src/core/tools/process-runner.ts` 实现（P4.4，`runProcess`/
+`ProcessResult`；P4.5 经其 `shell: true` 模式接入一次性 cmd/bash 工具），下述为已实现契约：
 
 Di 当前 `ProcessRunner.Kill(Process)` 与 `ShellSession.Kill()` 调用 `.NET Process.Kill(entireProcessTree:true)`；
 超时路径先终止进程树再回传 partial output。Node 的 `ChildProcess.kill()` 只表示发信号给该子进程，不能
