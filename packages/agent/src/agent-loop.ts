@@ -31,6 +31,13 @@ import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from ".
  * estimate crosses `contextTokenBudget` — or the budget is 0 — the loop returns
  * `context_limit` with the full trajectory and accumulated usage preserved (an
  * explicit pause, never an auto-trim or summary).
+ * P2.4 adds soft-stop (`interruptRequested`) at both phase boundaries (loop top
+ * ahead of the context guard, and right after the model returns tool calls
+ * before any tool starts) returning `interrupted` with the partial answer, the
+ * preserved trajectory/usage and the `interrupted` event; hard cancel stays an
+ * `AbortSignal` (loop top + pre-tool `throwIfAborted`, mid-stream/mid-tool
+ * `AbortError` propagates as a rejection and is never turned into an `isError`
+ * observation).
  *
  * Pure loop logic only: no Node IO, no fs, no disk. The loop never mutates the
  * caller's `history` array; every run builds its own trajectory.
@@ -76,8 +83,13 @@ export async function runAgentLoop(
   while (maxIterations === 0 || iterations < maxIterations) {
     // Phase boundary B0: hard abort before starting any model call.
     signal?.throwIfAborted();
-    // Soft stop is polled here, ahead of the context guard (ReAct.RunCoreAsync
-    // order: hard cancel -> soft stop -> context check); it lands in a later P2 card.
+    // Phase boundary B0/B2: soft stop, ahead of the context guard
+    // (ReAct.RunCoreAsync order: hard cancel -> soft stop -> context check).
+    // An in-flight model stream or tool is allowed to finish naturally; the loop
+    // converges here before starting any new phase.
+    if (dependencies.interruptRequested?.() === true) {
+      return stopInterrupted(dependencies, request, trajectory, usage, cost, iterations);
+    }
 
     // Context guard: estimate the exact request the model would see and pause
     // before any model side effect when it crosses the host-provided budget.
@@ -118,6 +130,13 @@ export async function runAgentLoop(
         iterations,
         stopReason: "answer",
       };
+    }
+
+    // Phase boundary B1: the model just produced tool call(s) but no tool has
+    // started. A soft stop returns interrupted and never starts a pending tool;
+    // the model's visible text (already streamed to the UI) stays as the answer.
+    if (dependencies.interruptRequested?.() === true) {
+      return stopInterrupted(dependencies, request, trajectory, usage, cost, iterations);
     }
 
     // Tool phase: process the model's calls in the order given.
@@ -332,6 +351,32 @@ function lastAssistantText(trajectory: readonly AgentMessage[]): string {
     }
   }
   return "";
+}
+
+/**
+ * Phase-boundary soft stop (C# `ReAct.StopInterrupted`): a normal convergence, NOT
+ * an exception. Preserves the partial answer (last assistant visible text), the
+ * full trajectory and the usage/cost accrued so far, emits the `interrupted`
+ * event for the UI, and never starts a pending tool or another model call.
+ */
+async function stopInterrupted(
+  dependencies: AgentDependencies,
+  request: AgentRequest,
+  trajectory: readonly AgentMessage[],
+  usage: TokenUsage,
+  cost: UsageCost | undefined,
+  iterations: number,
+): Promise<AgentResult> {
+  await emit(dependencies, { type: "interrupted" });
+  return {
+    answer: lastAssistantText(trajectory),
+    trajectory,
+    history: request.history,
+    usage,
+    cost,
+    iterations,
+    stopReason: "interrupted",
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -8,8 +8,10 @@
  * finalOutputTool, maxIterations) of runAgentLoop are implemented per
  * docs/migration/typescript-core/loop-and-state.md. P2.3 adds the context-budget
  * guard (`contextTokenBudget`/`estimateRequestTokens` -> `context_limit` with the
- * trajectory preserved). Soft-stop/hard-cancel and observer-error isolation land
- * in later P2 cards.
+ * trajectory preserved). P2.4 adds soft-stop (`interruptRequested` -> `interrupted`
+ * at both phase boundaries, never starting a pending tool or another model call)
+ * and hard cancel (`AbortSignal` rejection, never an `isError` observation).
+ * Observer-error isolation lands in a later P2 card.
  */
 
 export type {
