@@ -56,3 +56,34 @@ export type {
   TranslateEvent,
 } from "./sse.ts";
 export { SseEventParser, SseStreamError, parseSseStream, sseToModelEvents } from "./sse.ts";
+
+// DeepSeek provider adapter (P3.3 request/response translation).
+export {
+  deepSeekDefaults,
+  deepSeekErrorCodes,
+  createDeepSeekTranslator,
+  mapFinishReason,
+  mapHttpErrorBody,
+  mapUsage,
+  serializeRequest,
+  toWireRequest,
+  DeepSeekError,
+  DeepSeekAdapter,
+} from "./providers/deepseek/index.ts";
+export type {
+  DeepSeekAdapterOptions,
+  DeepSeekWireRequest,
+  DeepSeekWireThinking,
+  DeepSeekWireStreamOptions,
+  DeepSeekWireMessage,
+  DeepSeekWireContentPart,
+  DeepSeekWireImageUrl,
+  DeepSeekWireTool,
+  DeepSeekWireFunction,
+  DeepSeekWireToolCall,
+  DeepSeekWireFunctionCall,
+  DeepSeekWireChunk,
+  DeepSeekWireChunkChoice,
+  DeepSeekWireDelta,
+  DeepSeekWireUsage,
+} from "./providers/deepseek/index.ts";
