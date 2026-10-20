@@ -1,6 +1,6 @@
 # TypeScript Core 迁移：进度表
 
-> **状态：P0、P1.1、P1.2、P2.1、P2.2、P2.3、P3.1、P3.2 与 P6.1 已完成；P3.3 运行中（@di/ai deepseek 在途）、P4.1 已提交（867e936，本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
+> **状态：P0–P2.3 各单元、P3.1–P3.3、P4.1 与 P6.1 已完成；P2.4 派发中、P3.4 / P4.2 运行中（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
 > 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
 
@@ -36,10 +36,12 @@
 | P2.1 无工具答案路径与消息良构 | P1.2 | **verified** | 见 P2.1 交接 | 红：`npm test -w @di/agent`(1, 缺 runAgentLoop 导出)、`npm run typecheck -w @di/agent`(2, TS2305)。绿：`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 18 pass)、`npm run typecheck -w @di/agent`(0)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
 | P2.2 工具往返 | P2.1 | **verified** | 409321d、725f90e | 红：`npm test -w @di/agent`(1, 29 中 12 失败 = 全部工具相位用例，`LoopError tool-phase-not-implemented`)。绿：`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 29/29)、`npm run typecheck -w @di/agent`(0)、根 `npm run typecheck`(2, 仅 P4.1 在途的 @di/coding-agent 缺 createFileTools 等导出；@di/agent 与 @di/ai 均 0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
 | P2.3 迭代上限与预算暂停 | P2.2 | **verified** | eb849ed、03f92d4 | 红：`npm test -w @di/agent`(1, 39 中 5 失败 = 全部 context-budget guard 用例：模型被错误调用 / 估算器未被调用)。绿：`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 39/39)、`npm run typecheck -w @di/agent`(0)、根 `npm run typecheck`(2, 仅 P3.3 在途的 @di/ai 的 src/providers 与 deepseek 测试文件；@di/agent 与 @di/coding-agent 均 0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
-| P3 通用模型与 DeepSeek | P1 | in_progress | P3.1、P3.2（见子行）；P3.3 派发中 | 见子行 | 无 |
+| P3 通用模型与 DeepSeek | P1 | in_progress | P3.1–P3.3（见子行）；P3.4 运行中 | 见子行 | 无 |
 | P3.1 provider chunk assembler | P1.1 | **verified** | c0eb1de | 红：`npm test -w @di/ai`(1, 缺 AssemblerError 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 27/27, 含 P1.1 回归) | 无；后续卡：SSE framing（P3.2） |
 | P3.2 HTTP/SSE framing | P3.1 | **verified** | e0a2457 | 红：`npm test -w @di/ai`(1, 缺 SseEventParser 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 59/59 = 32 新增 + 27 回归) | 无；后续卡：DeepSeek 翻译（P3.3） |
-| P4 八个工具与平台执行 | P1 | in_progress | P4.1 运行中 | 未执行 | 预研已完成（27e3e60） |
+| P3.3 DeepSeek 请求/响应翻译 | P3.2 | **verified** | 5c36ca2 | 红：`npm test -w @di/ai`(1, 缺 DeepSeek 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 90/90 = 31 新增 + 59 回归)、根 `npm run typecheck`(0) | 无；后续卡：usage/cost（P3.4，运行中） |
+| P4 八个工具与平台执行 | P1 | in_progress | P4.1（见子行）；P4.2 运行中 | 见 P4.1 子行 | 预研已完成（27e3e60） |
+| P4.1 文件工具 read/write/edit | P6.1, P1.2 | **verified** | 867e936 | 红：`npm test -w @di/coding-agent`(1, 缺 createEditFileTool 导出)；业务红（临时禁 OEM fallback）`node --test test/read-file.test.ts`(1, 35 中 2 失败=GBK 用例)。绿：`npm run build -w @di/coding-agent`(0)、`npm run typecheck`(0)、`npm test -w @di/coding-agent`(0, 114/114=88 工具+26 配置回归)、根 `npm run build`(0)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无；FileShare.None 独占锁纯 Node 不可复刻；原子 rename 未做（保持基线原位写）；无解码器页（如 OEM 437）走显式解码错误（未加 iconv-lite）；后续卡：glob 枚举（P4.2） |
 | P5 检查点、恢复和统计 | P2, P4 | todo | – | 未执行 | 无 |
 | P6 Skills、配置、命令和日志 | P1 | in_progress | P6.1（见子行）；P6.2 待派 | 见 P6.1 子行 | 无 |
 | P6.1 DI_HOME 解析、分层配置合并与 JSONC | P1.1 | **verified** | f96ca98 | 红：`npm run build -w @di/coding-agent && npm test -w @di/coding-agent`(1, 缺导出；再 1, 10/26 断言失败)。绿：`npm run build -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 26/26)、`npm run typecheck -w @di/coding-agent`(0)；`@di/agent` 8/8(0)；TUI 116 pass(0) | 无；`--info` 属 P6.3；资源路径写入属 P6.2 |
@@ -116,6 +118,20 @@
 - **测试：** `packages/agent/test/agent-loop.test.ts` 新增 10 条（budget-pause fixture 全断言、`contextTokenBudget=0` 无条件暂停、估算=预算可继续、无预算禁用 guard、工具往返后预算越线保留轨迹与 usage、answer 不返回旧 history assistant、估算器与模型共享同一请求、无默认迭代上限 >24 轮继续、`maxIterations=1`、多工具单轮 + N 上限）。红测 `npm test -w @di/agent` 退出 1（39 中 5 失败 = 全部新 guard 用例：模型被错误调用或估算器未被调用）；实现后 39/39（P2.2 29 回归 + 新 10）。
 - **并行干扰记录：** P3.3 在途重建 `@di/ai` dist 曾使 dist 指向不存在的 `providers/types/content.js`，导致 `@di/agent` 测试 import 失败；本单元已用提交态 `@di/ai` src 重建干净 dist 恢复验证（未触碰 P3.3 的 src 文件）。若后续再现 `@di/ai` dist 破损，属 P3.3 在途状态，非 P2.3 失败。
 - **未完成门槛：** 无（本卡范围）。软停 / 硬取消（P2.4）、观察事件与 checkpoint hook 异常隔离、历史 / 快照 / budget tracker、模型切换均为后续 P2 卡。
+
+## P3.3 交接（5c36ca2）
+
+- **交付：** `packages/ai/src/providers/deepseek/`（`wire.ts` DTO、`translator.ts` 请求翻译 + 字节稳定序列化 + `createDeepSeekTranslator`、`adapter.ts` `DeepSeekAdapter implements ChatModel`、`index.ts`）从 `@di/ai` 公开导出；31 个测试 + 回归（90/90）。请求：`toWireRequest` 按 C# 序列化器字段顺序输出字节稳定 snake_case JSON；未设字段省略（绝不 `null`/`[]`/`""`）；`thinking` 由 `reasoningEffort` 映射（off→disabled、low/high/max→enabled+effort、默认省略、未知→`UNSUPPORTED_OPTION`）；assistant 历史回显 `reasoning_content` + `tool_calls`；工具结果映射 `tool_call_id`。响应：状态化 `TranslateEvent` 闭包被 `sseToModelEvents` 消费；固定块索引（reasoning=0、text=1、tool wireIndex n→2+n）使最终内容顺序对齐 C# assembler；`toolCallDelta` 仅当 wire 提供时才带 id/name（空串会覆写真实 id——首个实现尝试已修复）。
+- **[DONE] / 坏 JSON / 非 2xx：** `[DONE]` 为 no-op 终态；带 finish chunk + `[DONE]` 恰好一条 `completed`；只有 `[DONE]` 无 finish → `connection` `SseStreamError`（不伪造）。`JSON.parse` 失败或结构非法 → `[]` 跳过不崩流。`mapHttpErrorBody`：429→`RATE_LIMITED`、401/403→`MISSING_CREDENTIAL`、其它取 body code/type→`INVALID_REQUEST` 回退；`DeepSeekError` 携带 `LlmFailure` + code/status/`providerRetryAfterMs`（供 P3.5）。adapter 读 `Retry-After`（delta 秒/HTTP-date）；缺/空 apiKey 在 fetch 前抛 `MISSING_CREDENTIAL`。
+- **依赖形状：** `sseToModelEvents(stream, { model, translateEvent, idleTimeoutMs?, signal? })` 的 `TranslateEvent` 接缝；未改 `sse.ts` / `stream-assembler.ts` / `src/types/*`。
+- **未完成门槛：** 无（本卡范围）。成本计算（P3.4）、retry/backoff + 响应头等待 + 非 2xx/Retry-After 策略（P3.5）。
+
+## P4.1 交接（867e936）
+
+- **交付：** `packages/coding-agent/src/core/tools/`（`types.ts` `CoreTool` = `{ spec: ToolSpec, promptSnippet, promptGuidelines, execute(argumentsJson, signal?) → Promise<ToolObservation> }`、`errors.ts`、`args.ts` parse/validate + JSON-Schema builder、`paths.ts` resolvePath、`encoding.ts` SmartDecode + OEM 发现、`read.ts`/`write.ts`/`edit.ts`、`index.ts` `createFileTools`/`createToolExecutor`）从 `src/index.ts` 导出；88 个工具测试 + 26 配置回归（114）。`createToolExecutor` 适配 `@di/agent.ToolExecutor`（未知工具名 → `error: 未知工具 'x'` 观察；signal 透传；AbortError 传播不吞）。read 按编码探针：去 UTF-8 BOM → strict UTF-8（fatal）→ 1–3 字节接缝修剪 → 系统 OEM（懒 `chcp.com` 发现 + 缓存 + CP→TextDecoder label map）；本机 OEM=936，GBK fixture 命中；无解码器页（437）显式错误。
+- **错误路径 / 平台证据：** read/write/edit 覆盖缺路径/越界/非法 JSON/NUL/目录目标/父为文件/只读(EPERM)/abort 不落盘不碰文件；Windows 反斜杠相对路径、CRLF 读写保留（edit 写回仍 CRLF）、BOM 保留/剥离均实测。
+- **诚实边界：** 锁文件（FileShare.None）错误路径纯 Node 无法复刻（libuv 默认共享读写，无原生独占锁 API 且不加依赖）→ 未移植 C# Windows 锁测试，已记录未伪造；原子写（temp+rename）未做——保持 MVP 对齐 C# 原位 `File.WriteAllText` 基线；无新依赖（iconv-lite 推迟）。
+- **未完成门槛：** 无（本卡范围）。glob 枚举（P4.2，运行中）、grep/regex（P4.3，用 regex 探针 worker 终止边界）、进程/持久 shell（后续）。
 
 ## 下一张任务卡（P2 第四个单元：软停与硬取消）
 
