@@ -1,6 +1,6 @@
 # TypeScript Core 迁移：进度表
 
-> **状态：P0、P1.1 与 P1.2 已完成（本文件由 P0 提交创建，P1.1/P1.2 由迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
+> **状态：P0、P1.1、P1.2 与 P3.1 已完成；P2 / P3.2 / P6.1 进行中（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
 > 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
 
@@ -32,11 +32,12 @@
 | P1 最小工作区、词汇和夹具 | P0 | **verified** | P1.1（见子行）+ P1.2（a8144ea、731f8b5） | 见 P1.1 / P1.2 子行 | 无 |
 | P1.1 根 workspace、@di/ai 词汇与假模型无工具答案红→绿 | P0 | **verified** | 见本单元交接（`git log -1`） | `npm install`(0)；红测 `npm test -w @di/ai`(1, ERR_MODULE_NOT_FOUND)；绿测 `npm test -w @di/ai`(0, 1 pass)；`npm run build`(0)；`npm run typecheck`(0)；`npm.cmd --prefix tui test`(0, 116 pass)；`npm.cmd --prefix tui run build`(0) | 无 |
 | P1.2 记录型假执行器与跨语言 fixtures | P1.1 | **verified** | a8144ea、731f8b5 | 红：`npm run typecheck -w @di/agent`(2, TS2305 导出缺失)；`npm test -w @di/agent`(1, fixtures ENOENT)。绿：`npm run typecheck -w @di/agent`(0)、`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 8 pass)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
-| P2 纯循环与宿主状态 | P1 | todo | – | 未执行 | 无 |
-| P3 通用模型与 DeepSeek | P1 | todo | – | 未执行 | 无 |
-| P4 八个工具与平台执行 | P1 | todo | – | 未执行 | 预研已完成（27e3e60）；工具实现未开始 |
+| P2 纯循环与宿主状态 | P1 | in_progress | –（P2.1 派发中） | 未执行 | 无 |
+| P3 通用模型与 DeepSeek | P1 | in_progress | P3.1（见子行）；P3.2 进行中 | 见 P3.1 子行 | 无 |
+| P3.1 provider chunk assembler | P1.1 | **verified** | c0eb1de | 红：`npm test -w @di/ai`(1, 缺 AssemblerError 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 27/27, 含 P1.1 回归) | 无；后续卡：SSE framing（P3.2，进行中） |
+| P4 八个工具与平台执行 | P1 | todo | – | 未执行 | 预研已完成（27e3e60）；工具实现未开始（待 P6.1 完成后派 P4.1） |
 | P5 检查点、恢复和统计 | P2, P4 | todo | – | 未执行 | 无 |
-| P6 Skills、配置、命令和日志 | P1 | todo | – | 未执行 | 无 |
+| P6 Skills、配置、命令和日志 | P1 | in_progress | P6.1 进行中 | 未执行 | 无 |
 | P7 TS 宿主 / RPC / 原 TUI | P3, P4, P5, P6 | todo | – | 未执行 | 无 |
 | P8 ChatGPT 认证 | P3, 凭据存储接口 | todo | – | 未执行 | 预研已完成（27e3e60）；ChatGPT auth 实现未开始 |
 | P9 本地 Runner、切换与完成 | P7, P8 | todo | – | 未执行 | 无 |
@@ -63,6 +64,13 @@
 - **工具词汇决策：** loop-and-state.md 为权威：`ToolObservation` 是 executor 结果（text + isError）；任务卡中的 "ToolResult" 无对应类型（`ToolResultMessage` 属 `@di/ai`），按文档落地为 `ToolObservation`；`AgentRequest` 字段按 loop-and-state.md 草图实现。
 - **依赖的 @di/ai 形状：** `AgentMessage`（含 `ToolResultMessage` 成员）、`ToolCall`（`type:"tool-call"` + id/name/arguments 原始 JSON 串）、`ToolSpec`。`StopReason` 保留在 `@di/agent`。
 - **未完成门槛：** 无。根 `package.json` 的 `test` script 仍只测 `@di/ai`（共享文件，留给集成者决定是否并入 `@di/agent`）。
+
+## P3.1 交接（c0eb1de）
+
+- **交付：** `packages/ai/src/stream-assembler.ts`（`ProviderChunk` / `ProviderBlockStart` / `ProviderStreamAssembler` / `AssemblerError`）从 `@di/ai` 公开导出；26 个测试 + P1.1 假模型回归（27/27）。provider 层 `ProviderChunk`（blockStart/textDelta/reasoningDelta/toolCallDelta/blockEnd/usage/finish + responseInfo）按 index 组装为内部消息；assembler 最终恰好产出一条 `completed`（含完整 assistant message、usage、finish reason、model、可选 cost/responseId/timestamp/durationMs）。缺终态抛 `AssemblerError missing-finish`（不伪造成功）；in-band 终态错误（finish reason=error/aborted）照常发 `completed` 携带该 reason 与已组装部分内容。其它非法序列用结构化错误码（chunk-after-finish / duplicate-block-start / delta-without-block / delta-type-mismatch / block-end-without-start / already-completed）。
+- **工具调用：** 每 index 累积原始 JSON；`ModelEvent.toolCallDelta` 携带**累计** arguments（loop-and-state.md 约定，区别于 C# 转发原始 delta）；C# 回退镜像：缺 id → `call_{index}`、缺 name → `""`、空 arguments → `"{}"`（仅终块）。
+- **依赖形状：** `ModelEvent` / `ModelResponse` 来自 P1.1 的 `stream.ts` / `model.ts`（未改动）；`ProviderChunk` 此前无预置位置（P1.1 注释明确推迟到本单元），故置于新文件，未改任何既有类型文件。
+- **未完成门槛：** 无（本卡范围）。SSE/HTTP framing、DeepSeek 翻译、usage/cost、retry/timeout 均为后续 P3 卡；字节级 UTF-8 `TextDecoder` 分片处理属 P3.2。
 
 ## 下一张任务卡（P2 第一个单元）
 
