@@ -79,10 +79,12 @@ function toAgentRequest(fixture: LoopFixture): AgentRequest {
 class ScriptedModel implements ChatModel {
   readonly requests: ModelRequest[] = [];
   private readonly responses_: readonly ModelStepJson[];
+  private readonly fallback_: ModelStepJson | undefined;
   private callIndex_ = 0;
 
   constructor(script: ModelScriptJson) {
     this.responses_ = script.responses;
+    this.fallback_ = script.fallback;
   }
 
   get callCount(): number {
@@ -91,7 +93,9 @@ class ScriptedModel implements ChatModel {
 
   stream(request: ModelRequest, _signal?: AbortSignal): AsyncIterable<ModelEvent> {
     this.requests.push(request);
-    const step = this.responses_[this.callIndex_];
+    // A fixture may script zero responses and rely on `fallback` (hard-cancel.json),
+    // which then serves every model call.
+    const step = this.responses_[this.callIndex_] ?? this.fallback_;
     this.callIndex_ += 1;
     if (step === undefined || step.failure !== null) {
       throw new Error(`ScriptedModel: no completed step for model call #${this.callIndex_}`);
@@ -1013,4 +1017,254 @@ test("a single round with multiple tools respects the iteration cap (no tools ru
   assert.equal(result.stopReason, "max_iterations");
   assert.equal(result.iterations, 1);
   assert.equal(executor.calls.length, 0, "neither tool may run on the final (capped) round");
+});
+
+// ---------------------------------------------------------------------------
+// P2.4 soft-stop and hard-cancel
+// (loop-and-state.md §"中断、取消与并发生命周期"; C# ReActInterruptTests at
+// 09f4e08 — StopRequested_AfterModelProducedToolCalls_DoesNotExecuteTools,
+// StopRequested_BeforeFirstModelCall_ReturnsInterruptedWithoutCallingModel,
+// StopRequested_AfterToolBatch_StopsBeforeNextModelCall)
+// ---------------------------------------------------------------------------
+
+test("soft-stop fixture: an interrupt request after the model returns tool calls stops before any tool runs", async () => {
+  const fixture = loadLoopFixture("soft-stop.json");
+  const model = new ScriptedModel(fixture.input.model);
+  const events: AgentEvent[] = [];
+  const executor = new RecordingExecutor(() => ({ text: "must not run", isError: false }));
+  const stopAfterTurn = fixture.input.interrupt?.softStopAfterTurn;
+  let softStopRequested = false;
+
+  const result = await runAgentLoop(toAgentRequest(fixture), {
+    model,
+    toolExecutor: executor,
+    estimateRequestTokens: () => 0,
+    events: (event) => {
+      events.push(event);
+      // The soft stop arrives right after the model produced tool calls (B1).
+      if (stopAfterTurn !== undefined && event.type === "turnCompleted" && event.iteration === stopAfterTurn) {
+        softStopRequested = true;
+      }
+    },
+    interruptRequested: () => softStopRequested,
+  });
+
+  assert.equal(result.stopReason, fixture.expected.stopReason);
+  assert.equal(result.answer, fixture.expected.answer);
+  assert.equal(result.iterations, fixture.expected.iterations);
+  assert.deepEqual(result.usage, fixture.expected.usage);
+  assert.equal(result.cost ?? null, fixture.expected.cost);
+  assert.equal(result.failure ?? null, fixture.expected.failure);
+  assert.equal(model.callCount, fixture.expected.modelRequestCount, "no further model call after the soft stop");
+  assert.deepEqual(
+    events.map((event) => event.type),
+    fixture.expected.eventSequence,
+  );
+  assert.deepEqual(executor.records(), [], "no tool may start after the soft stop");
+  assert.equal(result.trajectory.length, fixture.expected.trajectoryCount);
+  assert.deepEqual(result.trajectory, fixture.expected.trajectory);
+});
+
+test("a soft stop at loop top returns interrupted before the context guard or any model call", async () => {
+  const model = new ScriptedModel({ responses: [step("should never be reached", [])] });
+  const events: AgentEvent[] = [];
+  let estimateCalls = 0;
+  const executor = new RecordingExecutor(() => ({ text: "must not run", isError: false }));
+
+  const result = await runAgentLoop(
+    {
+      sessionId: "s1",
+      systemPrompt: "test system prompt",
+      userMessage: "hi",
+      history: [],
+      tools: [],
+      contextTokenBudget: 1000,
+    },
+    {
+      model,
+      toolExecutor: executor,
+      estimateRequestTokens: () => {
+        estimateCalls += 1;
+        return 0;
+      },
+      events: (event) => {
+        events.push(event);
+      },
+      interruptRequested: () => true,
+    },
+  );
+
+  assert.equal(result.stopReason, "interrupted");
+  assert.equal(result.answer, "", "no assistant message has been produced yet");
+  assert.equal(result.iterations, 0);
+  assert.equal(model.callCount, 0, "a loop-top soft stop must not call the model");
+  assert.equal(estimateCalls, 0, "the soft stop precedes the context guard");
+  assert.equal(executor.calls.length, 0, "no tool may run");
+  assert.deepEqual(events.map((event) => event.type), ["interrupted"]);
+  assert.deepEqual(result.trajectory, [{ role: "user", content: [{ type: "text", text: "hi" }] }]);
+});
+
+test("a soft stop requested during tool execution lets the running tool complete, then interrupts before the next model call", async () => {
+  const model = new ScriptedModel({
+    responses: [
+      step("need data", [{ id: "c1", name: "echo", arguments: "{}" }]),
+      step("should never be reached", []),
+    ],
+  });
+  const events: AgentEvent[] = [];
+  let softStopRequested = false;
+  const executor = new RecordingExecutor((call) => {
+    softStopRequested = true; // the request arrives while the tool runs (B2)
+    return { text: "tool result", isError: false };
+  });
+
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "hello", history: [], tools: [] },
+    {
+      model,
+      toolExecutor: executor,
+      estimateRequestTokens: () => 0,
+      events: (event) => {
+        events.push(event);
+      },
+      interruptRequested: () => softStopRequested,
+    },
+  );
+
+  assert.equal(result.stopReason, "interrupted");
+  assert.equal(result.answer, "need data");
+  assert.equal(result.iterations, 1);
+  assert.equal(model.callCount, 1, "the next model call must be blocked by the loop-top soft stop");
+  assert.deepEqual(executor.records(), [{ id: "c1", name: "echo", arguments: "{}", order: 1 }]);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ["turnCompleted", "toolStarted", "toolCompleted", "interrupted"],
+  );
+  assert.equal(result.trajectory.length, 3); // [user, assistant(tool-call), tool result]
+  const tool = result.trajectory[2];
+  assert.ok(tool, "expected a tool message at index 2");
+  assert.equal(tool.role, "tool");
+});
+
+test("hard-cancel fixture: an abort after the tool completes rejects with AbortError and preserves the tool observation", async () => {
+  const fixture = loadLoopFixture("hard-cancel.json");
+  const model = new ScriptedModel(fixture.input.model);
+  const events: AgentEvent[] = [];
+  const recorded: AgentMessage[] = [];
+  const checkpoint: LoopCheckpoint = {
+    appendMessage: (message) => {
+      recorded.push(message);
+    },
+    toolStarted: () => {},
+    toolCompleted: (result) => {
+      recorded.push(result);
+    },
+  };
+  const controller = new AbortController();
+  const executor = new RecordingExecutor((call) => {
+    if (fixture.input.interrupt?.cancelAfterTool === true) {
+      controller.abort();
+    }
+    return { text: "done", isError: false };
+  });
+
+  await assert.rejects(
+    runAgentLoop(
+      toAgentRequest(fixture),
+      {
+        model,
+        toolExecutor: executor,
+        estimateRequestTokens: () => 0,
+        checkpoint,
+        events: (event) => {
+          events.push(event);
+        },
+      },
+      controller.signal,
+    ),
+    (error: unknown) => (error as { name?: string }).name === "AbortError",
+  );
+
+  assert.equal(model.callCount, fixture.expected.modelRequestCount);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    fixture.expected.eventSequence,
+  );
+  assert.deepEqual(
+    executor.records(),
+    fixture.expected.toolCalls.map((call, index) => ({
+      id: call.id,
+      name: call.name,
+      arguments: call.arguments,
+      order: index + 1,
+    })),
+  );
+  // A rejection has no returned trajectory; the checkpointed messages document
+  // the observable partial state: trajectory after the leading user message.
+  const expectedTrajectory = fixture.expected.trajectory;
+  assert.ok(expectedTrajectory, "hard-cancel fixture carries an expected trajectory");
+  assert.deepEqual(recorded, expectedTrajectory.slice(1), "the completed tool observation is preserved");
+});
+
+test("an abort while the model stream is in progress rejects with AbortError", async () => {
+  const controller = new AbortController();
+  const model: ChatModel = {
+    stream(_request, signal) {
+      return (async function* (): AsyncGenerator<ModelEvent> {
+        yield { type: "textDelta", delta: "par" };
+        controller.abort();
+        signal?.throwIfAborted();
+      })();
+    },
+  };
+  const events: AgentEvent[] = [];
+
+  await assert.rejects(
+    runAgentLoop(
+      { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "hi", history: [], tools: [] },
+      {
+        model,
+        toolExecutor: new RecordingExecutor(() => ({ text: "never", isError: false })),
+        estimateRequestTokens: () => 0,
+        events: (event) => {
+          events.push(event);
+        },
+      },
+      controller.signal,
+    ),
+    (error: unknown) => (error as { name?: string }).name === "AbortError",
+  );
+
+  assert.deepEqual(events.map((event) => event.type), ["textDelta"], "abort before completed yields no turnCompleted");
+});
+
+test("an AbortError thrown by a tool propagates as a rejection, never an isError observation", async () => {
+  const model = new ScriptedModel({
+    responses: [step("will call", [{ id: "c1", name: "long", arguments: "{}" }])],
+  });
+  const events: AgentEvent[] = [];
+  const executor = new RecordingExecutor(() => {
+    throw Object.assign(new Error("canceled by host"), { name: "AbortError" });
+  });
+
+  await assert.rejects(
+    runAgentLoop(
+      { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+      {
+        model,
+        toolExecutor: executor,
+        estimateRequestTokens: () => 0,
+        events: (event) => {
+          events.push(event);
+        },
+      },
+    ),
+    (error: unknown) => (error as { name?: string }).name === "AbortError",
+  );
+
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ["turnCompleted", "toolStarted"],
+    "toolStarted fires, but an AbortError must never surface as a toolCompleted error observation",
+  );
 });
