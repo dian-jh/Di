@@ -1,11 +1,26 @@
-import type { AgentMessage, ToolSpec } from "@di/ai";
+import type {
+  AgentMessage,
+  ChatModel,
+  FinishReason,
+  LlmFailure,
+  ModelRequest,
+  TokenUsage,
+  ToolCall,
+  ToolResultMessage,
+  ToolSpec,
+  UsageCost,
+} from "@di/ai";
+import type { ToolExecutor, ToolValidator } from "./tools.ts";
 
 /**
- * @di/agent loop types (P1.2: the tool-calling vocabulary + AgentRequest).
+ * @di/agent loop types (P1.2: tool-calling vocabulary + AgentRequest; P2.1:
+ * AgentResult / AgentEvent / AgentDependencies / LoopCheckpoint / StopReason).
  *
- * The remaining loop types (AgentResult, AgentEvent, AgentDependencies,
- * LoopCheckpoint, runAgentLoop) are added in P2 per execution-plan.md. Message
- * and tool-schema vocabulary is imported from @di/ai; never redefined here.
+ * Message and tool-schema vocabulary is imported from @di/ai; never redefined
+ * here. Loop type shapes are authoritative per
+ * docs/migration/typescript-core/loop-and-state.md §"建议公开的最小 loop types".
+ * Loop events live here per that section (architecture.md's `events.ts` note is
+ * a planning location; types.ts is the documented minimum-loop-types home).
  */
 
 export interface AgentRequest {
@@ -25,4 +40,73 @@ export interface AgentRequest {
   /** Opaque provider/model value; the adapter validates support. */
   reasoningEffort?: string;
   finalOutputTool?: string;
+}
+
+/** Why a loop run stopped (from `Core/AgentLoop/AgentResult.cs` `AgentStopReason`). */
+export type StopReason =
+  | "answer"
+  | "final_output_tool"
+  | "max_iterations"
+  | "error"
+  | "interrupted"
+  | "context_limit";
+
+/** One observable event emitted by the loop (from `Core/AgentLoop/AgentLoopEvent.cs`). */
+export type AgentEvent =
+  | { readonly type: "textDelta"; readonly delta: string }
+  | { readonly type: "reasoningDelta"; readonly delta: string }
+  | { readonly type: "toolCallDelta"; readonly id: string; readonly name: string; readonly arguments: string }
+  | {
+      readonly type: "turnCompleted";
+      readonly iteration: number;
+      readonly usage: TokenUsage;
+      readonly cost?: UsageCost;
+      readonly finishReason: FinishReason;
+    }
+  | { readonly type: "toolStarted"; readonly call: ToolCall }
+  | { readonly type: "toolCompleted"; readonly call: ToolCall; readonly observation: string; readonly isError: boolean }
+  | { readonly type: "runFailed"; readonly failure: LlmFailure }
+  | { readonly type: "interrupted" };
+
+/** The loop's outcome for one run (from `Core/AgentLoop/AgentResult.cs`). */
+export interface AgentResult {
+  /** Final visible text (last assistant message; partial or empty on non-answer stops). */
+  answer: string;
+  /** Full trajectory (history + user + assistant + tool messages) — replayable state. */
+  trajectory: readonly AgentMessage[];
+  /** The caller's cross-turn history, returned untouched (session log skips it). */
+  history: readonly AgentMessage[];
+  /** Accumulated token usage across all model calls. */
+  usage: TokenUsage;
+  /** Accumulated cost across all model calls; absent when no catalog rates apply. */
+  cost?: UsageCost;
+  /** Number of model calls actually executed. */
+  iterations: number;
+  stopReason: StopReason;
+  /** Set when stopReason is "error". */
+  failure?: LlmFailure;
+}
+
+/** Durable checkpoint seam: write-ahead intent/result persistence owned by the host. */
+export interface LoopCheckpoint {
+  appendMessage(message: AgentMessage): void | Promise<void>;
+  toolStarted(call: ToolCall): void | Promise<void>;
+  toolCompleted(result: ToolResultMessage): void | Promise<void>;
+}
+
+/** Everything the loop needs injected (loop-and-state.md §"建议公开的最小 loop types"). */
+export interface AgentDependencies {
+  model: ChatModel;
+  toolExecutor: ToolExecutor;
+  /** Pure or injected estimate helper; never a Node Buffer API. */
+  estimateRequestTokens: (request: ModelRequest) => number;
+  toolValidator?: ToolValidator;
+  /** Observer only; exceptions are isolated and diagnosed (later P2 card). */
+  events?: (event: AgentEvent) => void | Promise<void>;
+  /** Ordered diagnostic side channel; its own errors are swallowed. */
+  onObserverError?: (error: unknown, event: AgentEvent) => void | Promise<void>;
+  checkpoint?: LoopCheckpoint;
+  /** Soft stop: polled at phase boundaries before a model/tool phase starts. */
+  interruptRequested?: () => boolean;
+  beforeToolExecution?: (trajectory: readonly AgentMessage[]) => void | Promise<void>;
 }

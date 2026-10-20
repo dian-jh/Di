@@ -1,21 +1,20 @@
 /**
  * @di/agent — pure ReAct loop vocabulary.
  *
- * P1 status: compilable workspace stub. The tool-calling vocabulary and
- * AgentRequest are exported here (P1.2). The loop contracts defined in
- * docs/migration/typescript-core/loop-and-state.md (AgentResult, AgentEvent,
- * AgentDependencies, LoopCheckpoint, runAgentLoop) are implemented in P2 per
- * execution-plan.md.
+ * P2.1 status: the loop-owned types (AgentResult, AgentEvent, AgentDependencies,
+ * LoopCheckpoint, StopReason) and the tool-free answer path of runAgentLoop are
+ * implemented per docs/migration/typescript-core/loop-and-state.md. Tool
+ * round-trip, iteration/budget limits, soft-stop/hard-cancel and observer-error
+ * isolation land in later P2 cards.
  */
 
-/** Why a loop run stopped (from `Core/AgentLoop/AgentResult.cs` `AgentStopReason`). */
-export type StopReason =
-  | "answer"
-  | "final_output_tool"
-  | "max_iterations"
-  | "error"
-  | "interrupted"
-  | "context_limit";
-
-export type { AgentRequest } from "./types.ts";
+export type {
+  AgentRequest,
+  AgentResult,
+  AgentEvent,
+  AgentDependencies,
+  LoopCheckpoint,
+  StopReason,
+} from "./types.ts";
 export type { ToolExecutor, ToolValidator, ToolObservation } from "./tools.ts";
+export { LoopError, runAgentLoop } from "./agent-loop.ts";
