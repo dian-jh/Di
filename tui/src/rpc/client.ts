@@ -1,9 +1,12 @@
 /**
- * 子进程 RPC 客户端：spawn `di --mode rpc`，走 NDJSON over stdin/stdout 协议。
+ * 子进程 RPC 客户端：spawn 后端（`--mode rpc`），走 NDJSON over stdin/stdout 协议。
  *
- * - 二进制解析顺序：env DI_BIN → PATH 上的 `di` → `~/.di/bin/di.exe`（win32）。
+ * - 启动器可注入：`launcher: { bin, args }` 完整描述如何 spawn（如 `process.execPath` +
+ *   编译后 TS 入口参数，绕开 Windows npm `.cmd` shim）；缺省回退到 `bin` + `args`
+ *   （二进制解析顺序：env DI_BIN → PATH 上的 `di` → `~/.di/bin/di.exe`（win32））。
  * - 等待 `ready` 握手后才允许发请求。
- * - 请求带单调递增 id；无逐请求回执，`prompt` 的"回执"是事件流 + 一个 `result`。
+ * - 请求带单调递增 id；无逐请求回执，`prompt` 的"回执"是事件流 + 一个 `result`（终态恰好一次）。
+ * - 回合进行中（busy）拒绝新 prompt，避免 result 串台。
  * - 优雅退出：发 `shutdown` 等进程退出，超时后 SIGKILL。
  */
 
@@ -46,12 +49,27 @@ export class CommandError extends Error {
 /** 可注入的 spawn 工厂（测试替换为假子进程用）。 */
 export type SpawnFn = (bin: string, args: string[]) => ChildProcess;
 
+/**
+ * TS 后端启动器：完整描述如何 spawn 后端进程（bin + args 的启动单元）。
+ * Windows 上 npm `.cmd`/`.bat` shim 不能直接当原生可执行文件 spawn，
+ * 开发期 launcher 可为 `process.execPath` + 编译后 TS 入口参数
+ * （例如 `node packages/coding-agent/dist/cli/index.js --mode rpc`）。
+ */
+export interface Launcher {
+  /** 可执行文件路径（须为原生可执行）。 */
+  bin: string;
+  /** 启动参数（例如编译后 TS 入口 + `--mode rpc`）。 */
+  args: string[];
+}
+
 export type RpcClientState = "idle" | "connecting" | "ready" | "closed";
 
 export interface RpcClientOptions {
-  /** di 可执行文件路径。 */
-  bin: string;
-  /** 附加参数，默认 ["--mode", "rpc"]。 */
+  /** 后端启动器（完整 spawn 描述）。提供时优先于 bin/args。 */
+  launcher?: Launcher;
+  /** di 可执行文件路径（launcher 未提供时的后备）。 */
+  bin?: string;
+  /** 附加参数，默认 ["--mode", "rpc"]（launcher 未提供时生效）。 */
   args?: string[];
   /** 注入 spawn 工厂（默认 Node 原生 spawn）。 */
   spawnFn?: SpawnFn;
@@ -114,6 +132,8 @@ export function resolveDiBin(env: NodeJS.ProcessEnv = process.env): string | und
 }
 
 export class RpcClient {
+  /** 生效的后端启动器（注入的 launcher，或由 bin/args 合成）。 */
+  readonly launcher: Launcher;
   readonly binary: string;
   private readonly args: string[];
   private readonly spawnFn: SpawnFn;
@@ -141,8 +161,13 @@ export class RpcClient {
 
   constructor(options: RpcClientOptions) {
     this.options = options;
-    this.binary = options.bin;
-    this.args = options.args ?? ["--mode", "rpc"];
+    const launcher = options.launcher ?? { bin: options.bin ?? "", args: options.args ?? ["--mode", "rpc"] };
+    if (!launcher.bin) {
+      throw new Error("缺少后端启动器：请提供 launcher（bin + args）或 bin");
+    }
+    this.launcher = launcher;
+    this.binary = launcher.bin;
+    this.args = launcher.args;
     this.spawnFn =
       options.spawnFn ??
       ((bin, args) => spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: this.env }));
@@ -167,7 +192,7 @@ export class RpcClient {
       throw new Error("客户端已连接，请勿重复 connect()");
     }
     this.stateValue = "connecting";
-    const child = this.spawnFn(this.binary, this.args);
+    const child = this.spawnFn(this.launcher.bin, this.launcher.args);
     this.child = child;
 
     child.stdout?.setEncoding("utf8");
@@ -200,15 +225,19 @@ export class RpcClient {
 
   /* ------------------------- 请求方法 ------------------------- */
 
-  /** 运行一回合。返回的 promise 在对应 `result` 到达时 resolve。 */
+  /**
+   * 运行一回合。返回的 promise 在对应 `result` 到达时 resolve。
+   * 协议无 result↔request 关联（docs/tui-rpc.md §1 请求串行、§2.3 result 归属当前回合），
+   * 故回合进行中（busy）拒绝新 prompt，而不是覆盖在途回合——保证每个回合终态恰好一次、不被串台。
+   */
   prompt(message: string): Promise<AgentResult> {
     if (!this.ready) {
       return Promise.reject(new Error("RPC 未就绪（尚未收到 ready）"));
     }
-    this.sendRequest("prompt", { message });
     if (this.pendingTurn) {
-      this.pendingTurn.reject(new Error("上一回合尚未终结，被新的 prompt 取代"));
+      return Promise.reject(new Error("上一回合尚未终结（busy），请等待 result 或先 interrupt"));
     }
+    this.sendRequest("prompt", { message });
     return new Promise<AgentResult>((resolve, reject) => {
       this.pendingTurn = { resolve, reject };
     });
@@ -356,11 +385,14 @@ export class RpcClient {
         this.options.onEvent?.(message.event);
         break;
       case "result":
-        this.options.onResult?.(message.result);
-        if (this.pendingTurn) {
-          this.pendingTurn.resolve(message.result);
-          this.pendingTurn = null;
+        if (!this.pendingTurn) {
+          // 终态恰好一次：无在途回合的 result 视为协议异常（如有缺陷后端重复 result），忽略并告警。
+          process.stderr.write("[rpc] 收到无主 result，忽略（终态应恰好一次）\n");
+          break;
         }
+        this.options.onResult?.(message.result);
+        this.pendingTurn.resolve(message.result);
+        this.pendingTurn = null;
         break;
       case "error":
         this.options.onError?.(message.message, message.code);
@@ -407,7 +439,7 @@ export class RpcClient {
     if (this.stateValue === "connecting") {
       const err = new Error(
         `后端进程在${closing}退出（exit=${code ?? "?"}${signal ? `, signal=${signal}` : ""}）；` +
-          `di 可能未支持 --mode rpc，或 DI_BIN 指向了错误的二进制。`,
+          `后端可能未支持 --mode rpc，或启动器 ${this.binary} 指向了错误的二进制。`,
       );
       this.readyReject?.(err);
       this.readyReject = null;
