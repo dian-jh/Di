@@ -48,3 +48,11 @@ export type {
   ProviderStreamAssemblerOptions,
 } from "./stream-assembler.ts";
 export { AssemblerError, ProviderStreamAssembler } from "./stream-assembler.ts";
+
+export type {
+  SseEvent,
+  ParseSseStreamOptions,
+  SseToModelEventsOptions,
+  TranslateEvent,
+} from "./sse.ts";
+export { SseEventParser, SseStreamError, parseSseStream, sseToModelEvents } from "./sse.ts";
