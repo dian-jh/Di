@@ -1,6 +1,6 @@
 # TypeScript Core 迁移：进度表
 
-> **状态：P0–P2.7 各单元（P2 阶段全部完成）、P3.1–P3.5（@di/ai 全部完成）、P4.1–P4.4（P4 阶段全部完成）、P5 检查点/恢复与统计、P6.1 与四项预研均已完成；P6.2 Skills 待派（推荐下一卡）（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
+> **状态：P0–P2.7 各单元（P2 阶段全部完成）、P3.1–P3.5（@di/ai 全部完成）、P4.1–P4.4（P4 阶段全部完成）、P5 检查点/恢复与统计、P6.1、P6.2a（Skills 解析/发现/同源冲突）与四项预研均已完成；P6.2b（Skills matcher/activation/披露/元数据）待派（推荐下一卡）（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
 > 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
 
@@ -53,8 +53,9 @@
 | P4.4-output-collection | P4.3, P4.1 | **verified** | dad7852（test 红）、1c82bd0（feat 绿）、progress.md 见下 | 红：`npm test -w @di/coding-agent`(1, 244 中 13 失败 = 全部 P4.4 业务断言：超长输出无截断提示 / TotalChars 未计 dropped / 合并输出缺头尾 / timeout 无 error / abort 未 reject / 树杀后子进程存活 / 启动失败未回观察文本；断言失败非路径/缺导出)。绿：`npm run build -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 244 = 225 回归 + 19 新, 243 pass + 1 win-symlink 平台跳过)、`npm run typecheck -w @di/coding-agent`(0)、根 `npm run typecheck`(0)、根 `npm test`(0, @di/agent 50/50 + @di/ai 150/150 + 244/243 pass + 1 跳过)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无；P4 阶段全部完成；后续卡：P5 检查点/恢复（依赖 P2+P4，现依赖已齐） |
 | P5 检查点、恢复和统计 | P2, P4 | **verified** | P5-checkpoint-resume（见子行） | 见 P5-checkpoint-resume 子行 | 无 |
 | P5-checkpoint-resume | P2, P4 | **verified** | f567997（test 红）、633bfa3（feat 绿）、progress.md 见下 | 红：`npm test -w @di/coding-agent`(1, 252 中 8 失败 = 全部 8 个 P5 套件：SyntaxError "The requested module '@di/coding-agent' does not provide an export named 'SessionStore'/'SessionDataError'/'nowUtcIso'" 等 P5 导出缺失，243 回归 pass)。绿：`npm run build -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 305 = 244 回归 + 61 新, 304 pass + 1 win-symlink 平台跳过)、`npm run typecheck -w @di/coding-agent`(0)、根 `npm run typecheck`(0)、根 `npm test`(0, @di/agent 50/50 + @di/ai 150/150 + 305/304 pass + 1 跳过)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无；P5 阶段全部完成；后续卡：P6.2 Skills |
-| P6 Skills、配置、命令和日志 | P1 | in_progress | P6.1（见子行）；P6.2 待派 | 见 P6.1 子行 | 无 |
+| P6 Skills、配置、命令和日志 | P1 | in_progress | P6.1（见子行）；P6.2a（见子行）；P6.2b 待派 | 见 P6.1 / P6.2a 子行 | 无 |
 | P6.1 DI_HOME 解析、分层配置合并与 JSONC | P1.1 | **verified** | f96ca98 | 红：`npm run build -w @di/coding-agent && npm test -w @di/coding-agent`(1, 缺导出；再 1, 10/26 断言失败)。绿：`npm run build -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 26/26)、`npm run typecheck -w @di/coding-agent`(0)；`@di/agent` 8/8(0)；TUI 116 pass(0) | 无；`--info` 属 P6.3；资源路径写入属 P6.2 |
+| P6.2a-skills-parse-discover | P6.1 | **verified** | b76b047（test 红）、3095122（feat 绿）、progress.md 见下 | 红：`npm test -w @di/coding-agent`(1, 308 中 3 失败 = 全部 3 个 P6.2a 套件，SyntaxError "does not provide an export named 'ancestorAgentsSkillDirectories'/'MAX_SKILL_DESCRIPTION_LENGTH'" 等导出缺失，304 回归 pass)。绿：`npm run build -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 348 = 305 回归 + 43 新, 347 pass + 1 win-symlink 平台跳过)、`npm run typecheck -w @di/coding-agent`(0)、根 `npm run typecheck`(0)、根 `npm test`(0, @di/agent 50/50 + @di/ai 150/150 + 348/347 pass + 1 跳过)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无；YAML 决策：最小 frontmatter 子集解析器（C# 基线本就是手写单行/单层解析，非 YamlDotNet）；同源同名扁平覆盖目录式（对齐 C# 测试）；后续卡：P6.2b |
 | P7 TS 宿主 / RPC / 原 TUI | P3, P4, P5, P6 | todo | – | 未执行 | 无 |
 | P8 ChatGPT 认证 | P3, 凭据存储接口 | todo | – | 未执行 | 预研已完成（27e3e60）；ChatGPT auth 实现未开始 |
 | P9 本地 Runner、切换与完成 | P7, P8 | todo | – | 未执行 | 无 |
@@ -233,14 +234,23 @@
 - **设计决策：** 1) `OpaqueBlock.type` 是 `string & {}`（存插件真实类型串），`ContentBlock` 非判别联合——用类型谓词窄化；opaque 按 `rawJson` 字段检测且最先判定，忠实 C# `SerializeCheckpointBlock` 按 CLR 类型匹配（OpaqueBlock 恒写 `{type:"opaque", unknown_type, raw_json}`）；TS 写端拒绝无法序列化块（`cannot-serialize`），不复刻 C# `{type:"unknown"}` 写/读不对称。2) 读端严格：未知 role/块/缺失错型字段 → 带行号 `SessionDataError`，绝不低级异常；`parseEnvelopeLine` 只把 `type`+`payload` 当强字段（timestamp/ordinal 缺失容错为 `""` / -1）。3) in-process 恢复对齐 C# `AgentRunner.RunAsync` catch：模型/取消错误后重载历史 + `preserveHistoryUntilReset`；unknown-outcome 置 `recoveryBlockedReason_` 后续 turn 抛 `SessionRecoveryBlockedError` 直到 `resetHistory()`。4) 统计"未知字段不伪造已知"：只有 `event_msg`+`task_complete` 计入 turns，未知记录/载荷类型不进任何已知计数。5) 恢复容错 CRLF。
 - **未完成门槛：** 无（本卡范围）。P5 阶段全部完成（P5 父行已更新）。P7 接线后必须再用真实 TS CLI 重做 crash/resume 验收（执行计划 §P5 门槛：测试宿主不能代替生产链路）；ShellSession / 持久 shell 仍为后续；下一卡：P6.2 Skills。
 
-## 下一张任务卡（P6.2 Skills）
+## P6.2a 交接（b76b047、3095122）
 
-> **推荐下一卡：P6.2 Skills（而非 P6.3/P6.4）。** 按 operator-guide P5/P6 顺序，P5 完成后进入 P6.2 Skills（P6.1 配置/JSONC 已完成；P6 尚有 P6.2–P6.4）。执行计划依赖图上 P6.2 仅依赖 P6.1（已完成），是 P6 余下单元中依赖最少、独立可验收的一个；P6.3 命令/模型选择/CLI 依赖 P6.2 的 Skills 语义（`allowed-tools` 等元数据），P6.4 日志依赖 P6.1 的资源路径——先派 P6.2 可让 P6 后半程顺次推进。
+- **交付：** `packages/coding-agent/src/core/skills/` 新增 5 文件：`skill.ts`（`Skill` 接口 + `SkillFormatError` + `MAX_SKILL_NAME_LENGTH`=64 / `MAX_SKILL_DESCRIPTION_LENGTH`=1024）、`skill-markdown.ts`（`parseSkillMarkdown(content, expectedName?)`：手写单行/单层缩进 frontmatter 解析，逐行复刻 C#）、`skill-locations.ts`（`userAgentsSkillsDirectory` / `projectAgentsSkillsDirectory` / `ancestorAgentsSkillDirectories` + 可注入 `AncestorSkillDiscoveryOptions.isRoot`）、`skill-repository.ts`（`loadSkills(sources, warn?)` / `loadSkillsFromUserAndProject`：有序多源合并，目录式先/扁平式后、同源冲突告警、坏文件跳过）、`index.ts`。`src/index.ts` 导出全部新增符号；`package.json` test script 加 `test/skills/*.test.ts`。43 个新测试（`test/skills/skill-markdown.test.ts` 23 + `skill-locations.test.ts` 5 + `skill-repository.test.ts` 15）。
+- **YAML 决策（(a) 最小 frontmatter 子集解析器，不引入 YAML 依赖）：** 关键事实——C# 基线 `Core/Skills/SkillMarkdown.cs` 从未使用 YamlDotNet：它本身就是手写单行 `key: value` / 单层缩进解析器（引号剥离、`#` 注释跳过、`metadata:` 嵌套段、`allowed-tools` 空格分隔、`disable-model-invocation` 大小写不敏感、受识别键重复拒绝）。因此行为样例"支持格式不因换 YAML 库无意变化"的正确复刻就是把同一手写逻辑逐行移植到 TS；引入 YAML 依赖（option b）反而会因库行为差异破坏格式边界，且需走 operator-guide 新依赖探针。格式边界用测试钉死：`metadata: {author: x}` 内联流式**不**解析（C# 视非空值为未知字段忽略）、引号值保留内嵌冒号、metadata 重复键保留首个、未知顶层字段忽略、license/compatibility 容忍忽略。
+- **同源冲突裁定：** 任务卡措辞 "directory-style wins over flat-style" 与固定基线冲突——C# `SkillRepositoryTests.Load_FlatFileAndDirectory_SameName_FlatWins` 与 `SkillRepository.cs` 注释"同源同名时扁平覆盖目录式"明确 **扁平式胜出**（目录先加载、扁平后加载，后加载覆盖 + 告警）。按 operator-guide 规则 4（文档冲突先核对固定基线与契约），实现对齐 C#：同源目录×扁平同名 → 扁平胜出 + `skill 名称冲突` 告警；跨源同名覆盖是设计好的优先级，不告警。
+- **红→绿：** 红为 `npm test -w @di/coding-agent` 退出 1（308 中 3 失败 = 全部 3 个 P6.2a 套件，SyntaxError "does not provide an export named 'ancestorAgentsSkillDirectories'/'MAX_SKILL_DESCRIPTION_LENGTH'" 等导出缺失，304 回归 pass；首次红用缺失导出脚手架，符合 operator-guide）。实现后绿：`npm run build -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 348 = 305 回归 + 43 新, 347 pass + 1 win-symlink 平台跳过)、`npm run typecheck -w @di/coding-agent`(0)；根 `npm run typecheck`(0)；根 `npm test`(0, @di/agent 50/50 + @di/ai 150/150 + 348/347 pass + 1 跳过)；`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0)。
+- **设计决策：** 1) `ancestorAgentsSkillDirectories` 默认根探测 `existsSync(<dir>/.git)`（文件/目录均可，镜像 C# `Directory.Exists || File.Exists`），`isRoot` 可注入使纯路径逻辑可测（"到文件系统根"用例零 fs 访问）；Windows 路径比较大小写不敏感（镜像 `OrdinalIgnoreCase`）。2) 枚举顺序确定：目录式/扁平式分组内按名称 `.sort()` 后遍历（同名冲突结果不受影响，仅稳定告警顺序；C# 依赖文件系统枚举顺序，TS 显式排序保证跨平台确定性）。3) 跳过范围对齐 C#：只吞 `SkillFormatError` + Node fs 系统错误（带 `.code`），其它错误上抛；目录/文件枚举错误不吞（镜像 C# 枚举在 try 外）。4) 扁平 `.md` 匹配 Windows 上大小写不敏感（镜像 `EnumerateFiles("*.md")`）。5) 已知细微偏差：description/instructions 空白判定用 JS `trim()`（C# .NET whitespace 与 JS 对 U+FEFF 处理略异），仅影响 BOM 单独作值等极端输入，不触及支持格式边界。
+- **未完成门槛：** 无（本卡范围）。P6.2b（匹配 / 激活 / 披露 / 元数据四单元）为后续卡；P6.2 门槛（REPL/print/JSON/RPC 激活集一致、固定激活与一次性执行都保留）待 P6.2b 完成后完整验收。
 
-- **ID：** P6.2-skills
-- **输入：** execution-plan.md §P6.2（frontmatter / 来源顺序 / 同源冲突 / 匹配 / 激活 / 披露 / 元数据 7 个单元，每单元"必须先建立的行为样例"表）；C# 基线 `Core/Skills/`（`SkillMarkdown.cs` / `SkillRepository.cs` / `SkillLocations.cs` / `SkillMatcher.cs` / `SkillActivation.cs` / `SkillContext.cs` / `SkillTools.cs`）与现有测试 `Di.Tests/Skills/`（`git show 09f4e08:` 只读）；P6.1 `DiHome` / JSONC parser。
-- **行为：** frontmatter 受识别键重复拒绝、未知字段忽略、名称与文件一致、BOM/CRLF、支持格式不因换 YAML 库无意变化；来源顺序 用户 `.agents/skills` → 用户 `.di/skills` → 项目祖先 `.agents/skills` 远到近 → 当前项目 `.di/skills`，`.git` 文件/目录均为根；同源冲突 目录式先、扁平式后、同名有警告、坏文件跳过、遍历顺序确定；匹配 ASCII 分词/停用词、中文二元组、重叠系数、阈值 0.30、最多 3 个，同分名称 Ordinal 排序；激活 pinned 在前、auto 去重且每轮重算、disable-model-invocation 不广告/自动匹配但仍接受显式调用；披露 广告与激活正文分开、正文进易变系统上下文、load_skill 附目录提示不污染持久历史；元数据 allowed-tools 目前不是已实施的权限约束，不能宣称沙盒化。
-- **红测（execution-plan.md §P6.2 行为样例表逐项）：** 先测后实现，逐项 red→green。
-- **门槛：** 相同消息在 REPL / print / JSON / RPC 激活集一致；固定激活与一次性带参数执行都保留。
-- **实现：** 目标 `packages/coding-agent/src/core/skills/`（或执行计划指定位置）；复用 P6.1 `DiHome` 定位与资源路径写入。
-- **后续卡（按 operator-guide P5/P6 顺序）：** P6.2 完成后进入 P6.3 命令、模型选择与 CLI 模式（再 P6.4 日志）。
+## 下一张任务卡（P6.2b Skills: matcher / activation / disclosure / metadata）
+
+> **推荐下一卡：P6.2b（而非 P6.3/P6.4）。** P6.2a（frontmatter / 来源顺序 / 同源冲突）已完成；P6.2b 覆盖 execution-plan §P6.2 行为样例表剩余四单元：**匹配 / 激活 / 披露 / 元数据**——本卡刻意未处理。P6.2b 仅依赖 P6.2a 的 `Skill` 模型与发现结果，是 P6 余下单元中依赖最少、独立可验收的一个；P6.3 命令/模型选择/CLI 依赖 P6.2 的 Skills 语义（`allowed-tools` 等元数据），P6.4 日志依赖 P6.1 的资源路径——先派 P6.2b 可让 P6 后半程顺次推进。
+
+- **ID：** P6.2b-skills-match-activate
+- **输入：** execution-plan.md §P6.2 行为样例表四单元；C# 基线 `Core/Skills/`（`SkillMatcher.cs` / `SkillActivation.cs` / `SkillContext.cs` / `SkillTools.cs`）与现有测试 `Di.Tests/Skills/`（`SkillMatcherTests.cs` / `SkillActivationTests.cs` / `SkillToolsTests.cs` / `SkillDesignAuditTests.cs` 相关用例，`git show 09f4e08:` 只读）；P6.2a 已提交 `packages/coding-agent/src/core/skills/`（`Skill` / `parseSkillMarkdown` / `loadSkills`）与 `AgentSession.activeSkills` / `setActiveSkills`（`buildSkillContext` 已是 turn-boundary volatile 尾部注入，不进持久历史）。
+- **行为：** 匹配 ASCII 分词/停用词、中文二元组、重叠系数、阈值 0.30、最多 3 个，同分名称 Ordinal 排序（非 locale）；激活 pinned 在前、auto 去重且每轮重算、disable-model-invocation 不广告/自动匹配但仍接受显式调用；披露 广告与激活正文分开、正文进易变系统上下文、load_skill 附目录提示不污染持久历史；元数据 allowed-tools 目前不是已实施的权限约束，不能宣称沙盒化。
+- **红测（行为样例表逐项）：** 先测后实现，逐项 red→green。
+- **门槛：** 相同消息在 REPL / print / JSON / RPC 激活集一致；固定激活与一次性带参数执行都保留（一次性执行为 P6.3 命令/CLI 依赖）。
+- **实现：** 目标 `packages/coding-agent/src/core/skills/`（`skill-matcher.ts` / `skill-activation.ts` / `skill-context.ts` / `skill-tools.ts` 等）；`ISkillMatcher` 可替换接缝（`LexicalSkillMatcher` 轻量离线确定性）；正文注入复用 `AgentSession` volatile 请求尾部（turn-boundary 读取）。
+- **后续卡（按 operator-guide P5/P6 顺序）：** P6.2b 完成后进入 P6.3 命令、模型选择与 CLI 模式（再 P6.4 日志）。
