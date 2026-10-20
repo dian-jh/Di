@@ -4,7 +4,10 @@ import type {
   ChatModel,
   ModelRequest,
   ToolSpec,
+  TokenUsage,
+  UsageCost,
 } from "@di/ai";
+import { combineCost, tokenUsageAdd, tokenUsageZero } from "@di/ai";
 import type {
   AgentDependencies,
   AgentEvent,
@@ -32,7 +35,8 @@ import {
  * live ONLY here. `runAgentLoop` (@di/agent) stays a pure loop that never
  * persists next-turn history.
  *
- * P2.6-card behavior (mirrors `Core/AgentLoop/AgentRunner.cs` `RunAsync`):
+ * P2.6-card behavior (mirrors `Core/AgentLoop/AgentRunner.cs` `RunAsync`) plus
+ * P2.7 model switching:
  * - `runTurn` is the only session-turn entry; one session serializes turns
  *   (concurrent prompt or `resetHistory` while a turn is running → busy).
  * - each turn merges the full loop trajectory into cross-turn memory, trims
@@ -42,7 +46,16 @@ import {
  * - a `context_limit` stop sets `preserveHistoryUntilReset` so the next turn does
  *   not auto-trim that paused trajectory / generate a summary;
  * - model/skills changes take effect at turn boundaries (`setModel` /
- *   `setActiveSkills` are read at turn start, never mid-stream);
+ *   `setActiveSkills` are read at turn start, never mid-stream): the model is
+ *   resolved at the start of `runTurn` (`config.resolveModel` when provided,
+ *   else the injected/current model) and captured for the whole turn — a
+ *   mid-turn `setModel` never replaces a running loop's dependency;
+ * - a model-resolution failure rejects the turn at the boundary with an explicit
+ *   `SessionModelError` (code `model-resolve-failed`) — no silent fallback, no
+ *   invented token window — and leaves committed history untouched;
+ * - the host accumulates each loop run's usage/cost into a cross-turn session
+ *   ledger (`usage` / `cost`) for L1 display and budget level; this is separate
+ *   from estimation — the budget tracker keeps feeding ESTIMATED values;
  * - a stable environment snapshot is appended as a history system message only
  *   when its text changes (never re-injecting stable prefix bytes each turn);
  * - the budget tracker feeds ESTIMATED values (never billed usage): it sees the
@@ -62,6 +75,21 @@ export class SessionBusyError extends Error {
   }
 }
 
+/**
+ * Model/provider resolution failure at the turn boundary (C#
+ * `ILlmService.ResolveModelAsync` rejection / `LlmRuntime.RequireAdapter`).
+ * Rejects the turn with an explicit error — never a silent fallback, never an
+ * invented token window — and leaves committed cross-turn history untouched.
+ */
+export class SessionModelError extends Error {
+  readonly code = "model-resolve-failed";
+
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "SessionModelError";
+  }
+}
+
 /** One active skill injected into the volatile request tail (turn-boundary read). */
 export interface ActiveSkill {
   readonly name: string;
@@ -72,6 +100,16 @@ export interface ActiveSkill {
 export interface AgentSessionConfig {
   /** Stable system prompt injected first in every model request (loop prefix). */
   readonly systemPrompt: string;
+  /**
+   * Optional turn-boundary model resolver (C# `AgentRunner._modelFactory` /
+   * `ILlmService.ResolveModelAsync`). When provided, `runTurn` awaits it at the
+   * turn boundary with the current model reference and uses the returned
+   * `ChatModel` for THAT turn. A throwing / rejecting resolver (or one returning
+   * no model) rejects the turn with `SessionModelError` — no silent fallback, no
+   * invented token window — and does not disturb committed history. When absent,
+   * the injected / `setModel`-swapped model is used directly.
+   */
+  readonly resolveModel?: (current: ChatModel) => ChatModel | Promise<ChatModel>;
   /** Model-facing tool schemas. */
   readonly tools?: readonly ToolSpec[];
   /**
@@ -131,6 +169,10 @@ export class AgentSession {
   private softStopRequested_ = false;
   private model_: ChatModel;
   private activeSkills_: readonly ActiveSkill[] = [];
+  /** Cross-turn usage ledger: each completed run's usage accumulated by the host. */
+  private usage_: TokenUsage = tokenUsageZero();
+  /** Cross-turn cost ledger; `undefined` until any turn reports cost (never fabricated as zero). */
+  private cost_: UsageCost | undefined;
 
   constructor(config: AgentSessionConfig, deps: AgentSessionDeps) {
     if (config == null) throw new TypeError("AgentSession: config is required");
@@ -159,6 +201,25 @@ export class AgentSession {
   /** The model used by the next turn (changes take effect at turn boundaries). */
   get currentModel(): ChatModel {
     return this.model_;
+  }
+
+  /**
+   * Cross-turn accumulated token usage across all completed turns (host ledger;
+   * for L1 display / budget level). Each `runAgentLoop` result's usage is
+   * accumulated here at turn end. This is distinct from the budget tracker,
+   * which keeps feeding ESTIMATED values — never treat a display value as the
+   * estimate truth.
+   */
+  get usage(): TokenUsage {
+    return this.usage_;
+  }
+
+  /**
+   * Cross-turn accumulated cost across all completed turns; `undefined` until any
+   * turn reports cost (an unknown model rate is never fabricated as zero).
+   */
+  get cost(): UsageCost | undefined {
+    return this.cost_;
   }
 
   /** Swap the model; takes effect at the next turn boundary, never mid-stream. */
@@ -222,8 +283,11 @@ export class AgentSession {
     try {
       const tokenBudget = this.config_.tokenBudget;
       const maxHistoryTurns = this.config_.maxHistoryTurns ?? 0;
-      // Turn-boundary model read: setModel takes effect only here, never mid-stream.
-      const model = this.model_;
+      // Turn-boundary model resolution: setModel takes effect only here, never
+      // mid-stream. The resolved model is captured for the whole turn, so a
+      // mid-turn setModel (e.g. while blocked on a GatedModel) can never replace
+      // a running loop's dependency.
+      const model = await this.resolveModel_();
 
       // Start-of-turn trim when the budget shrank (or this is the first turn) and
       // history is not being preserved (C# `_lastHistoryBudget is null ||
@@ -323,12 +387,45 @@ export class AgentSession {
         this.lastSnapshotText_ = undefined;
       }
       this.syncTracker_(this.history_);
+      // Cross-turn usage/cost ledger: each loop run's usage/cost is accumulated
+      // here by the host (C# accounting), for L1 display / budget level. The
+      // budget tracker is NOT updated from these values — it keeps feeding
+      // ESTIMATED values only (never treat a UI-display value as the truth).
+      this.usage_ = tokenUsageAdd(this.usage_, result.usage);
+      this.cost_ = combineCost(this.cost_, result.cost);
       return result;
     } finally {
       this.running_ = false;
       // Never carry a stale soft-stop flag or signal into the next turn.
       this.softStopRequested_ = false;
     }
+  }
+
+  /**
+   * Resolve the model for THIS turn at the turn boundary (C#
+   * `_modelFactory(CurrentModel)` / `ILlmService.ResolveModelAsync`). Without a
+   * configured resolver the injected/current model is returned; with one, the
+   * resolver is awaited with the current model reference. A throwing / rejecting
+   * resolver (or one returning no model) is surfaced as an explicit
+   * `SessionModelError` — no silent fallback, no invented token window.
+   */
+  private async resolveModel_(): Promise<ChatModel> {
+    const resolve = this.config_.resolveModel;
+    if (resolve === undefined) return this.model_;
+    let resolved: ChatModel;
+    try {
+      resolved = await resolve(this.model_);
+    } catch (error) {
+      if (error instanceof SessionModelError) throw error;
+      throw new SessionModelError(
+        "AgentSession: model resolution failed at the turn boundary (no silent fallback)",
+        { cause: error },
+      );
+    }
+    if (resolved == null) {
+      throw new SessionModelError("AgentSession: model resolver returned no model (no silent fallback)");
+    }
+    return resolved;
   }
 
   /** Whole-request estimate mirroring the loop's buildModelRequest (system + trajectory + volatile tail). */

@@ -36,7 +36,7 @@ export type { ReadFileToolOptions } from "./core/tools/read.ts";
 export type { GlobToolOptions } from "./core/tools/glob.ts";
 export type { GrepToolOptions } from "./core/tools/grep.ts";
 
-export { AgentSession, SessionBusyError } from "./core/agent-session.ts";
+export { AgentSession, SessionBusyError, SessionModelError } from "./core/agent-session.ts";
 export type {
   ActiveSkill,
   AgentSessionConfig,
