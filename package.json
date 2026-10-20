@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "build": "npm run build -w @di/ai && npm run build -w @di/agent && npm run build -w @di/coding-agent",
-    "test": "npm run build -w @di/ai && npm test -w @di/ai",
+    "test": "npm run build --workspaces --if-present && npm test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
