@@ -117,6 +117,28 @@ export {
   renderLoadedSkill,
 } from "./core/skills/skill-tools.ts";
 
+// P6.3b CLI: pure argument parsing, mode resolution, the dispatch shell and the
+// non-interactive modes (version/info/help/list-models/stats/skill-eval), plus the
+// `auth chatgpt` command resolution that fails closed on the P8b platform gate.
+export {
+  CliArgsParser,
+} from "./cli/args.ts";
+export type { CliArgs, CliArgsParseResult, CliDiagnostic } from "./cli/args.ts";
+export { AppMode, CliMode } from "./cli/mode.ts";
+export { CLI_NAME, CLI_VERSION, CliInfo, HELP_TEXT } from "./cli/cli-info.ts";
+export { LineTextReader, StringTextWriter, nullTextReader } from "./cli/io.ts";
+export type { TextReader, TextWriter } from "./cli/io.ts";
+export type { CliHost, CliHostFactory } from "./cli/cli-host.ts";
+export { defaultCliHostFactory } from "./cli/cli-host.ts";
+export { CliApp } from "./cli/cli-app.ts";
+export { AUTH_CHATGPT_NOT_AVAILABLE, AUTH_USAGE, runAuthCommand } from "./cli/auth-command.ts";
+
+// P6.3b skills: labeled case loader + matcher quality/cost metrics (--skill-eval).
+export { loadSkillCases } from "./core/skills/skill-case-loader.ts";
+export type { SkillTestCase } from "./core/skills/skill-case-loader.ts";
+export { evaluateSkillSet } from "./core/skills/skill-evaluator.ts";
+export type { SkillMetrics } from "./core/skills/skill-evaluator.ts";
+
 // P6.3a commands: builtin slash command registry, user command Markdown/loader
 // and model selection (provider/model resolution + reasoning tier).
 export {
