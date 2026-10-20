@@ -35,3 +35,20 @@ export type { CoreTool } from "./core/tools/index.ts";
 export type { ReadFileToolOptions } from "./core/tools/read.ts";
 export type { GlobToolOptions } from "./core/tools/glob.ts";
 export type { GrepToolOptions } from "./core/tools/grep.ts";
+
+export { AgentSession, SessionBusyError } from "./core/agent-session.ts";
+export type {
+  ActiveSkill,
+  AgentSessionConfig,
+  AgentSessionDeps,
+  SessionTurnOptions,
+} from "./core/agent-session.ts";
+export { InputBudgetTracker, estimateMemoryTokens, estimateTokenCount } from "./core/budget.ts";
+export {
+  dropOldestTurns,
+  sanitizeHistory,
+  trimHistoryByTokens,
+  trimHistoryByTurns,
+  userMessageCount,
+} from "./core/history.ts";
+export { buildEnvironmentSnapshot } from "./core/environment-snapshot.ts";

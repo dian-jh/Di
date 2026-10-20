@@ -1,0 +1,437 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import type {
+  AgentMessage,
+  ChatModel,
+  ContentBlock,
+  ModelEvent,
+  ModelRequest,
+  ModelResponse,
+  ToolCall,
+  ToolObservation,
+} from "@di/ai";
+import { textOfMessage } from "@di/ai";
+import type { ToolExecutor } from "@di/agent";
+import {
+  AgentSession,
+  InputBudgetTracker,
+  SessionBusyError,
+  buildEnvironmentSnapshot,
+  estimateMemoryTokens,
+  sanitizeHistory,
+  trimHistoryByTokens,
+} from "@di/coding-agent";
+
+/**
+ * P2.6 card 6: cross-turn history, environment snapshot and the budget tracker —
+ * the `AgentSession` host (docs/migration/typescript-core/loop-and-state.md
+ * §"AgentSession 历史与恢复" / §"中断、取消与并发生命周期"; C# baseline
+ * `Core/AgentLoop/AgentRunner.cs` `RunAsync` / `TrimHistoryByTokens` /
+ * `SanitizeHistory`).
+ *
+ * Every business case is red by ASSERTION (never a path / missing-export error):
+ * turn A's trajectory appears in turn B's history; whole user-turn trim keeps the
+ * most recent turn; unpaired tool calls are sanitized in persisted history while
+ * the result trajectory is NOT rewritten; a `context_limit` pause preserves the
+ * trajectory until reset; the stable snapshot is appended only when changed;
+ * concurrent prompt/reset is rejected per the busy policy; and the budget tracker
+ * sees the accumulated trajectory before tool execution plus the trimmed estimate
+ * at turn end.
+ */
+
+/** One canned model step: an assistant text and/or tool calls. */
+interface Step {
+  text: string;
+  toolCalls?: readonly { id: string; name: string; arguments: string }[];
+}
+
+/** Scripted ChatModel yielding exactly one `completed` per call; repeats the last step. */
+class FakeModel implements ChatModel {
+  readonly requests: ModelRequest[] = [];
+  private readonly steps_: readonly Step[];
+  private index_ = 0;
+
+  constructor(steps: readonly Step[]) {
+    if (steps.length === 0) throw new Error("FakeModel: at least one step required");
+    this.steps_ = steps;
+  }
+
+  get callCount(): number {
+    return this.index_;
+  }
+
+  stream(request: ModelRequest, _signal?: AbortSignal): AsyncIterable<ModelEvent> {
+    this.requests.push(request);
+    const step = this.steps_[Math.min(this.index_, this.steps_.length - 1)]!;
+    this.index_ += 1;
+    const response: ModelResponse = {
+      message: { role: "assistant", content: assistantContent(step) },
+      finishReason: (step.toolCalls?.length ?? 0) > 0 ? { type: "tool-calls" } : { type: "stop" },
+      usage: { inputTokens: 0, outputTokens: 0 },
+      model: "fake",
+      timestamp: 1_700_000_000_000,
+    };
+    return (async function* (): AsyncGenerator<ModelEvent> {
+      yield { type: "completed", response };
+    })();
+  }
+}
+
+function assistantContent(step: Step): readonly ContentBlock[] {
+  const blocks: ContentBlock[] = [{ type: "text", text: step.text }];
+  for (const call of step.toolCalls ?? []) {
+    blocks.push({ type: "tool-call", id: call.id, name: call.name, arguments: call.arguments });
+  }
+  return blocks;
+}
+
+/** Records calls, returns a canned result; optionally observes the budget tracker. */
+class FakeExecutor implements ToolExecutor {
+  readonly calls: ToolCall[] = [];
+  private readonly observer_?: () => void;
+
+  constructor(observer?: () => void) {
+    this.observer_ = observer;
+  }
+
+  execute(call: ToolCall, _signal?: AbortSignal): Promise<ToolObservation> {
+    this.calls.push(call);
+    this.observer_?.();
+    return Promise.resolve({ text: `result ${call.name}`, isError: false });
+  }
+}
+
+/** A ChatModel that blocks on a gate until the test releases it (busy tests). */
+class GatedModel implements ChatModel {
+  private release_: () => void = () => {};
+  private readonly gate_: Promise<void>;
+
+  constructor() {
+    this.gate_ = new Promise<void>((resolve) => {
+      this.release_ = resolve;
+    });
+  }
+
+  release(): void {
+    this.release_();
+  }
+
+  async *stream(_request: ModelRequest, _signal?: AbortSignal): AsyncIterable<ModelEvent> {
+    await this.gate_;
+    yield {
+      type: "completed",
+      response: {
+        message: { role: "assistant", content: [{ type: "text", text: "done" }] },
+        finishReason: { type: "stop" },
+        usage: { inputTokens: 0, outputTokens: 0 },
+        model: "fake",
+        timestamp: 1_700_000_000_000,
+      },
+    };
+  }
+}
+
+function isBusy(error: unknown): boolean {
+  return error instanceof SessionBusyError;
+}
+
+/**
+ * Assert that `promise` rejects with a matching error within `timeoutMs`.
+ * Bounded so a missing busy check fails cleanly (red) instead of hanging on the
+ * gate the first turn is blocked on.
+ */
+async function rejectsWithin(
+  promise: Promise<unknown>,
+  predicate: (error: unknown) => boolean,
+  timeoutMs: number,
+): Promise<void> {
+  let timedOut = false;
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      reject(new Error(`expected a rejection within ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  try {
+    await Promise.race([promise, timeout]);
+    throw new Error("expected the call to be rejected, but it resolved");
+  } catch (error) {
+    if (!timedOut && predicate(error)) return;
+    throw error;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-turn history
+// ---------------------------------------------------------------------------
+
+test("turn A's trajectory appears in turn B's history (cross-turn memory)", async () => {
+  const model = new FakeModel([{ text: "answer-甲" }, { text: "answer-乙" }]);
+  const session = new AgentSession(
+    { systemPrompt: "sys", tokenBudget: 10_000 },
+    { model, toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  const resultA = await session.runTurn({ userMessage: "甲" });
+  assert.equal(resultA.stopReason, "answer");
+  const resultB = await session.runTurn({ userMessage: "乙" });
+  // The history passed into turn B is turn A's full trajectory (user + assistant).
+  assert.deepEqual(
+    resultB.history.map((message) => textOfMessage(message)),
+    ["甲", "answer-甲"],
+  );
+});
+
+test("whole user-turn trim drops oldest turns and keeps the most recent turn", async () => {
+  const longAnswer = (n: number): string => "x".repeat(n); // 396 chars = 99 tokens
+  const model = new FakeModel([{ text: longAnswer(396) }, { text: longAnswer(396) }, { text: "done" }]);
+  const session = new AgentSession(
+    { systemPrompt: "sys", tokenBudget: 150 },
+    { model, toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  await session.runTurn({ userMessage: "甲" });
+  await session.runTurn({ userMessage: "乙" });
+  const third = await session.runTurn({ userMessage: "丙" });
+  const userTexts = third.history.filter((m) => m.role === "user").map((m) => textOfMessage(m));
+  assert.deepEqual(userTexts, ["乙"], "oldest whole user-turn is dropped");
+  assert.ok(
+    !third.history.some((m) => textOfMessage(m).includes("甲")),
+    "trimming is whole-turn only, never a partial cut",
+  );
+});
+
+test("no token budget and no maxHistoryTurns keeps full history (no invented limit)", async () => {
+  const model = new FakeModel([{ text: "a1" }, { text: "a2" }, { text: "a3" }]);
+  const session = new AgentSession(
+    { systemPrompt: "sys" }, // no tokenBudget, no maxHistoryTurns
+    { model, toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  await session.runTurn({ userMessage: "甲" });
+  await session.runTurn({ userMessage: "乙" });
+  const third = await session.runTurn({ userMessage: "丙" });
+  assert.deepEqual(
+    third.history.filter((m) => m.role === "user").map((m) => textOfMessage(m)),
+    ["甲", "乙"],
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Sanitize / context_limit
+// ---------------------------------------------------------------------------
+
+test("unpaired tool calls are sanitized in persisted history; the result trajectory is NOT rewritten", async () => {
+  const model = new FakeModel([
+    { text: "let me check", toolCalls: [{ id: "c1", name: "read", arguments: "{}" }] },
+    { text: "done" },
+  ]);
+  const executor = new FakeExecutor();
+  const session = new AgentSession(
+    { systemPrompt: "sys", tokenBudget: 10_000 },
+    { model, toolExecutor: executor, estimateRequestTokens: () => 1 },
+  );
+  const resultA = await session.runTurn({ userMessage: "甲", maxIterations: 1 });
+  assert.equal(resultA.stopReason, "max_iterations");
+  assert.equal(executor.calls.length, 0, "the capped turn must not execute its tool calls");
+  // The returned result trajectory is the full loop trajectory, never rewritten.
+  assert.ok(
+    resultA.trajectory.some((m) => m.role === "assistant" && m.content.some((b) => b.type === "tool-call")),
+  );
+
+  const resultB = await session.runTurn({ userMessage: "乙" });
+  // Persisted history: the orphaned tool-call assistant is gone, the user turn remains.
+  assert.ok(
+    !resultB.history.some((m) => m.role === "assistant" && m.content.some((b) => b.type === "tool-call")),
+    "the orphaned tool-call group is removed from persisted memory",
+  );
+  assert.deepEqual(
+    resultB.history.filter((m) => m.role === "user").map((m) => textOfMessage(m)),
+    ["甲"],
+  );
+});
+
+test("after context_limit the paused trajectory is preserved: the next turn does not auto-trim it", async () => {
+  const model = new FakeModel([{ text: "ok" }, { text: "never" }, { text: "never" }]);
+  const estimate = (request: ModelRequest): number => request.messages.length;
+  const session = new AgentSession(
+    { systemPrompt: "sys", tokenBudget: 2 },
+    { model, toolExecutor: new FakeExecutor(), estimateRequestTokens: estimate },
+  );
+  await session.runTurn({ userMessage: "甲" }); // 2 messages == budget -> runs
+  const paused = await session.runTurn({ userMessage: "乙" }); // 4 messages > budget -> context_limit
+  assert.equal(paused.stopReason, "context_limit");
+  assert.equal(model.callCount, 1, "no model call for the paused turn");
+  const third = await session.runTurn({ userMessage: "丙" });
+  // The full paused trajectory (both turns) is still there — no auto-trim, no summary.
+  assert.deepEqual(
+    third.history.filter((m) => m.role === "user").map((m) => textOfMessage(m)),
+    ["甲", "乙"],
+  );
+  assert.equal(model.callCount, 1, "no summary/model call is generated for the paused trajectory");
+});
+
+// ---------------------------------------------------------------------------
+// Snapshot
+// ---------------------------------------------------------------------------
+
+test("stable environment snapshot is appended as a history system message only when changed", async () => {
+  const model = new FakeModel([{ text: "一" }, { text: "二" }]);
+  const session = new AgentSession(
+    { systemPrompt: "sys", workingDirectory: "C:\\work", tokenBudget: 10_000 },
+    { model, toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  await session.runTurn({ userMessage: "甲" });
+  const second = await session.runTurn({ userMessage: "乙" });
+  const snapshot = buildEnvironmentSnapshot("C:\\work");
+  const snapshots = second.history.filter((m) => m.role === "system" && m.text === snapshot);
+  assert.equal(snapshots.length, 1, "the snapshot is appended exactly once, on change");
+});
+
+// ---------------------------------------------------------------------------
+// Busy policy
+// ---------------------------------------------------------------------------
+
+test("concurrent prompt is rejected per busy policy", async () => {
+  const model = new GatedModel();
+  const session = new AgentSession(
+    { systemPrompt: "sys", tokenBudget: 10_000 },
+    { model, toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  const first = session.runTurn({ userMessage: "甲" });
+  try {
+    await rejectsWithin(session.runTurn({ userMessage: "乙" }), isBusy, 200);
+  } finally {
+    model.release();
+  }
+  const result = await first;
+  assert.equal(result.stopReason, "answer");
+});
+
+test("resetHistory during a running turn is rejected per busy policy", async () => {
+  const model = new GatedModel();
+  const session = new AgentSession(
+    { systemPrompt: "sys", tokenBudget: 10_000 },
+    { model, toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  const first = session.runTurn({ userMessage: "甲" });
+  try {
+    assert.throws(() => session.resetHistory(), isBusy);
+  } finally {
+    model.release();
+  }
+  await first;
+});
+
+// ---------------------------------------------------------------------------
+// Budget tracker
+// ---------------------------------------------------------------------------
+
+test("budget tracker sees the accumulated trajectory before tool execution and the trimmed estimate at turn end", async () => {
+  const tracker = new InputBudgetTracker();
+  const model = new FakeModel([
+    { text: "checking", toolCalls: [{ id: "c1", name: "read", arguments: "{}" }] },
+    { text: "done" },
+  ]);
+  let preToolEstimate = -1;
+  const executor = new FakeExecutor(() => {
+    preToolEstimate = tracker.currentTokens;
+  });
+  const session = new AgentSession(
+    { systemPrompt: "sys", tokenBudget: 10_000, budgetTracker: tracker },
+    { model, toolExecutor: executor, estimateRequestTokens: () => 1 },
+  );
+  const result = await session.runTurn({ userMessage: "甲" });
+  assert.equal(result.stopReason, "answer");
+  // Before tool execution the tracker saw the accumulated trajectory so far.
+  assert.equal(preToolEstimate, estimateMemoryTokens(result.trajectory.slice(0, 2)));
+  // At turn end the tracker holds the trimmed memory estimate (estimated, not billed).
+  assert.equal(tracker.currentTokens, estimateMemoryTokens(session.history));
+});
+
+// ---------------------------------------------------------------------------
+// Turn boundary behavior
+// ---------------------------------------------------------------------------
+
+test("model change takes effect at the next turn boundary", async () => {
+  const modelA = new FakeModel([{ text: "from-A" }]);
+  const modelB = new FakeModel([{ text: "from-B" }]);
+  const session = new AgentSession(
+    { systemPrompt: "sys", tokenBudget: 10_000 },
+    { model: modelA, toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  await session.runTurn({ userMessage: "甲" });
+  session.setModel(modelB);
+  await session.runTurn({ userMessage: "乙" });
+  assert.equal(modelA.callCount, 1, "turn B ran on the swapped model");
+  assert.equal(modelB.callCount, 1);
+});
+
+test("a soft-stop request is honored and cleared at turn end (no leak into the next turn)", async () => {
+  const model = new FakeModel([{ text: "second" }]);
+  const session = new AgentSession(
+    { systemPrompt: "sys", tokenBudget: 10_000 },
+    { model, toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  session.requestSoftStop();
+  const first = await session.runTurn({ userMessage: "甲" });
+  assert.equal(first.stopReason, "interrupted");
+  assert.equal(model.callCount, 0, "the soft stop is honored before the first model call");
+  const second = await session.runTurn({ userMessage: "乙" });
+  assert.equal(second.stopReason, "answer", "the soft-stop flag must not leak into the next turn");
+  assert.equal(model.callCount, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Pure history helpers (direct contracts; C# TrimHistoryByTokens / SanitizeHistory)
+// ---------------------------------------------------------------------------
+
+test("sanitizeHistory removes an unpaired tool group (assistant + partial results) from the persisted tail", () => {
+  const messages: AgentMessage[] = [
+    { role: "user", content: [{ type: "text", text: "甲" }] },
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "checking" },
+        { type: "tool-call", id: "c1", name: "read", arguments: "{}" },
+        { type: "tool-call", id: "c2", name: "write", arguments: "{}" },
+      ],
+    },
+    { role: "tool", toolCallId: "c1", content: "partial", isError: false },
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "more" },
+        { type: "tool-call", id: "c3", name: "read", arguments: "{}" },
+      ],
+    },
+  ];
+  const cleaned = sanitizeHistory(messages);
+  assert.deepEqual(cleaned, messages.slice(0, 1));
+});
+
+test("sanitizeHistory keeps a fully paired tool round", () => {
+  const messages: AgentMessage[] = [
+    { role: "user", content: [{ type: "text", text: "甲" }] },
+    {
+      role: "assistant",
+      content: [{ type: "tool-call", id: "c1", name: "read", arguments: "{}" }],
+    },
+    { role: "tool", toolCallId: "c1", content: "ok", isError: false },
+  ];
+  assert.deepEqual(sanitizeHistory(messages), messages);
+});
+
+test("trimHistoryByTokens drops oldest whole user-turns and keeps at least the most recent one", () => {
+  const long = "x".repeat(396); // 99 tokens
+  const messages: AgentMessage[] = [
+    { role: "user", content: [{ type: "text", text: "甲" }] },
+    { role: "assistant", content: [{ type: "text", text: long }] },
+    { role: "user", content: [{ type: "text", text: "乙" }] },
+    { role: "assistant", content: [{ type: "text", text: long }] },
+  ];
+  assert.deepEqual(trimHistoryByTokens(messages, 150), messages.slice(2));
+  // A single over-budget turn is retained (keeps at least the most recent turn).
+  assert.deepEqual(trimHistoryByTokens(messages.slice(0, 2), 150), messages.slice(0, 2));
+});
