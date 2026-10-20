@@ -32,7 +32,8 @@
 | P1 最小工作区、词汇和夹具 | P0 | **verified** | P1.1（见子行）+ P1.2（a8144ea、731f8b5） | 见 P1.1 / P1.2 子行 | 无 |
 | P1.1 根 workspace、@di/ai 词汇与假模型无工具答案红→绿 | P0 | **verified** | 见本单元交接（`git log -1`） | `npm install`(0)；红测 `npm test -w @di/ai`(1, ERR_MODULE_NOT_FOUND)；绿测 `npm test -w @di/ai`(0, 1 pass)；`npm run build`(0)；`npm run typecheck`(0)；`npm.cmd --prefix tui test`(0, 116 pass)；`npm.cmd --prefix tui run build`(0) | 无 |
 | P1.2 记录型假执行器与跨语言 fixtures | P1.1 | **verified** | a8144ea、731f8b5 | 红：`npm run typecheck -w @di/agent`(2, TS2305 导出缺失)；`npm test -w @di/agent`(1, fixtures ENOENT)。绿：`npm run typecheck -w @di/agent`(0)、`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 8 pass)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
-| P2 纯循环与宿主状态 | P1 | in_progress | –（P2.1 派发中） | 未执行 | 无 |
+| P2 纯循环与宿主状态 | P1 | in_progress | P2.1（见子行） | 见 P2.1 子行 | 无 |
+| P2.1 无工具答案路径与消息良构 | P1.2 | **verified** | 见 P2.1 交接 | 红：`npm test -w @di/agent`(1, 缺 runAgentLoop 导出)、`npm run typecheck -w @di/agent`(2, TS2305)。绿：`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 18 pass)、`npm run typecheck -w @di/agent`(0)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
 | P3 通用模型与 DeepSeek | P1 | in_progress | P3.1（见子行）；P3.2 进行中 | 见 P3.1 子行 | 无 |
 | P3.1 provider chunk assembler | P1.1 | **verified** | c0eb1de | 红：`npm test -w @di/ai`(1, 缺 AssemblerError 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 27/27, 含 P1.1 回归) | 无；后续卡：SSE framing（P3.2，进行中） |
 | P4 八个工具与平台执行 | P1 | todo | – | 未执行 | 预研已完成（27e3e60）；工具实现未开始（待 P6.1 完成后派 P4.1） |
@@ -72,10 +73,19 @@
 - **依赖形状：** `ModelEvent` / `ModelResponse` 来自 P1.1 的 `stream.ts` / `model.ts`（未改动）；`ProviderChunk` 此前无预置位置（P1.1 注释明确推迟到本单元），故置于新文件，未改任何既有类型文件。
 - **未完成门槛：** 无（本卡范围）。SSE/HTTP framing、DeepSeek 翻译、usage/cost、retry/timeout 均为后续 P3 卡；字节级 UTF-8 `TextDecoder` 分片处理属 P3.2。
 
-## 下一张任务卡（P2 第一个单元）
+## P2.1 交接
 
-- **ID：** P2-loop-pure-answer
-- **输入：** `packages/agent/src/`（`types.ts`、`tools.ts`、`agent-loop.ts`）；`@di/ai` 假模型（P1.1）与记录型假执行器（P1.2）；`fixtures/` 的 `kind:"loop"` 样例。
-- **行为：** 实现 `runAgentLoop` 的纯文本答案路径（等价 C# `ReAct.RunCoreAsync` 无工具分支）：合成 trajectory、检查软停 / 预算、调用模型、append assistant、发 `turnCompleted`、无工具调用返回 `stopReason=answer`；随后按 loop-and-state.md 逐单元推进工具往返、预算 / 迭代、取消。
-- **红测：** 先写 `packages/agent/test/agent-loop.test.ts`，用假模型返回无工具答案，运行确认因缺失行为失败，再补最小实现。
-- **绿测：** `npm test -w @di/agent`（含用 recording executor 驱动的 fixture 校验）；`npm run typecheck -w @di/agent`；根 `npm run typecheck`；`npm.cmd --prefix tui test`（116 pass）与 `npm.cmd --prefix tui run build`。
+- **交付：** `packages/agent/src/types.ts` 新增 `AgentResult` / `AgentEvent` / `AgentDependencies` / `LoopCheckpoint`，`StopReason` 从 `index.ts` 移入并重导出；新建 `packages/agent/src/agent-loop.ts`（`runAgentLoop` 无工具答案路径 + `LoopError`）；`src/index.ts` 导出全部新类型与 `runAgentLoop` / `LoopError`。测试 `packages/agent/test/agent-loop.test.ts` 新增 10 条（纯答案 fixture、上下文拼装、systemContext、空 systemPrompt、history 前置且不被修改、delta 转发顺序、空文本/空工具、缺 completed 拒绝、参数越界拒绝、工具请求响亮失败），P1.2 8 条回归全绿，共 18 pass。
+- **红→绿：** 红为 `npm test -w @di/agent` 退出 1（`@di/agent` 无 `runAgentLoop` 命名导出）与 `npm run typecheck -w @di/agent` 退出 2（TS2305 缺 `AgentDependencies`/`AgentEvent`/`LoopError`/`runAgentLoop`）。实现后绿：build(0)、test(0, 18 pass)、typecheck(0)、根 typecheck(0)、TUI test(0, 116 pass)、TUI build(0)。
+- **类型决策：** 全部按 loop-and-state.md §"建议公开的最小 loop types"；`AgentEvent` 放 `types.ts`（architecture.md 的 `events.ts` 属规划位置，leaf 文档明确允许 types.ts/tools.ts）。`AgentResult.history` 原样返回调用方数组（不修改）；`cost`/`failure` 未上报时为 undefined（对照 fixture 的 null 用 `?? null` 断言）。
+- **实现决策：** trajectory = history + userMessage（不触碰调用方数组）；模型请求上下文 = 非空 systemPrompt 稳定前缀 + trajectory + 非空 systemContext 尾部 system 消息（镜像 `ReAct.BuildContext`）；单次模型调用，delta（textDelta/reasoningDelta/toolCallDelta）按序 await 转发；`completed` 取最后一次、缺 `completed` 抛 `LoopError("missing-completed")`；usage/cost 按 C# `TokenUsage.Add` / `CombineCost` 语义累加（可空字段单侧存在保留另一侧）；`checkpoint.appendMessage` 先于 `turnCompleted`；无工具调用返回 `stopReason=answer`；模型返回工具调用抛 `LoopError("tool-phase-not-implemented")`（诚实边界，不伪造答案、不静默执行工具）。事件顺序：纯答案路径事件序列为 `["turnCompleted"]`（ScriptedModel 只发 `completed`，与 fixture eventSequence 一致）；delta 转发另用流式模型单独测试。
+- **消息良构：** `maxIterations` 整数且 >= 0（0=无限）、`maxTokens` 正整数、`contextTokenBudget` 整数且 >= 0，越界在 loop 启动时抛 `RangeError`（不静默 clamp）；空 userMessage / 空 tools 正常处理不崩溃；provider 空 stream / 缺 finish 拒绝。
+- **未完成门槛：** 无（本卡范围）。工具往返（P2.2）、迭代上限 / 预算暂停、软停 / 硬取消、观察事件异常隔离、跨回合历史 / 快照、模型切换均为后续 P2 卡；`runAgentLoop` 当前对工具调用直接抛错，P2.2 落地前不可接真实工具。
+
+## 下一张任务卡（P2 第二个单元：工具往返）
+
+- **ID：** P2.2-loop-tool-round-trip
+- **输入：** 现有 `runAgentLoop`（P2.1）与 `AgentEvent.toolStarted` / `toolCompleted`、`toolCallDelta`、`ToolExecutor` / `ToolValidator`（P1.2）；`fixtures/tool-round-trip.json`（`tool-round-trip` 场景，expected eventSequence `["turnCompleted","toolStarted","toolCompleted","turnCompleted"]`、trajectory 4 条、executor 调用顺序）。
+- **行为：** 在 `runAgentLoop` 加入工具相位：模型返回 tool call 后按序校验（validator）、`beforeToolExecution`、await checkpoint intent、发 `toolStarted`、执行工具、发 `toolCompleted`（observer 故障隔离属后卡）、observation 转 `ToolResultMessage` 加入 trajectory、await checkpoint result，再回到模型相位；单轮多工具按序执行；工具异常转 isError observation 而非崩溃；`final_output_tool` / `max_iterations` 边界同卡或下卡。
+- **红测：** 以 `tool-round-trip.json` 期望断言 runAgentLoop：stopReason=answer、iterations=2、executor 记录顺序、trajectory 深度相等、eventSequence；当前 `LoopError("tool-phase-not-implemented")` 分支先红，替换为真实实现。
+- **绿测：** `npm test -w @di/agent`（P2.1 回归 + 新用例）；`npm run typecheck -w @di/agent`；根 `npm run typecheck`；`npm.cmd --prefix tui test`（116 pass）与 `npm.cmd --prefix tui run build`。
