@@ -13,6 +13,11 @@ import { CliInfo } from "./cli-info.ts";
 import { type CliHost, type CliHostFactory, defaultCliHostFactory } from "./cli-host.ts";
 import { type TextReader, type TextWriter } from "./io.ts";
 import { runAuthCommand } from "./auth-command.ts";
+import { runInteractive } from "../modes/repl.ts";
+import { runJsonMode } from "../modes/json-mode.ts";
+import { runPrintMode } from "../modes/print-mode.ts";
+import { runRpcMode } from "../modes/rpc-mode.ts";
+import type { TuiLauncherContext } from "../modes/tui-launcher.ts";
 
 /**
  * CLI dispatch shell (Pi's main.ts counterpart; C# `Di.Cli/CliApp.cs` at baseline
@@ -21,17 +26,18 @@ import { runAuthCommand } from "./auth-command.ts";
  * — so the shell is replayable in any host and testable with in-memory streams.
  *
  * Short paths (--version / --info / --help / --stats and argument errors) return
- * before any host is built. Host-requiring paths (--list-models / --skill-eval)
- * go through the injected {@link CliHostFactory}; a throwing factory becomes the
- * documented host-failure output (json mode → a single error doc on stdout,
- * text modes → stderr). The interactive / print / json / rpc BODIES are P6.3c:
- * the host is built (the seam the bodies slot into) and the mode then fails
- * closed with an honest "not yet implemented" message.
+ * before any host is built. Host-requiring paths (--list-models / --skill-eval /
+ * interactive / print / json / rpc) go through the injected {@link CliHostFactory};
+ * a throwing factory becomes the documented host-failure output (json mode → a
+ * single error doc on stdout, text modes → stderr) — the `--resume` recovery
+ * failure rides this envelope (`session_resume`). The mode BODIES (P6.3c) are
+ * dispatched from here: REPL / TUI (interactive), single JSON doc (json), text
+ * single shot (print), NDJSON (rpc).
  *
  * Output contract (docs/cli.md §3.4/§4): data → stdout, diagnostics/errors →
  * stderr, exit code 0 = success / 1 = usage or runtime error, ANSI only when
  * `stdoutTty && !noAnsi`. Internal camelCase never leaks to the wire: the
- * JSON/RPC wire shapes are produced by the P6.3c mode bodies.
+ * JSON/RPC wire shapes are produced by the mode bodies.
  */
 
 /** Fallback effective-config values mirror the C# `AgentLoopOptions` / `ModelOptions` defaults. */
@@ -40,9 +46,11 @@ const MODEL_DEFAULTS = { provider: "deepseek", defaultModel: "deepseek-flash" };
 
 export class CliApp {
   private readonly hostFactory: CliHostFactory;
+  private readonly tui?: TuiLauncherContext;
 
-  constructor(hostFactory: CliHostFactory = defaultCliHostFactory) {
+  constructor(hostFactory: CliHostFactory = defaultCliHostFactory, tui?: TuiLauncherContext) {
     this.hostFactory = hostFactory;
+    this.tui = tui;
   }
 
   /** Run one CLI invocation and return the process exit code (0 = success, 1 = usage/runtime error). */
@@ -53,6 +61,7 @@ export class CliApp {
     stderr: TextWriter,
     stdinTty: boolean,
     stdoutTty: boolean,
+    signal?: AbortSignal,
   ): Promise<number> {
     if (args[0] === "auth") return runAuthCommand(args, stdout, stderr);
 
@@ -100,8 +109,16 @@ export class CliApp {
             return await listModels(host, cliArgs.listModels ?? "", stdout, stderr);
           case AppMode.SkillEval:
             return await skillEval(host, cliArgs.skillEval, stdout, stderr);
+          case AppMode.Interactive:
+            // --resume forces simple interaction: REPL without trying the TUI, and no
+            // auto-requested model (the REPL waits for the user's first line).
+            return await runInteractive(host, stdin, stdout, stderr, stdinTty, stdoutTty, this.tui, cliArgs.resume !== undefined, signal);
+          case AppMode.Rpc:
+            return await runRpcMode(host, cliArgs, stdin, stdout, stderr, signal);
+          case AppMode.Json:
+            return await runJsonMode(host, cliArgs, stdin, stdout, stderr, signal);
           default:
-            return deferredMode(mode, stderr);
+            return await runPrintMode(host, cliArgs, stdin, stdout, stderr, stdoutTty, signal);
         }
       }
     }
@@ -235,16 +252,6 @@ async function skillEval(host: CliHost, casesPath: string | undefined, stdout: T
   stdout.writeLine(`无匹配率: ${metrics.noMatchRate.toFixed(3)}`);
   stdout.writeLine(`平均上下文 token/回合: ${metrics.averageContextTokens.toFixed(0)}`);
   return 0;
-}
-
-/**
- * Interactive / print / json / rpc mode BODY seam. Resolution already happened;
- * the bodies are P6.3c (REPL / PrintMode / JSON single-doc / RPC NDJSON + busy
- * envelope). Fail closed with an honest message so nothing silently "succeeds".
- */
-function deferredMode(mode: AppMode, stderr: TextWriter): number {
-  stderr.writeLine(`${mode} 模式尚未在 TypeScript 后端实现（P6.3c 接线）。`);
-  return 1;
 }
 
 function osName(): string {

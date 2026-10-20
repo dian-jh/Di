@@ -133,6 +133,23 @@ export { defaultCliHostFactory } from "./cli/cli-host.ts";
 export { CliApp } from "./cli/cli-app.ts";
 export { AUTH_CHATGPT_NOT_AVAILABLE, AUTH_USAGE, runAuthCommand } from "./cli/auth-command.ts";
 
+// P6.3c modes + output contracts: event bus / renderer, the interactive (REPL +
+// TUI launcher) / print / json / rpc mode bodies, the session-runner seam and the
+// host extension (command registry / AgentSession-backed runner / session store /
+// currentModel + reasoning seams).
+export { EventBus, EventConsumer } from "./core/events/event-bus.ts";
+export type { TurnRunner } from "./cli/cli-host.ts";
+export { createSessionRunner } from "./modes/turn-runner.ts";
+export { EventRenderer, drainEvents, formatUsage, renderAll, usageCostTotal } from "./modes/event-renderer.ts";
+export { errorMessage, resolvePrompt } from "./modes/common.ts";
+export { runPrintMode } from "./modes/print-mode.ts";
+export { runJsonMode } from "./modes/json-mode.ts";
+export { runRpcMode } from "./modes/rpc-mode.ts";
+export { DEFAULT_REPL_OPTIONS, Repl, runInteractive } from "./modes/repl.ts";
+export type { ReplOptions } from "./modes/repl.ts";
+export { TUI_DEFAULT_RELATIVE_ENTRY, tryLaunchTui } from "./modes/tui-launcher.ts";
+export type { TuiDecision, TuiLauncherContext } from "./modes/tui-launcher.ts";
+
 // P6.3b skills: labeled case loader + matcher quality/cost metrics (--skill-eval).
 export { loadSkillCases } from "./core/skills/skill-case-loader.ts";
 export type { SkillTestCase } from "./core/skills/skill-case-loader.ts";
