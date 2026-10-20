@@ -1,8 +1,8 @@
 # TypeScript Core 迁移：进度表
 
-> **状态：P0 已建立（本文件由 P0 提交创建）。** 只保存简短状态表与证据位置，不复制专题契约；
+> **状态：P0 与 P1.1 已完成（本文件由 P0 提交创建，P1.1 由迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
-> 预研任务未完成，不得标绿。
+> 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
 
 ## 基线快照（P0 建立时）
 
@@ -29,22 +29,23 @@
 | 任务 ID | 依赖 | 状态 | 实现提交 | 验证命令 / 退出码 | 阻塞点 |
 |---|---|---|---|---|---|
 | P0 冻结参考与行为清单 | 无 | **verified** | 本提交（创建本文件与 behavior-ledger.md；hash 见交接报告 / `git log -1`） | 见上表三行，退出码均 0 | 无 |
-| P1 最小工作区、词汇和夹具 | P0 | todo | – | 未执行 | 无 |
+| P1 最小工作区、词汇和夹具 | P0 | in_progress | P1.1 完成 / P1.2 未开始（见子行） | 见 P1.1 行 | P1.2 未执行 |
+| P1.1 根 workspace、@di/ai 词汇与假模型无工具答案红→绿 | P0 | **verified** | 见本单元交接（`git log -1`） | `npm install`(0)；红测 `npm test -w @di/ai`(1, ERR_MODULE_NOT_FOUND)；绿测 `npm test -w @di/ai`(0, 1 pass)；`npm run build`(0)；`npm run typecheck`(0)；`npm.cmd --prefix tui test`(0, 116 pass)；`npm.cmd --prefix tui run build`(0) | 无 |
+| P1.2 记录型假执行器与跨语言 fixtures | P1.1 | todo | – | 未执行 | 无 |
 | P2 纯循环与宿主状态 | P1 | todo | – | 未执行 | 无 |
 | P3 通用模型与 DeepSeek | P1 | todo | – | 未执行 | 无 |
-| P4 八个工具与平台执行 | P1 | todo | – | 未执行 | 依赖 P4-*-probe（未完成） |
+| P4 八个工具与平台执行 | P1 | todo | – | 未执行 | 预研已完成（27e3e60）；工具实现未开始 |
 | P5 检查点、恢复和统计 | P2, P4 | todo | – | 未执行 | 无 |
 | P6 Skills、配置、命令和日志 | P1 | todo | – | 未执行 | 无 |
 | P7 TS 宿主 / RPC / 原 TUI | P3, P4, P5, P6 | todo | – | 未执行 | 无 |
-| P8 ChatGPT 认证 | P3, 凭据存储接口 | todo | – | 未执行 | 依赖 P8-auth-storage-probe（未完成） |
+| P8 ChatGPT 认证 | P3, 凭据存储接口 | todo | – | 未执行 | 预研已完成（27e3e60）；ChatGPT auth 实现未开始 |
 | P9 本地 Runner、切换与完成 | P7, P8 | todo | – | 未执行 | 无 |
-| P4-regex-probe（预研） | P4 | todo | – | 未执行 | .NET→JS regex 兼容矩阵 / worker terminate 未验证 |
-| P4-win-process-probe（预研） | P4 | todo | – | 未执行 | Windows 进程树终止 / 管道清理未验证 |
-| P4-win-encoding-probe（预研） | P4 | todo | – | 未执行 | OEM code page 获取 / 解码能力未验证 |
-| P8-auth-storage-probe（预研） | P8 | todo | – | 未执行 | 跨进程 advisory lock / Windows ACL / 失败不覆盖旧凭据未验证 |
+| P4-regex-probe（预研） | P4 | **verified** | 27e3e60 | `git show 27e3e60`(0)；发现见 probes/P4-regex-probe.md | 无 |
+| P4-win-process-probe（预研） | P4 | **verified** | 27e3e60 | `git show 27e3e60`(0)；发现见 probes/P4-win-process-probe.md | 无 |
+| P4-win-encoding-probe（预研） | P4 | **verified** | 27e3e60 | `git show 27e3e60`(0)；发现见 probes/P4-win-encoding-probe.md | 无 |
+| P8-auth-storage-probe（预研） | P8 | **verified** | 27e3e60 | `git show 27e3e60`(0)；发现见 probes/P8-auth-storage-probe.md | 无 |
 
-> 预研四项按 operator-guide §"当前可执行性与预研任务" 保持 `todo`：选型结论与最终发布验收仍需独立复核。
-> `docs/migration/typescript-core/probes/` 目录不存在；若其他实施者加入预研产物，P0 提交不包含它们。
+> `docs/migration/typescript-core/probes/` 已有四份预研发现（27e3e60 提交）；P1.2 及后续阶段据此推进。
 
 ## 证据位置
 
@@ -52,12 +53,14 @@
 - 迁移契约唯一权威：`architecture.md`（模块映射）、`execution-plan.md`（阶段/门槛）、`loop-and-state.md`、`models-and-auth.md`、`tools-and-platform.md`、`sessions-and-compatibility.md`、`validation-and-release.md`。
 - 基线测试临时产物：`/tmp/di-p0-baseline`（仅 P0 隔离 DI_HOME，不含凭据）；完整命令/退出码见本文件"基线非集成测试证据"。
 - 基线源码/测试枚举：`git ls-tree -r --name-only 09f4e08 Core Common Di.Cli Di.Tests Di.Cli.Tests tui/src`（已核实）。
+- P1.1 决策（后续卡片沿用）：本机 npm `11.13.0` 不支持 `workspace:` 协议（`EUNSUPPORTEDPROTOCOL`），workspace 依赖统一使用 `"*"`——本地 workspace 版本 `0.1.0` 满足 `*`，npm 直接链接本地包（见根 `package-lock.json` 的 `packages/*` 与 `node_modules/@di/*` 符号链接）。`@di/agent`、`@di/coding-agent` 均为占位 stub（可编译、可解析），P2 起才填真实循环契约。
 
-## 下一张任务卡（P1）
+## 下一张任务卡（P1.2）
 
-- **ID：** P1-ai-vocab（示例编号，由实施者确认）
-- **输入：** 根 npm workspaces + `packages/ai`/`packages/agent`/`packages/coding-agent` manifests、`@di/ai` 最小公开类型、假模型；契约见 architecture.md §TypeScript 与包约束、execution-plan P1。
-- **红测：** 先写导入 `@di/ai` 并通过假模型返回**无工具答案**的测试，运行确认因缺失行为失败（red），再补最小实现（green）。
-- **保留：** 原 `tui/` 路径与包名、已锁定版本；根锁文件验证可重现后再处理 `tui/package-lock.json`。
-- **约束：** ESM / strict / `noUncheckedIndexedAccess` / erasable TS / `node:test`；跨包从公开 `exports` 导入；生产包编译后运行；脚本兼容 Windows（不依赖 POSIX glob）；命令实际创建后才能运行。
+- **ID：** P1-2-recording-executor-and-fixtures（示例编号，由实施者确认）
+- **输入：** 记录型假执行器（`@di/agent` 的 `ToolExecutor`/`ToolObservation` 形状）与首组跨语言合成 fixtures（纯答案 / 工具往返 / 错误 / 软停 / 硬取消 / 预算暂停 / 恢复的最小样例）；契约见 execution-plan P1 §5、loop-and-state.md §"建议公开的最小 loop types"、architecture.md 依赖方向。
+- **前置：** P1.1（本单元）已完成——根 workspace、`@di/ai` 词汇、假模型无工具答案测试已 green，TUI 116 测试不退化。
+- **红测：** 先写使用记录型假执行器的业务测试，运行确认因缺失行为失败（red），再补最小实现（green）。
+- **保留：** 原 `tui/` 路径与包名；不处理 `tui/package-lock.json`。
+- **约束：** ESM / strict / `noUncheckedIndexedAccess` / erasable TS / `node:test`；跨包从公开 `exports` 导入；生产包编译后运行；脚本兼容 Windows（不依赖 POSIX glob）。
 - **门槛：** 干净环境能安装、检查类型并通过首个真实 TS 用例；TUI 原测试（116 项）不退化。
