@@ -9,7 +9,6 @@ import type { AgentResult } from "@di/agent";
 import {
   CliApp,
   LineTextReader,
-  ModelSelection,
   nullTextReader,
   SessionStore,
   StringTextWriter,
@@ -17,8 +16,10 @@ import {
   type CliHost,
   type Skill,
   type TextWriter,
+  type TuiLauncherContext,
 } from "@di/coding-agent";
-import { FakeAdapter, FakeModelService, RecordingHost } from "../commands/test-doubles.ts";
+import { FakeAdapter, FakeModelService } from "../commands/test-doubles.ts";
+import { buildHost, FakeRunner } from "../modes/test-host.ts";
 
 /**
  * P6.3b card — CliApp dispatch shell (port of the in-scope half of C#
@@ -33,20 +34,17 @@ import { FakeAdapter, FakeModelService, RecordingHost } from "../commands/test-d
 
 const TTY = true;
 
-function setup(host: CliHost | null = null) {
+function setup(host: CliHost | null = null, tui?: TuiLauncherContext) {
   const stdout = new StringTextWriter();
   const stderr = new StringTextWriter();
   const factory = new HostFactory(host);
-  const app = new CliApp(factory.create);
+  const app = new CliApp(factory.create, tui);
   return { app, stdout, stderr, factory };
 }
 
-/** Fake host: a ModelSelection over a fake model service + a skills list. */
+/** Fake host: a full P6.3c CliHost (models over a fake service + skills + runner + bus + registry). */
 function makeHost(models: FakeModelService, skills: readonly Skill[]): CliHost {
-  return {
-    models: new ModelSelection(models, new RecordingHost()),
-    skills,
-  };
+  return buildHost({ service: models, skills }).host;
 }
 
 function deepseekModels() {
@@ -307,51 +305,118 @@ test("HostFactoryFailure_ErrorToStderrInTextMode", async () => {
   assert.equal(factory.calls, 1);
 });
 
-// ---- deferred interactive/print/json/rpc bodies: fail closed with a clear seam ----
+// ---- interactive / resume / rpc dispatch (P6.3c real mode bodies) ----
 
-test("DeferredMode_Interactive_BuildsHost_ReportsNotYetImplemented", async () => {
-  const service = new FakeModelService();
-  const { app, stdout, stderr, factory } = setup(makeHost(service, []));
+/** TUI context that forces the C# REPL fallback (interactive tests don't touch real env / fs / processes). */
+const ReplOnly: TuiLauncherContext = { getEnv: () => "repl" };
 
-  const code = await app.runAsync(["--mode", "interactive"], new LineTextReader(["你好", "/exit"]), stdout, stderr, TTY, TTY);
+test("Resume_UsesReplWithoutTryingTui", async () => {
+  let spawnCalls = 0;
+  const tui: TuiLauncherContext = {
+    getEnv: () => "",
+    resolveEntry: () => "fake-entry.js",
+    nodeAvailable: () => true,
+    spawn: () => {
+      spawnCalls += 1;
+      return 0;
+    },
+  };
+  const { host } = buildHost();
+  const { app, stdout, stderr, factory } = setup(host, tui);
 
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("interactive"));
-  assert.ok(stderr.text().includes("P6.3c"));
-  assert.equal(factory.calls, 1); // host is built first (the P6.3c body slots in here)
-});
+  const code = await app.runAsync(["--resume", "checkpoint.jsonl"], nullTextReader, stdout, stderr, TTY, TTY);
 
-test("DeferredMode_Json_BuildsHost_ReportsNotYetImplemented", async () => {
-  const service = new FakeModelService();
-  const { app, stdout, stderr, factory } = setup(makeHost(service, []));
-
-  const code = await app.runAsync(["--mode", "json", "prompt"], nullTextReader, stdout, stderr, TTY, TTY);
-
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("json"));
-  assert.ok(stderr.text().includes("P6.3c"));
+  assert.equal(code, 0);
+  assert.equal(spawnCalls, 0); // --resume 强制简单交互（REPL），不尝试 TUI、不自动请求模型
   assert.equal(factory.calls, 1);
 });
 
-test("DeferredMode_Print_BuildsHost_ReportsNotYetImplemented", async () => {
-  const service = new FakeModelService();
-  const { app, stdout, stderr, factory } = setup(makeHost(service, []));
+test("ResumeHostFailure_UsesJsonErrorEnvelopeInJsonMode", async () => {
+  const { app, stdout, stderr, factory } = setup(); // no host: factory throws
 
-  const code = await app.runAsync(["--mode", "print", "prompt"], nullTextReader, stdout, stderr, TTY, TTY);
+  const code = await app.runAsync(["--mode", "json", "--resume", "broken.jsonl"], nullTextReader, stdout, stderr, TTY, TTY);
 
   assert.equal(code, 1);
-  assert.ok(stderr.text().includes("print"));
+  assert.ok(stdout.text().includes('"error"'));
+  assert.ok(stdout.text().includes("session_resume"));
+  assert.equal(stderr.text(), "");
   assert.equal(factory.calls, 1);
 });
 
-test("DeferredMode_Rpc_BuildsHost_ReportsNotYetImplemented", async () => {
-  const service = new FakeModelService();
-  const { app, stdout, stderr, factory } = setup(makeHost(service, []));
+test("RpcMode_BuildsHost_EmitsReady_ExitsZero", async () => {
+  const { host } = buildHost();
+  const { app, stdout, stderr, factory } = setup(host);
+  const stdin = new LineTextReader(['{"type":"request","id":1,"method":"shutdown","params":{}}']);
 
-  const code = await app.runAsync(["--mode", "rpc"], new LineTextReader(['{"type":"request","id":1,"method":"shutdown","params":{}}']), stdout, stderr, TTY, TTY);
+  const code = await app.runAsync(["--mode", "rpc"], stdin, stdout, stderr, TTY, TTY);
 
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("rpc"));
+  assert.equal(code, 0);
+  assert.ok(stdout.text().includes('"type":"ready"'));
+  assert.equal(stderr.text(), "");
+  assert.equal(factory.calls, 1); // rpc 路径构建宿主
+});
+
+test("Json_Prompt_EmitsSingleDoc_ExitsZero", async () => {
+  const { host } = buildHost();
+  const { app, stdout, stderr, factory } = setup(host);
+
+  const code = await app.runAsync(["--mode", "json", "分析"], nullTextReader, stdout, stderr, TTY, TTY);
+
+  assert.equal(code, 0);
+  const doc = JSON.parse(stdout.text());
+  assert.equal(doc.stop_reason, "answer");
+  assert.equal(stderr.text(), "");
+  assert.equal(factory.calls, 1);
+});
+
+test("Interactive_ReadsStdin_RunsAgentTurn", async () => {
+  const { host, runner } = buildHost();
+  const { app, stdout, stderr, factory } = setup(host, ReplOnly);
+  const stdin = new LineTextReader(["你好", "/exit"]);
+
+  const code = await app.runAsync([], stdin, stdout, stderr, TTY, TTY);
+
+  assert.equal(code, 0);
+  assert.deepEqual((runner as FakeRunner).messages, ["你好"]);
+  assert.ok(stdout.text().includes("di>"));
+  assert.ok(stdout.text().includes("回答: 你好"));
+  assert.equal(factory.calls, 1);
+});
+
+test("Interactive_StdinEof_ExitsZero_WithoutRunningTurn", async () => {
+  const { host, runner } = buildHost();
+  const { app, stdout, factory } = setup(host, ReplOnly);
+
+  const code = await app.runAsync([], nullTextReader, stdout, new StringTextWriter(), TTY, TTY);
+
+  assert.equal(code, 0);
+  assert.deepEqual((runner as FakeRunner).messages, []);
+  assert.ok(stdout.text().includes("di>"));
+});
+
+test("Interactive_WithTuiEligible_LaunchesTui_SkipsRepl", async () => {
+  // M4：交互默认交 TS TUI。TTY + 入口可解析 + node 可用 + spawn 返回 0 → 返回 TUI 退出码，
+  // Repl 完全不跑（无 "di>" 提示、无回合消费 stdin）。
+  let spawnCalls = 0;
+  const tui: TuiLauncherContext = {
+    getEnv: () => undefined,
+    resolveEntry: () => "fake-entry.js",
+    nodeAvailable: () => true,
+    spawn: () => {
+      spawnCalls += 1;
+      return 0;
+    },
+  };
+  const { host, runner } = buildHost();
+  const { app, stdout, stderr, factory } = setup(host, tui);
+  const stdin = new LineTextReader(["你好", "/exit"]);
+
+  const code = await app.runAsync([], stdin, stdout, stderr, TTY, TTY);
+
+  assert.equal(code, 0);
+  assert.deepEqual((runner as FakeRunner).messages, []); // Repl 未运行，无回合
+  assert.ok(!stdout.text().includes("di>"));
+  assert.equal(spawnCalls, 1);
   assert.equal(factory.calls, 1);
 });
 
