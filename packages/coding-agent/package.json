@@ -1,0 +1,31 @@
+{
+  "name": "@di/coding-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Di Node host composition root (TypeScript Core migration; compilable stub until later phases)",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@di/ai": "*",
+    "@di/agent": "*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/node": "22.20.5"
+  }
+}

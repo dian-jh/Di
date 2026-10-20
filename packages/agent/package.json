@@ -1,0 +1,29 @@
+{
+  "name": "@di/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Di pure ReAct loop vocabulary (TypeScript Core migration; compilable stub until P2)",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@di/ai": "*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

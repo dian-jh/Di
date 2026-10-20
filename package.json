@@ -1,0 +1,22 @@
+{
+  "name": "di-typescript-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Di TypeScript Core migration workspace (root)",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @di/ai && npm run build -w @di/agent && npm run build -w @di/coding-agent",
+    "test": "npm run build -w @di/ai && npm test -w @di/ai",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/node": "22.20.5"
+  }
+}

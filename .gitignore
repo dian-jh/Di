@@ -217,3 +217,13 @@ venv/
 tui/node_modules/
 tui/dist/
 
+# ---------------------------------------------------------------
+#  TypeScript Core 迁移 workspace（packages/*）
+#  注意：上方 NuGet 规则 `**/[Pp]ackages/*` 会误伤本目录，这里逐层撤销。
+# ---------------------------------------------------------------
+!packages/
+!packages/ai/
+!packages/agent/
+!packages/coding-agent/
+packages/*/dist/
+

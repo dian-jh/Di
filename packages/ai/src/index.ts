@@ -1,0 +1,43 @@
+/**
+ * @di/ai — public entry.
+ *
+ * Provider-neutral message/model vocabulary. Cross-package consumers must import
+ * only these public exports (never `../src`). The ownership table in
+ * docs/migration/typescript-core/architecture.md is authoritative.
+ */
+
+export type {
+  TextBlock,
+  ReasoningBlock,
+  ImageBlock,
+  FileBlock,
+  ToolCall,
+  ToolResultBlock,
+  OpaqueBlock,
+  ContentBlock,
+} from "./types/content.ts";
+export { isTextBlock } from "./types/content.ts";
+
+export type {
+  SystemMessage,
+  UserMessage,
+  AssistantMessage,
+  ToolResultMessage,
+  AgentMessage,
+} from "./types/messages.ts";
+export { textOfMessage } from "./types/messages.ts";
+
+export type { ToolSpec } from "./types/tools.ts";
+
+export type { ModelEvent } from "./types/stream.ts";
+
+export type {
+  TokenUsage,
+  UsageCost,
+  LlmFailure,
+  FinishReason,
+  ModelRef,
+  ModelRequest,
+  ModelResponse,
+  ChatModel,
+} from "./types/model.ts";
