@@ -77,6 +77,17 @@ export interface ProcessRunOptions {
   readonly oemCodePage?: number;
   /** Process-diagnostic knobs (heartbeat cadence / slow-success threshold); undefined = C# defaults. */
   readonly diagnostics?: ProcessDiagnosticsOptions;
+  /**
+   * Run the command through the platform default shell (`shell: true`). When
+   * true, `[file, ...args].join(" ")` is passed as ONE command-line string to
+   * `spawn(..., { shell: true })` — Node on Windows wraps it as
+   * `comspec /d /s /c "<line>"` (equivalent to C# `ProcessRunner`'s
+   * `rawArguments` for cmd, so embedded quotes are preserved verbatim and
+   * `&` / redirection / `%CD%` work), on POSIX as `/bin/sh -c <line>` (one arg,
+   * equivalent to C# `ShellCommand.Default` args array). Default false: all
+   * existing behavior is unchanged (args-array spawn, no shell quoting).
+   */
+  readonly shell?: boolean;
 }
 
 /** One process execution result, rendered as the tool observation text. */
@@ -112,6 +123,7 @@ export async function runProcess(
     killBudgetMs = PROCESS_KILL_BUDGET_MS,
     oemCodePage,
     diagnostics,
+    shell = false,
   } = options;
   const heartbeatIntervalMs = diagnostics?.heartbeatIntervalMs ?? 5000;
   const heartbeatTickMs = diagnostics?.heartbeatTickMs ?? 1000;
@@ -154,18 +166,35 @@ export async function runProcess(
     if (externalSignal !== undefined) externalSignal.removeEventListener("abort", onExternalAbort);
   };
 
-  // ---- spawn (args array, never a shell string: no shell-quoting injection) ----
+  // ---- spawn ----
+  // Default: args array, never a shell string (no shell-quoting injection).
+  // `shell: true` (bash tool, platform default shell): the joined line is passed
+  // to spawn with shell:true so Node itself constructs `comspec /d /s /c "<line>"`
+  // on Windows (= C# `rawArguments`, embedded quotes preserved, `&`/redirection/
+  // `%CD%` work) and `/bin/sh -c <line>` on POSIX (one arg, = C# args array). All
+  // lifecycle semantics (tree kill, bounded drain, timeout/cancel, startup
+  // failure) are identical either way — no separate spawn path bypasses it.
   let child: ChildProcess;
   try {
-    child = spawn(file, args, {
-      cwd,
-      env: mergeEnv(env),
-      stdio: stdio ?? ["ignore", "pipe", "pipe"],
-      shell: false,
-      windowsHide: true,
-      // POSIX only: a new process group so the whole tree can be signaled.
-      detached: process.platform !== "win32",
-    });
+    child = shell
+      ? spawn([file, ...args].join(" "), {
+          cwd,
+          env: mergeEnv(env),
+          stdio: stdio ?? ["ignore", "pipe", "pipe"],
+          shell: true,
+          windowsHide: true,
+          // POSIX only: a new process group so the whole tree can be signaled.
+          detached: process.platform !== "win32",
+        })
+      : spawn(file, args, {
+          cwd,
+          env: mergeEnv(env),
+          stdio: stdio ?? ["ignore", "pipe", "pipe"],
+          shell: false,
+          windowsHide: true,
+          // POSIX only: a new process group so the whole tree can be signaled.
+          detached: process.platform !== "win32",
+        });
   } catch (error) {
     diagnose(`proc: start_failed name=${programName} error=${truncateField(messageOf(error))}`);
     cleanup();

@@ -31,10 +31,17 @@ export {
   GREP_MAX_MATCH_LINE_CHARS,
   GREP_REGEX_TIMEOUT_MS,
 } from "./core/tools/grep.ts";
+export {
+  createBashTool,
+  BASH_DEFAULT_TIMEOUT_SECONDS,
+  BASH_MAX_TIMEOUT_SECONDS,
+  PLATFORM_SHELL_NAME,
+} from "./core/tools/bash.ts";
 export type { CoreTool } from "./core/tools/index.ts";
 export type { ReadFileToolOptions } from "./core/tools/read.ts";
 export type { GlobToolOptions } from "./core/tools/glob.ts";
 export type { GrepToolOptions } from "./core/tools/grep.ts";
+export type { BashToolOptions } from "./core/tools/bash.ts";
 export {
   BoundedByteBuffer,
   OutputBuffer,

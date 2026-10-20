@@ -22,7 +22,7 @@ import { ancestorAgentsSkillDirectories, userAgentsSkillsDirectory } from "../co
 import { loadSkills } from "../core/skills/skill-repository.ts";
 import { createSkillAwareExecutor, LOAD_SKILL_TOOL } from "../core/skills/skill-tools.ts";
 import type { Skill } from "../core/skills/skill.ts";
-import { createFileTools, createToolExecutor } from "../core/tools/index.ts";
+import { createBashTool, createFileTools, createToolExecutor } from "../core/tools/index.ts";
 import { createGlobTool } from "../core/tools/glob.ts";
 import { createGrepTool } from "../core/tools/grep.ts";
 import type { CoreTool } from "../core/tools/types.ts";
@@ -152,8 +152,15 @@ export async function createCliHost(
   const effectiveProvider = !isBlank(args.provider) ? args.provider! : configuredProvider;
   const defaultModel = args.model ?? configuredDefaultModel;
 
-  // Tools: the P4.x set (file/glob/grep) over the workspace.
-  const tools = options.tools ?? [...createFileTools(workspace), createGlobTool(workspace), createGrepTool(workspace)];
+  // Tools: the P4.x set in canonical order read/write/edit/glob/grep/bash over
+  // the workspace (C# `CoreTools` canonical order first slice; the one-shot
+  // shell tool lands here so the "运行命令与代码" instruction is honest).
+  const tools = options.tools ?? [
+    ...createFileTools(workspace),
+    createGlobTool(workspace),
+    createGrepTool(workspace),
+    createBashTool(workspace),
+  ];
   const toolSpecs = tools.map((tool) => tool.spec);
 
   // Skills: standard locations in priority order (C# `CliHost.Create`): user
