@@ -86,3 +86,20 @@ export {
   userMessageCount,
 } from "./core/history.ts";
 export { buildEnvironmentSnapshot } from "./core/environment-snapshot.ts";
+
+// P6.2a skills: SKILL.md frontmatter parsing, repository discovery and
+// same-source conflict resolution.
+export {
+  MAX_SKILL_DESCRIPTION_LENGTH,
+  MAX_SKILL_NAME_LENGTH,
+  SkillFormatError,
+} from "./core/skills/skill.ts";
+export type { Skill } from "./core/skills/skill.ts";
+export { parseSkillMarkdown } from "./core/skills/skill-markdown.ts";
+export {
+  ancestorAgentsSkillDirectories,
+  projectAgentsSkillsDirectory,
+  userAgentsSkillsDirectory,
+} from "./core/skills/skill-locations.ts";
+export type { AncestorSkillDiscoveryOptions } from "./core/skills/skill-locations.ts";
+export { loadSkills, loadSkillsFromUserAndProject } from "./core/skills/skill-repository.ts";
