@@ -138,6 +138,15 @@ export { AUTH_CHATGPT_NOT_AVAILABLE, AUTH_USAGE, runAuthCommand } from "./cli/au
 // host extension (command registry / AgentSession-backed runner / session store /
 // currentModel + reasoning seams).
 export { EventBus, EventConsumer } from "./core/events/event-bus.ts";
+export type { EventHandler } from "./core/events/event-bus.ts";
+export type { LogEvent, ModelCallStartedEvent, RunStartedEvent } from "./core/events/log-events.ts";
+
+// P6.4 run logging: per-day lifecycle log (DiLog + DiLogOptions + LogLevel) and
+// the ProcessDiagnostics static hook (default no-op; host wires it to DiLog).
+export { DiLog, LogLevel, redactSensitive } from "./core/logging/di-log.ts";
+export type { DiLogOptions } from "./core/logging/di-log.ts";
+export { ProcessDiagnostics } from "./core/logging/process-diagnostics.ts";
+export type { ProcessDiagnosticSink } from "./core/logging/process-diagnostics.ts";
 export type { TurnRunner } from "./cli/cli-host.ts";
 export { createSessionRunner } from "./modes/turn-runner.ts";
 export { EventRenderer, drainEvents, formatUsage, renderAll, usageCostTotal } from "./modes/event-renderer.ts";
