@@ -53,13 +53,30 @@ export {
 } from "./core/tools/process-runner.ts";
 export type { ProcessRunOptions } from "./core/tools/process-runner.ts";
 
-export { AgentSession, SessionBusyError, SessionModelError } from "./core/agent-session.ts";
+export { AgentSession, SessionBusyError, SessionModelError, SessionRecoveryBlockedError } from "./core/agent-session.ts";
 export type {
   ActiveSkill,
   AgentSessionConfig,
   AgentSessionDeps,
   SessionTurnOptions,
 } from "./core/agent-session.ts";
+
+// P5 sessions: JSONL checkpoint codec / writer / recovery / stats.
+export { SessionDataError } from "./core/sessions/errors.ts";
+export type { SessionErrorCode } from "./core/sessions/errors.ts";
+export {
+  nowUtcIso,
+  parseCheckpointBlock,
+  parseCheckpointMessage,
+  serializeCheckpointBlock,
+  serializeCheckpointMessage,
+  serializeEnvelope,
+} from "./core/sessions/codec.ts";
+export { SessionStore } from "./core/sessions/session-log.ts";
+export type { CheckpointTurnCompletion, SessionLogOptions } from "./core/sessions/session-log.ts";
+export { loadRecovery, RECOVERY_NOT_EXECUTED_NOTE } from "./core/sessions/session-recovery.ts";
+export { aggregateSessionStats } from "./core/sessions/session-stats.ts";
+export type { SessionStatsSummary } from "./core/sessions/session-stats.ts";
 export { InputBudgetTracker, estimateMemoryTokens, estimateTokenCount } from "./core/budget.ts";
 export {
   dropOldestTurns,

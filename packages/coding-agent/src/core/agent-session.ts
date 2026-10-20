@@ -27,6 +27,9 @@ import {
   trimHistoryByTurns,
   userMessageCount,
 } from "./history.ts";
+import type { SessionStore } from "./sessions/session-log.ts";
+import { loadRecovery } from "./sessions/session-recovery.ts";
+import { SessionDataError } from "./sessions/errors.ts";
 
 /**
  * AgentSession — the Node host that owns cross-turn state (loop-and-state.md
@@ -72,6 +75,21 @@ export class SessionBusyError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "SessionBusyError";
+  }
+}
+
+/**
+ * The session is blocked from further turns because a started tool outcome is
+ * unknown (C# `AgentRunner._recoveryBlockedReason`). Replay is forbidden: the
+ * caller must inspect the side effects and call `resetHistory()` (or start a new
+ * session) before the same host may continue.
+ */
+export class SessionRecoveryBlockedError extends Error {
+  readonly code = "recovery-blocked";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "SessionRecoveryBlockedError";
   }
 }
 
@@ -124,6 +142,16 @@ export interface AgentSessionConfig {
   /** Optional shared tracker the host reads for L1 predictions; the session feeds ESTIMATED values only. */
   readonly budgetTracker?: InputBudgetTracker;
   readonly checkpoint?: LoopCheckpoint;
+  /**
+   * Durable session store (P5): owns the JSONL checkpoint writes (`beginCheckpointTurn`
+   * before each loop run, the loop's durable `LoopCheckpoint` seam, `completeCheckpointTurn`
+   * at turn end) and the same-process recovery on a model/cancellation error — the host
+   * reloads the durable checkpoint into memory and continues without re-executing tools;
+   * a started-but-unfinished outcome blocks further turns until `resetHistory`. When set,
+   * it takes precedence over `checkpoint` for the loop seam. Absent = no session log
+   * (`--no-session`).
+   */
+  readonly sessionStore?: SessionStore;
   readonly events?: (event: AgentEvent) => void | Promise<void>;
   readonly onObserverError?: (error: unknown, event: AgentEvent) => void | Promise<void>;
   readonly toolValidator?: ToolValidator;
@@ -163,6 +191,8 @@ export class AgentSession {
   private readonly sessionId_ = `session-${randomUUID()}`;
   private history_: AgentMessage[] = [];
   private preserveHistoryUntilReset_ = false;
+  /** C# `AgentRunner._recoveryBlockedReason`: set when a started tool outcome is unknown. */
+  private recoveryBlockedReason_: string | undefined;
   private lastHistoryBudget_: number | undefined;
   private lastSnapshotText_: string | undefined;
   private running_ = false;
@@ -255,9 +285,33 @@ export class AgentSession {
     }
     this.history_ = [];
     this.preserveHistoryUntilReset_ = false;
+    this.recoveryBlockedReason_ = undefined;
     this.lastHistoryBudget_ = undefined;
     this.lastSnapshotText_ = undefined;
     this.config_.budgetTracker?.update(0);
+  }
+
+  /**
+   * Restore a validated session trajectory before the next explicit user turn
+   * (C# `AgentRunner.RestoreHistory`; the `--resume` entry). The restored history
+   * is treated as a paused trajectory (`preserveHistoryUntilReset`), so the next
+   * turn does not auto-trim it; a `context_limit` pause preserves the restored
+   * task and its tool results until a larger budget continues.
+   */
+  restoreHistory(history: readonly AgentMessage[]): void {
+    this.history_ = [...history];
+    this.preserveHistoryUntilReset_ = true;
+    this.recoveryBlockedReason_ = undefined;
+    this.lastHistoryBudget_ = undefined;
+    let snapshot: string | undefined;
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      const message = history[i];
+      if (message?.role === "system") {
+        snapshot = message.text;
+        break;
+      }
+    }
+    this.lastSnapshotText_ = snapshot;
   }
 
   /**
@@ -276,6 +330,11 @@ export class AgentSession {
    *    sanitize the tail — the returned result trajectory is never rewritten.
    */
   async runTurn(options: SessionTurnOptions): Promise<AgentResult> {
+    if (this.recoveryBlockedReason_ !== undefined) {
+      throw new SessionRecoveryBlockedError(
+        "会话恢复检测到工具执行结果未知。请先核查副作用并调用 ResetHistory() 或启动新会话。" + this.recoveryBlockedReason_,
+      );
+    }
     if (this.running_) {
       throw new SessionBusyError("AgentSession: a turn is already running; concurrent prompt rejected (busy policy)");
     }
@@ -347,6 +406,9 @@ export class AgentSession {
         ...(systemContext !== undefined ? { systemContext } : {}),
       };
 
+      const sessionStore = this.config_.sessionStore;
+      const checkpoint = sessionStore ?? this.config_.checkpoint;
+
       const dependencies: AgentDependencies = {
         model,
         toolExecutor: this.deps_.toolExecutor,
@@ -355,11 +417,41 @@ export class AgentSession {
         interruptRequested: () => this.softStopRequested_,
         ...(this.config_.events !== undefined ? { events: this.config_.events } : {}),
         ...(this.config_.onObserverError !== undefined ? { onObserverError: this.config_.onObserverError } : {}),
-        ...(this.config_.checkpoint !== undefined ? { checkpoint: this.config_.checkpoint } : {}),
+        ...(checkpoint !== undefined ? { checkpoint } : {}),
         ...(this.config_.toolValidator !== undefined ? { toolValidator: this.config_.toolValidator } : {}),
       };
 
-      const result = await runAgentLoop(request, dependencies, options.signal);
+      // Durable turn-start checkpoint (C# `CheckpointLog?.BeginCheckpointTurn`):
+      // a snapshot of the current history + the user message is durable before
+      // any model work. A failed write aborts the turn before any side effect.
+      if (sessionStore !== undefined) {
+        sessionStore.beginCheckpointTurn(options.userMessage, Date.now(), this.history_);
+      }
+
+      let result: AgentResult;
+      try {
+        result = await runAgentLoop(request, dependencies, options.signal);
+      } catch (error) {
+        // Same-process recovery (C# `RunAsync` catch): refresh the in-memory
+        // history from the durable checkpoint so the SAME host can continue
+        // without re-executing tools. A started-but-unfinished outcome blocks
+        // further turns (fail closed) until an explicit reset.
+        if (sessionStore !== undefined) {
+          try {
+            const recovered = loadRecovery(sessionStore.logFilePath);
+            this.history_ = [...recovered];
+            this.preserveHistoryUntilReset_ = true;
+            this.recoveryBlockedReason_ = undefined;
+          } catch (recoveryError) {
+            if (recoveryError instanceof SessionDataError && recoveryError.code === "unknown-outcome") {
+              this.recoveryBlockedReason_ = recoveryError.message;
+            } else {
+              this.recoveryBlockedReason_ = "Recovery checkpoint could not be validated; inspect the session log before continuing.";
+            }
+          }
+        }
+        throw error;
+      }
 
       // Turn end: persist cross-turn memory. `context_limit` is an explicit pause
       // (C# `AgentStopReason.ContextLimit`): the trajectory is preserved verbatim
@@ -393,6 +485,12 @@ export class AgentSession {
       // ESTIMATED values only (never treat a UI-display value as the truth).
       this.usage_ = tokenUsageAdd(this.usage_, result.usage);
       this.cost_ = combineCost(this.cost_, result.cost);
+      // Durable turn-completion marker (C# `CheckpointLog?.CompleteCheckpointTurn`),
+      // after the in-memory history/ledger commit. If this write fails the turn
+      // result was still fully persisted as earlier checkpoints and remains recoverable.
+      if (sessionStore !== undefined) {
+        sessionStore.completeCheckpointTurn(result);
+      }
       return result;
     } finally {
       this.running_ = false;
