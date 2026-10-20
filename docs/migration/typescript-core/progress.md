@@ -1,6 +1,6 @@
 # TypeScript Core 迁移：进度表
 
-> **状态：P0–P2.4 各单元、P3.1–P3.3、P4.1 与 P6.1 已完成；P3.4 / P4.2 运行中（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
+> **状态：P0–P2.4 各单元、P3.1–P3.4、P4.1–P4.2、P6.1 与四项预研均已完成；P2.5 / P3.5 / P4.3 运行中（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
 > 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
 
@@ -32,17 +32,19 @@
 | P1 最小工作区、词汇和夹具 | P0 | **verified** | P1.1（见子行）+ P1.2（a8144ea、731f8b5） | 见 P1.1 / P1.2 子行 | 无 |
 | P1.1 根 workspace、@di/ai 词汇与假模型无工具答案红→绿 | P0 | **verified** | 见本单元交接（`git log -1`） | `npm install`(0)；红测 `npm test -w @di/ai`(1, ERR_MODULE_NOT_FOUND)；绿测 `npm test -w @di/ai`(0, 1 pass)；`npm run build`(0)；`npm run typecheck`(0)；`npm.cmd --prefix tui test`(0, 116 pass)；`npm.cmd --prefix tui run build`(0) | 无 |
 | P1.2 记录型假执行器与跨语言 fixtures | P1.1 | **verified** | a8144ea、731f8b5 | 红：`npm run typecheck -w @di/agent`(2, TS2305 导出缺失)；`npm test -w @di/agent`(1, fixtures ENOENT)。绿：`npm run typecheck -w @di/agent`(0)、`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 8 pass)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
-| P2 纯循环与宿主状态 | P1 | in_progress | P2.1–P2.4（见子行）；观察事件异常隔离、历史/快照/budget tracker、模型切换待派 | 见 P2.1 / P2.2 / P2.3 / P2.4 子行 | 无 |
+| P2 纯循环与宿主状态 | P1 | in_progress | P2.1–P2.4（见子行）；P2.5 运行中；历史/快照/budget tracker、模型切换待派 | 见 P2.1 / P2.2 / P2.3 / P2.4 子行 | 无 |
 | P2.1 无工具答案路径与消息良构 | P1.2 | **verified** | 见 P2.1 交接 | 红：`npm test -w @di/agent`(1, 缺 runAgentLoop 导出)、`npm run typecheck -w @di/agent`(2, TS2305)。绿：`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 18 pass)、`npm run typecheck -w @di/agent`(0)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
 | P2.2 工具往返 | P2.1 | **verified** | 409321d、725f90e | 红：`npm test -w @di/agent`(1, 29 中 12 失败 = 全部工具相位用例，`LoopError tool-phase-not-implemented`)。绿：`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 29/29)、`npm run typecheck -w @di/agent`(0)、根 `npm run typecheck`(2, 仅 P4.1 在途的 @di/coding-agent 缺 createFileTools 等导出；@di/agent 与 @di/ai 均 0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
 | P2.3 迭代上限与预算暂停 | P2.2 | **verified** | eb849ed、03f92d4 | 红：`npm test -w @di/agent`(1, 39 中 5 失败 = 全部 context-budget guard 用例：模型被错误调用 / 估算器未被调用)。绿：`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 39/39)、`npm run typecheck -w @di/agent`(0)、根 `npm run typecheck`(2, 仅 P3.3 在途的 @di/ai 的 src/providers 与 deepseek 测试文件；@di/agent 与 @di/coding-agent 均 0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
 | P2.4 软停与硬取消 | P2.3 | **verified** | 7f33e9a、ed8064f | 红：`npm test -w @di/agent`(1, 45 中 3 失败 = 全部软停止用例：模型被调用/继续执行工具，返回 answer 而非 interrupted；hard-cancel / 中途 abort / AbortError 隔离 3 条已实现直接绿)。绿：`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 45/45=39 回归+6 新)、`npm run typecheck -w @di/agent`(0)、根 `npm run typecheck`(0, P3.4/P4.2 在途当前 typecheck-clean)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
-| P3 通用模型与 DeepSeek | P1 | in_progress | P3.1–P3.3（见子行）；P3.4 运行中 | 见子行 | 无 |
+| P3 通用模型与 DeepSeek | P1 | in_progress | P3.1–P3.4（见子行）；P3.5 运行中 | 见 P3.1 / P3.2 / P3.3 / P3.4 子行 | 无 |
 | P3.1 provider chunk assembler | P1.1 | **verified** | c0eb1de | 红：`npm test -w @di/ai`(1, 缺 AssemblerError 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 27/27, 含 P1.1 回归) | 无；后续卡：SSE framing（P3.2） |
 | P3.2 HTTP/SSE framing | P3.1 | **verified** | e0a2457 | 红：`npm test -w @di/ai`(1, 缺 SseEventParser 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 59/59 = 32 新增 + 27 回归) | 无；后续卡：DeepSeek 翻译（P3.3） |
-| P3.3 DeepSeek 请求/响应翻译 | P3.2 | **verified** | 5c36ca2 | 红：`npm test -w @di/ai`(1, 缺 DeepSeek 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 90/90 = 31 新增 + 59 回归)、根 `npm run typecheck`(0) | 无；后续卡：usage/cost（P3.4，运行中） |
-| P4 八个工具与平台执行 | P1 | in_progress | P4.1（见子行）；P4.2 运行中 | 见 P4.1 子行 | 预研已完成（27e3e60） |
+| P3.3 DeepSeek 请求/响应翻译 | P3.2 | **verified** | 5c36ca2 | 红：`npm test -w @di/ai`(1, 缺 DeepSeek 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 90/90 = 31 新增 + 59 回归)、根 `npm run typecheck`(0) | 无；后续卡：usage/cost（P3.4） |
+| P3.4 usage 聚合与成本计算 | P3.1+P3.2+P3.3 | **verified** | 269ff93 | 红：`npm test -w @di/ai`(1, 缺 billableInputTokens 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck -w @di/ai`(0)、`npm test -w @di/ai`(0, 123/123 = 90 回归 + 33 新增)、根 `npm run typecheck`(0)、`npm test -w @di/agent`(0, 45/45) | 无；后续卡：retry/timeout（P3.5） |
+| P4 八个工具与平台执行 | P1 | in_progress | P4.1–P4.2（见子行）；P4.3 运行中 | 见 P4.1 / P4.2 子行 | 预研已完成（27e3e60） |
 | P4.1 文件工具 read/write/edit | P6.1, P1.2 | **verified** | 867e936 | 红：`npm test -w @di/coding-agent`(1, 缺 createEditFileTool 导出)；业务红（临时禁 OEM fallback）`node --test test/read-file.test.ts`(1, 35 中 2 失败=GBK 用例)。绿：`npm run build -w @di/coding-agent`(0)、`npm run typecheck`(0)、`npm test -w @di/coding-agent`(0, 114/114=88 工具+26 配置回归)、根 `npm run build`(0)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无；FileShare.None 独占锁纯 Node 不可复刻；原子 rename 未做（保持基线原位写）；无解码器页（如 OEM 437）走显式解码错误（未加 iconv-lite）；后续卡：glob 枚举（P4.2） |
+| P4.2 glob 文件枚举 | P4.1 | **verified** | 1c08756 | 红：`npm test -w @di/coding-agent`(1, 缺 globIsMatch/createGlobTool/GLOB_DEFAULT_LIMIT 导出)。绿：`npm run build -w @di/coding-agent`(0)、`npm run typecheck -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 162 = 114 回归 + 48 新增, 161 pass + 1 win-symlink 平台跳过)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无；Windows 文件符号链接创建需管理员/开发者模式（EPERM）→ symlink-file 用例本机跳过、POSIX CI 运行；后续卡：grep/regex（P4.3） |
 | P5 检查点、恢复和统计 | P2, P4 | todo | – | 未执行 | 无 |
 | P6 Skills、配置、命令和日志 | P1 | in_progress | P6.1（见子行）；P6.2 待派 | 见 P6.1 子行 | 无 |
 | P6.1 DI_HOME 解析、分层配置合并与 JSONC | P1.1 | **verified** | f96ca98 | 红：`npm run build -w @di/coding-agent && npm test -w @di/coding-agent`(1, 缺导出；再 1, 10/26 断言失败)。绿：`npm run build -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 26/26)、`npm run typecheck -w @di/coding-agent`(0)；`@di/agent` 8/8(0)；TUI 116 pass(0) | 无；`--info` 属 P6.3；资源路径写入属 P6.2 |
@@ -141,6 +143,22 @@
 - **红→绿：** 红为 `npm test -w @di/agent` 退出 1（45 中 3 失败 = 全部软停止用例：soft-stop fixture 继续到第 2 次模型调用、loop-top 与 B2 返回 answer 而非 interrupted；hard-cancel / 中途 abort / AbortError 隔离 3 条已实现直接绿）。实现后绿：build(0)、test(0, 45/45)、typecheck -w(0)；根 typecheck(0，P3.4/P4.2 在途当前 typecheck-clean)；TUI test(0, 116 pass)、TUI build(0)。
 - **设计决策：** B1 软停检查置于工具 for 循环之前、final-output-tool 检查之前（对齐 loop-and-state.md §"一回合精确时序" step 6「有 tool call 时先检查软停止」与 C# `ReAct.RunCoreAsync` 的 B1 检查在 foreach 之前；任务卡括注「final-output-tool 检查之后」与 C# 次序相抵，fixture 未区分该场景，按权威文档落地——软停优先于 final output tool）。`interruptRequested` 缺省 undefined 时 `.?.()===true` 为 false，既有行为不变（C# `NoSignal_NeverInterrupts` 回归语义）。answer 复用 `lastAssistantText`（不过滤 history 前缀，与 C# `StopInterrupted` 一致，区别于 `contextLimitAnswer`）。
 - **未完成门槛：** 无（本卡范围）。观察事件与 checkpoint hook 异常隔离、历史 / 快照 / budget tracker、模型切换均为后续 P2 卡。
+
+## P3.4 交接（269ff93）
+
+- **交付：** `packages/ai/src/usage.ts`（`TokenUsage` 聚合 + 成本计算：`tokenUsageZero` / `tokenUsageAdd` / `billableInputTokens` / `cacheHitRate` / `usageCostZero` / `usageCostTotal` / `usageCostAdd` / `combineCost` / `calculateCost` / `costForModel`）与 `packages/ai/src/catalog.ts`（`ModelSpec` / `MODEL_CATALOG` / `findModelCostRates`）从 `@di/ai` 公开导出；33 个新测试 + 回归（123/123）。
+- **聚合语义：** `tokenUsageAdd` 的必填 `inputTokens`/`outputTokens` 恒求和；可选字段（`totalTokens` / `cacheReadTokens` / `cacheWriteTokens` / `reasoningTokens`）按 `SumOrNull`——单侧 undefined 保留另一侧、双侧 undefined 仍 undefined（`add(Zero, x) == x`，对齐 `TokenUsage.cs` 与 agent-loop 私有 `addUsage`）。派生计费数（`billableInputTokens` / `cacheHitRate` / `calculateCost`）将缺失缓存字段按 **0** 处理——与聚合语义的刻意差异，对齐 `TokenUsage.BillableInputTokens` / `CostCalculator`。
+- **成本目录（数据驱动）：** 费率纯数据转录自 C# 基线 adapter 的 `Catalog`——`deepseek-flash` 0.28/0.42/0.07（cacheWrite 0）、`deepseek-v4-pro` 1.20/4.00/0.30、`chatgpt/gpt-6.1-sol` **刻意无 cost**（订阅制）。新增模型 = 数据改动，不动引擎代码。**未知成本绝不伪造为零**：`costForModel` 对未知 provider/model 或该模型无费率返回 `undefined`；`combineCost(undefined, x) == x`、`combineCost(undefined, undefined) == undefined`；`ModelResponse.cost` 仅在定义时展开（assembler 测试断言 `"cost" in response === false`）。cacheRead/cacheWrite 按各自更低价计（v4-pro cacheRead=$0.30/M，不用 flash 的 $0.07）。
+- **cost 注入接缝：** `ProviderStreamAssemblerOptions` 新增可选 `cost?: (usage) => UsageCost | undefined`，在 `finish()` 恰一次调用；`SseToModelEventsOptions` 透传至 assembler。镜像 C# `ChatModelClient.StreamAsync → LlmRuntime.CalculateCost(provider, model, usage)`。对既有 `stream-assembler.ts` / `sse.ts` 为最小向后兼容增补（90 条既有测试全绿）；`src/types/*` 与 `providers/deepseek/*` 未动。
+- **未完成门槛：** 无（本卡范围）。DeepSeek adapter 尚未把 cost 函数接入其 `sseToModelEvents` 调用（接缝已留；adapter 只绑定 model id，cost 需要 provider，属宿主/后续接线步骤）。retry/timeout 为 P3 卡 5。
+
+## P4.2 交接（1c08756）
+
+- **交付：** `packages/coding-agent/src/core/tools/`（`glob-matcher.ts` `globToRegex` / `globIsMatch`、`enumerate.ts` `enumerateFiles` async generator + `isExcludedDirectoryName`、`glob.ts` `createGlobTool` / `GLOB_DEFAULT_LIMIT`(200) / `GLOB_DEFAULT_SCAN_BUDGET_MS`(60s) / `GlobToolOptions`）从 `src/index.ts` 导出；48 个新测试（`glob-matcher.test.ts` 15 + `glob.test.ts` 33）+ 回归（162 = 114 + 48，161 pass + 1 win-symlink 跳过）。
+- **匹配器（精确移植）：** `*`→`[^/]*`、`?`→`[^/]`、`**`→`.*`、`**/`→`(?:.*/)?`（零或多目录，`**/*.cs` 命中根文件）、模式 `\`→`/` 归一化、字面量 regex 转义、`^…$` 锚定；`i` flag 仅 `win32`（Unicode 大小写折叠，非 locale 敏感）。C# `GlobMatcherTests` 全部 15 例 + 边界通过。忽略目录集精确对齐 `ToolHelpers.ExcludedDirectoryNames`（obj/bin/node_modules/.git/.hg/.svn/.vs/.idea/__pycache__/.venv/venv/AppData/Temp/cache/Caches/.cache，全小写，不区分大小写）——TDD 中修掉混合大小写 bug。
+- **遍历（P4 gate：真异步可取消）：** `async function*`，每目录 `readdir(dir,{withFileTypes:true})` await + loop-top / readdir 后 / 每文件三处 `signal?.throwIfAborted()`，绝非同步扫描包 Promise；不可读/消失目录跳过（不使遍历失败）；符号链接/交接点目录不下降（Node 将交接点报为 symlink dirent；`stat` 跟随分类——文件链接产出、目录链接跳过、断链跳过）；根恒遍历。扫描预算 60s（可注入），每文件墙钟检查，耗尽返回部分结果 + "扫描超过 N 秒预算…" 显式提示（绝不伪"无匹配"）。结果上限默认 200（可注入，`Math.max(1, limit)`），续传提示 `limit=2N`。空扫描返回 C# 标记 `（未找到匹配文件）`。预期失败为 `error:` 观察；硬中止传播 AbortError（非错误观察）。
+- **Windows 路径证据：** 交接点环测试本机通过（不下降、不挂起）；反斜杠模式 `src\*.cs` 归一化命中、结果恒用 `/`；大小写不敏感匹配本机绿；Unicode 文件名（`报告.md`）命中。
+- **未完成门槛：** 无（本卡范围）。Windows 文件符号链接创建需管理员/开发者模式（EPERM）→ symlink-file 用例本机跳过、POSIX CI 运行，非卡 gate 失败。文档化小差异：含 Windows 非法字符的 `path` 参数（如 `?`）——C# `Path.GetFullPath` 抛 → `error: 路径参数非法`，Node `resolve` 透传 → ENOENT → `error: 目录不存在`；NUL（常见情况）仍如 C# 走 `路径参数非法`。grep/regex 为 P4 卡 3（复用 `enumerateFiles` / `isExcludedDirectoryName`，worker_threads + `worker.terminate()` 超时终止，100 匹配默认上限，60s 扫描预算）。
 
 ## 下一张任务卡（P2 第五个单元：观察事件与 checkpoint hook 的异常隔离）
 
