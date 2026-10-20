@@ -6,8 +6,10 @@
  * the tool round-trip phase (validator, beforeToolExecution, checkpoint
  * intent/result, toolStarted/toolCompleted events, error observations,
  * finalOutputTool, maxIterations) of runAgentLoop are implemented per
- * docs/migration/typescript-core/loop-and-state.md. Iteration/budget guards,
- * soft-stop/hard-cancel and observer-error isolation land in later P2 cards.
+ * docs/migration/typescript-core/loop-and-state.md. P2.3 adds the context-budget
+ * guard (`contextTokenBudget`/`estimateRequestTokens` -> `context_limit` with the
+ * trajectory preserved). Soft-stop/hard-cancel and observer-error isolation land
+ * in later P2 cards.
  */
 
 export type {

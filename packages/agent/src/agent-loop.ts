@@ -26,6 +26,11 @@ import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from ".
  * written before the next model call. Multiple tools in one round execute in
  * order. `finalOutputTool` returns the raw arguments as the answer;
  * `maxIterations` stops the loop and does not execute tools on the final turn.
+ * P2.3 adds the context-budget guard: before each model call the exact request
+ * the model would see is estimated (injected `estimateRequestTokens`); when the
+ * estimate crosses `contextTokenBudget` — or the budget is 0 — the loop returns
+ * `context_limit` with the full trajectory and accumulated usage preserved (an
+ * explicit pause, never an auto-trim or summary).
  *
  * Pure loop logic only: no Node IO, no fs, no disk. The loop never mutates the
  * caller's `history` array; every run builds its own trajectory.
@@ -71,10 +76,20 @@ export async function runAgentLoop(
   while (maxIterations === 0 || iterations < maxIterations) {
     // Phase boundary B0: hard abort before starting any model call.
     signal?.throwIfAborted();
+    // Soft stop is polled here, ahead of the context guard (ReAct.RunCoreAsync
+    // order: hard cancel -> soft stop -> context check); it lands in a later P2 card.
+
+    // Context guard: estimate the exact request the model would see and pause
+    // before any model side effect when it crosses the host-provided budget.
+    // The estimate is an approximate guard, never the provider's token count.
+    const modelRequest = buildModelRequest(request, trajectory);
+    if (shouldPauseForContextLimit(modelRequest, request.contextTokenBudget, dependencies.estimateRequestTokens)) {
+      return stopContextLimit(request, trajectory, usage, cost, iterations);
+    }
 
     // Model phase: one call per iteration.
     iterations += 1;
-    const response = await streamModel(request, trajectory, dependencies, signal);
+    const response = await streamModel(modelRequest, dependencies, signal);
 
     usage = addUsage(usage, response.usage);
     cost = combineCost(cost, response.cost);
@@ -205,12 +220,10 @@ function validateRequest(request: AgentRequest, dependencies: AgentDependencies)
 
 /** One model call: forward deltas, take the last `completed` response. */
 async function streamModel(
-  request: AgentRequest,
-  trajectory: readonly AgentMessage[],
+  modelRequest: ModelRequest,
   dependencies: AgentDependencies,
   signal: AbortSignal | undefined,
 ): Promise<ModelResponse> {
-  const modelRequest = buildModelRequest(request, trajectory);
   let completed: ModelResponse | undefined;
   for await (const event of dependencies.model.stream(modelRequest, signal)) {
     switch (event.type) {
@@ -313,6 +326,64 @@ function userMessage(text: string): UserMessage {
 
 function lastAssistantText(trajectory: readonly AgentMessage[]): string {
   for (let i = trajectory.length - 1; i >= 0; i--) {
+    const message = trajectory[i];
+    if (message !== undefined && message.role === "assistant") {
+      return textOfMessage(message);
+    }
+  }
+  return "";
+}
+
+// ---------------------------------------------------------------------------
+// Context budget guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Context-budget guard (ReAct.RunCoreAsync): a budget of 0 pauses unconditionally;
+ * otherwise an estimate strictly greater than the budget pauses (an estimate
+ * exactly equal to the budget proceeds). A missing budget disables the guard.
+ * The estimate is an approximate heuristic — never the provider's exact token
+ * count (loop-and-state.md §AgentSession 历史与恢复).
+ */
+function shouldPauseForContextLimit(
+  modelRequest: ModelRequest,
+  contextTokenBudget: number | undefined,
+  estimate: (request: ModelRequest) => number,
+): boolean {
+  if (contextTokenBudget === undefined) return false;
+  if (contextTokenBudget === 0) return true;
+  return estimate(modelRequest) > contextTokenBudget;
+}
+
+/**
+ * Explicit pause (loop-and-state.md §AgentSession 历史与恢复): return the full
+ * trajectory and already-accumulated usage, never auto-trim or summarize. The
+ * answer is the last current-turn assistant text after the user (past the history
+ * prefix), mirroring C# `StopContextLimit` — an old history assistant answer is
+ * never reported as the current answer.
+ */
+function stopContextLimit(
+  request: AgentRequest,
+  trajectory: readonly AgentMessage[],
+  usage: TokenUsage,
+  cost: UsageCost | undefined,
+  iterations: number,
+): AgentResult {
+  return {
+    answer: contextLimitAnswer(trajectory, request.history),
+    trajectory,
+    history: request.history,
+    usage,
+    cost,
+    iterations,
+    stopReason: "context_limit",
+  };
+}
+
+/** C# `StopContextLimit` answer: skip history + current user, last assistant text after them. */
+function contextLimitAnswer(trajectory: readonly AgentMessage[], history: readonly AgentMessage[]): string {
+  const firstCurrentTurn = Math.min(trajectory.length, history.length + 1);
+  for (let i = trajectory.length - 1; i >= firstCurrentTurn; i--) {
     const message = trajectory[i];
     if (message !== undefined && message.role === "assistant") {
       return textOfMessage(message);
