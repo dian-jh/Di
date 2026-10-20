@@ -21,5 +21,8 @@ export {
   READ_FILE_MAX_OUTPUT_LINES,
   READ_FILE_MAX_OUTPUT_CHARS,
 } from "./core/tools/read.ts";
+export { createGlobTool, GLOB_DEFAULT_LIMIT, GLOB_DEFAULT_SCAN_BUDGET_MS } from "./core/tools/glob.ts";
+export { globIsMatch, globToRegex } from "./core/tools/glob-matcher.ts";
 export type { CoreTool } from "./core/tools/index.ts";
 export type { ReadFileToolOptions } from "./core/tools/read.ts";
+export type { GlobToolOptions } from "./core/tools/glob.ts";
