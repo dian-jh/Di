@@ -116,3 +116,32 @@ export {
   isLoadSkillCall,
   renderLoadedSkill,
 } from "./core/skills/skill-tools.ts";
+
+// P6.3a commands: builtin slash command registry, user command Markdown/loader
+// and model selection (provider/model resolution + reasoning tier).
+export {
+  MAX_COMMAND_DESCRIPTION_LENGTH,
+  MAX_COMMAND_NAME_LENGTH,
+  CommandFormatException,
+  parseCommandMarkdown,
+} from "./core/commands/command-markdown.ts";
+export type { UserCommand } from "./core/commands/command-markdown.ts";
+export { loadCommandsInto } from "./core/commands/command-loader.ts";
+export type { CommandResult, SlashCommand, SlashCommandHandler } from "./core/commands/slash-command.ts";
+export { HANDLED, QUIT, turnCommand } from "./core/commands/slash-command.ts";
+export { SlashCommandRegistry } from "./core/commands/slash-command-registry.ts";
+export type { CommandContext, CommandHost, CommandOutput } from "./core/commands/command-context.ts";
+export { StringCommandOutput } from "./core/commands/command-context.ts";
+export { createBuiltinCommands, createBuiltinRegistry } from "./core/commands/builtin-commands.ts";
+export { ModelReference, ModelSelection, ModelSelectionError } from "./core/model-selection.ts";
+export type {
+  ModelInfo,
+  ModelReasoningInfo,
+  ModelSelectionErrorCode,
+  ModelSelectionHost,
+  ModelSelectionOptions,
+  ModelService,
+  ProviderInfo,
+  ReasoningEffortInfo,
+  ResolvedModelInfo,
+} from "./core/model-selection.ts";

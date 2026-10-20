@@ -185,7 +185,7 @@ test("refresh failure keeps the last snapshot", async () => {
   const errors = await selection.refresh();
 
   assert.equal(errors.length, 1);
-  assert.ok(errors[0].includes("boom"));
+  assert.ok(errors[0]!.includes("boom"));
   // the advisory catalog still exposes the previous snapshot
   assert.deepEqual(selection.list().map((m) => m.id), ["deepseek-flash"]);
 });
