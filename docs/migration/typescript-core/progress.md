@@ -1,6 +1,6 @@
 # TypeScript Core 迁移：进度表
 
-> **状态：P0 与 P1.1 已完成（本文件由 P0 提交创建，P1.1 由迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
+> **状态：P0、P1.1 与 P1.2 已完成（本文件由 P0 提交创建，P1.1/P1.2 由迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
 > 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
 
@@ -29,9 +29,9 @@
 | 任务 ID | 依赖 | 状态 | 实现提交 | 验证命令 / 退出码 | 阻塞点 |
 |---|---|---|---|---|---|
 | P0 冻结参考与行为清单 | 无 | **verified** | 本提交（创建本文件与 behavior-ledger.md；hash 见交接报告 / `git log -1`） | 见上表三行，退出码均 0 | 无 |
-| P1 最小工作区、词汇和夹具 | P0 | in_progress | P1.1 完成 / P1.2 未开始（见子行） | 见 P1.1 行 | P1.2 未执行 |
+| P1 最小工作区、词汇和夹具 | P0 | **verified** | P1.1（见子行）+ P1.2（a8144ea、731f8b5） | 见 P1.1 / P1.2 子行 | 无 |
 | P1.1 根 workspace、@di/ai 词汇与假模型无工具答案红→绿 | P0 | **verified** | 见本单元交接（`git log -1`） | `npm install`(0)；红测 `npm test -w @di/ai`(1, ERR_MODULE_NOT_FOUND)；绿测 `npm test -w @di/ai`(0, 1 pass)；`npm run build`(0)；`npm run typecheck`(0)；`npm.cmd --prefix tui test`(0, 116 pass)；`npm.cmd --prefix tui run build`(0) | 无 |
-| P1.2 记录型假执行器与跨语言 fixtures | P1.1 | todo | – | 未执行 | 无 |
+| P1.2 记录型假执行器与跨语言 fixtures | P1.1 | **verified** | a8144ea、731f8b5 | 红：`npm run typecheck -w @di/agent`(2, TS2305 导出缺失)；`npm test -w @di/agent`(1, fixtures ENOENT)。绿：`npm run typecheck -w @di/agent`(0)、`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 8 pass)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
 | P2 纯循环与宿主状态 | P1 | todo | – | 未执行 | 无 |
 | P3 通用模型与 DeepSeek | P1 | todo | – | 未执行 | 无 |
 | P4 八个工具与平台执行 | P1 | todo | – | 未执行 | 预研已完成（27e3e60）；工具实现未开始 |
@@ -55,12 +55,19 @@
 - 基线源码/测试枚举：`git ls-tree -r --name-only 09f4e08 Core Common Di.Cli Di.Tests Di.Cli.Tests tui/src`（已核实）。
 - P1.1 决策（后续卡片沿用）：本机 npm `11.13.0` 不支持 `workspace:` 协议（`EUNSUPPORTEDPROTOCOL`），workspace 依赖统一使用 `"*"`——本地 workspace 版本 `0.1.0` 满足 `*`，npm 直接链接本地包（见根 `package-lock.json` 的 `packages/*` 与 `node_modules/@di/*` 符号链接）。`@di/agent`、`@di/coding-agent` 均为占位 stub（可编译、可解析），P2 起才填真实循环契约。
 
-## 下一张任务卡（P1.2）
+## P1.2 交接（a8144ea、731f8b5）
 
-- **ID：** P1-2-recording-executor-and-fixtures（示例编号，由实施者确认）
-- **输入：** 记录型假执行器（`@di/agent` 的 `ToolExecutor`/`ToolObservation` 形状）与首组跨语言合成 fixtures（纯答案 / 工具往返 / 错误 / 软停 / 硬取消 / 预算暂停 / 恢复的最小样例）；契约见 execution-plan P1 §5、loop-and-state.md §"建议公开的最小 loop types"、architecture.md 依赖方向。
-- **前置：** P1.1（本单元）已完成——根 workspace、`@di/ai` 词汇、假模型无工具答案测试已 green，TUI 116 测试不退化。
-- **红测：** 先写使用记录型假执行器的业务测试，运行确认因缺失行为失败（red），再补最小实现（green）。
-- **保留：** 原 `tui/` 路径与包名；不处理 `tui/package-lock.json`。
-- **约束：** ESM / strict / `noUncheckedIndexedAccess` / erasable TS / `node:test`；跨包从公开 `exports` 导入；生产包编译后运行；脚本兼容 Windows（不依赖 POSIX glob）。
-- **门槛：** 干净环境能安装、检查类型并通过首个真实 TS 用例；TUI 原测试（116 项）不退化。
+- **交付：** `@di/agent` 工具调用词汇（`packages/agent/src/tools.ts` 的 `ToolExecutor` / `ToolValidator` / `ToolObservation`、`src/types.ts` 的 `AgentRequest`，从 `src/index.ts` 导出；`AgentMessage` / `ToolSpec` / `ToolCall` 从 `@di/ai` 导入不重定义）；记录型假执行器 `packages/agent/test/recording-executor.ts`（记录 id/name/arguments/order，返回 canned 结果）；跨语言 fixtures 位于仓库根 `fixtures/`（7 个场景：纯答案 / 工具往返 / 错误 / 软停 / 硬取消 / 预算暂停 / 恢复），schema 见 `fixtures/README.md` 与 `fixtures/schema.json`。
+- **位置决策：** 文档未指定 loop fixture 位置（P5 session fixtures 属 `packages/coding-agent/test/fixtures/sessions/`，不在本期），故选仓库根 `fixtures/` 并记录于 fixtures/README.md。
+- **红→绿：** 词汇导入测试先以导出缺失红（`npm run typecheck -w @di/agent` 退出 2，TS2305），实现后绿（0）。fixture 测试先以 fixtures 缺失红（`npm test -w @di/agent` 退出 1，ENOENT），创建后绿（8 pass / 0 fail）。fixture 预期全部来自 C# 基线 `09f4e08`（ReActTests / ReActInterruptTests / AgentRunnerTests）与叶子文档，非自生成。
+- **工具词汇决策：** loop-and-state.md 为权威：`ToolObservation` 是 executor 结果（text + isError）；任务卡中的 "ToolResult" 无对应类型（`ToolResultMessage` 属 `@di/ai`），按文档落地为 `ToolObservation`；`AgentRequest` 字段按 loop-and-state.md 草图实现。
+- **依赖的 @di/ai 形状：** `AgentMessage`（含 `ToolResultMessage` 成员）、`ToolCall`（`type:"tool-call"` + id/name/arguments 原始 JSON 串）、`ToolSpec`。`StopReason` 保留在 `@di/agent`。
+- **未完成门槛：** 无。根 `package.json` 的 `test` script 仍只测 `@di/ai`（共享文件，留给集成者决定是否并入 `@di/agent`）。
+
+## 下一张任务卡（P2 第一个单元）
+
+- **ID：** P2-loop-pure-answer
+- **输入：** `packages/agent/src/`（`types.ts`、`tools.ts`、`agent-loop.ts`）；`@di/ai` 假模型（P1.1）与记录型假执行器（P1.2）；`fixtures/` 的 `kind:"loop"` 样例。
+- **行为：** 实现 `runAgentLoop` 的纯文本答案路径（等价 C# `ReAct.RunCoreAsync` 无工具分支）：合成 trajectory、检查软停 / 预算、调用模型、append assistant、发 `turnCompleted`、无工具调用返回 `stopReason=answer`；随后按 loop-and-state.md 逐单元推进工具往返、预算 / 迭代、取消。
+- **红测：** 先写 `packages/agent/test/agent-loop.test.ts`，用假模型返回无工具答案，运行确认因缺失行为失败，再补最小实现。
+- **绿测：** `npm test -w @di/agent`（含用 recording executor 驱动的 fixture 校验）；`npm run typecheck -w @di/agent`；根 `npm run typecheck`；`npm.cmd --prefix tui test`（116 pass）与 `npm.cmd --prefix tui run build`。
