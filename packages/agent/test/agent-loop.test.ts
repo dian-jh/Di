@@ -737,3 +737,280 @@ test("usage accumulates across the tool round-trip model calls", async () => {
   assert.equal(result.iterations, 2);
   assert.deepEqual(result.usage, { inputTokens: 30, outputTokens: 12 });
 });
+
+// ---------------------------------------------------------------------------
+// P2.3 context-budget guard and iteration boundaries
+// (loop-and-state.md §"一回合精确时序" step 3 + §"iteration 与停止理由")
+// ---------------------------------------------------------------------------
+
+test("budget-pause fixture: an estimate over the budget pauses with context_limit before any model call", async () => {
+  const fixture = loadLoopFixture("budget-pause.json");
+  const model = new ScriptedModel(fixture.input.model);
+  const events: AgentEvent[] = [];
+  const executor = new RecordingExecutor(() => ({ text: "unexpected tool call", isError: true }));
+
+  const result = await runAgentLoop(toAgentRequest(fixture), {
+    model,
+    toolExecutor: executor,
+    // The host-provided estimate exceeds contextTokenBudget(1) on the first request.
+    estimateRequestTokens: () => 1_000_000,
+    events: (event) => {
+      events.push(event);
+    },
+  });
+
+  assert.equal(result.stopReason, fixture.expected.stopReason);
+  assert.equal(result.answer, fixture.expected.answer);
+  assert.equal(result.iterations, fixture.expected.iterations);
+  assert.deepEqual(result.usage, fixture.expected.usage);
+  assert.equal(result.cost ?? null, fixture.expected.cost);
+  assert.equal(result.failure ?? null, fixture.expected.failure);
+  assert.equal(model.callCount, fixture.expected.modelRequestCount);
+  assert.equal(executor.calls.length, 0, "the budget guard must not execute tools");
+  assert.deepEqual(
+    events.map((event) => event.type),
+    fixture.expected.eventSequence,
+  );
+  assert.equal(result.trajectory.length, fixture.expected.trajectoryCount);
+  assert.deepEqual(result.trajectory, fixture.expected.trajectory);
+});
+
+test("contextTokenBudget of 0 pauses unconditionally even with a zero estimate", async () => {
+  const model = new ScriptedModel({
+    responses: [step("should never be reached", [])],
+  });
+  const executor = new RecordingExecutor(() => ({ text: "unexpected tool call", isError: true }));
+
+  const result = await runAgentLoop(
+    {
+      sessionId: "s1",
+      systemPrompt: "test system prompt",
+      userMessage: "tiny",
+      history: [],
+      tools: [],
+      contextTokenBudget: 0,
+    },
+    { model, toolExecutor: executor, estimateRequestTokens: () => 0 },
+  );
+
+  assert.equal(result.stopReason, "context_limit");
+  assert.equal(result.iterations, 0);
+  assert.equal(model.callCount, 0);
+  assert.deepEqual(result.trajectory, [{ role: "user", content: [{ type: "text", text: "tiny" }] }]);
+});
+
+test("an estimate exactly equal to the budget proceeds; only an over-budget estimate pauses", async () => {
+  const model = new ScriptedModel({
+    responses: [step("ok", [])],
+  });
+
+  const result = await runAgentLoop(
+    {
+      sessionId: "s1",
+      systemPrompt: "test system prompt",
+      userMessage: "hi",
+      history: [],
+      tools: [],
+      contextTokenBudget: 3,
+    },
+    { model, toolExecutor: new RecordingExecutor(() => ({ text: "unexpected", isError: true })), estimateRequestTokens: () => 3 },
+  );
+
+  assert.equal(result.stopReason, "answer");
+  assert.equal(result.answer, "ok");
+  assert.equal(model.callCount, 1);
+});
+
+test("without a contextTokenBudget the estimate guard is disabled", async () => {
+  const model = new ScriptedModel({
+    responses: [step("ok", [])],
+  });
+
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "hi", history: [], tools: [] },
+    { model, toolExecutor: new RecordingExecutor(() => ({ text: "unexpected", isError: true })), estimateRequestTokens: () => 1_000_000 },
+  );
+
+  assert.equal(result.stopReason, "answer");
+  assert.equal(result.answer, "ok");
+  assert.equal(model.callCount, 1);
+});
+
+test("estimate over the budget on a later loop iteration pauses with trajectory and usage preserved", async () => {
+  const model = new ScriptedModel({
+    responses: [
+      step("still working", [{ id: "c1", name: "echo", arguments: "{}" }]),
+      // A second model call must never happen.
+    ],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+
+  const result = await runAgentLoop(
+    {
+      sessionId: "s1",
+      systemPrompt: "test system prompt",
+      userMessage: "go",
+      history: [],
+      tools: [],
+      contextTokenBudget: 1,
+    },
+    {
+      model,
+      toolExecutor: executor,
+      // The first request fits; once the tool result grows the trajectory the next request overflows.
+      estimateRequestTokens: (request) => (request.messages.length > 2 ? 1_000_000 : 0),
+    },
+  );
+
+  assert.equal(result.stopReason, "context_limit");
+  assert.equal(result.answer, "still working");
+  assert.equal(result.iterations, 1);
+  assert.equal(model.callCount, 1, "the second model call must be blocked by the budget guard");
+  assert.equal(executor.calls.length, 1);
+  assert.equal(result.trajectory.length, 3); // [user, assistant(tool-call), tool result]
+});
+
+test("context_limit answer never returns an old history assistant text", async () => {
+  const history = [
+    { role: "user", content: [{ type: "text", text: "previous question" }] },
+    { role: "assistant", content: [{ type: "text", text: "previous answer" }] },
+  ];
+  const model = new ScriptedModel({ responses: [] }); // never reached
+  const executor = new RecordingExecutor(() => ({ text: "unexpected", isError: true }));
+
+  const result = await runAgentLoop(
+    {
+      sessionId: "s1",
+      systemPrompt: "test system prompt",
+      userMessage: "large current task",
+      history: history as unknown as AgentRequest["history"],
+      tools: [],
+      contextTokenBudget: 1,
+    },
+    { model, toolExecutor: executor, estimateRequestTokens: () => 1_000_000 },
+  );
+
+  assert.equal(result.stopReason, "context_limit");
+  assert.equal(result.answer, "");
+  assert.equal(model.callCount, 0);
+});
+
+test("the budget estimator sees the exact model request the model receives", async () => {
+  const model = new ScriptedModel({
+    responses: [step("ok", [])],
+  });
+  let estimated: ModelRequest | undefined;
+
+  await runAgentLoop(
+    {
+      sessionId: "s1",
+      systemPrompt: "test system prompt",
+      userMessage: "hi",
+      history: [],
+      tools: [],
+      contextTokenBudget: 1000,
+    },
+    {
+      model,
+      toolExecutor: new RecordingExecutor(() => ({ text: "unexpected", isError: true })),
+      estimateRequestTokens: (request) => {
+        estimated = request;
+        return 1;
+      },
+    },
+  );
+
+  assert.ok(estimated, "the estimator must be invoked for an over-zero budget");
+  assert.deepEqual(estimated.messages, [
+    { role: "system", text: "test system prompt" },
+    { role: "user", content: [{ type: "text", text: "hi" }] },
+  ]);
+  const sent = model.requests[0];
+  assert.ok(sent, "expected one model request");
+  assert.equal(sent, estimated, "the estimator and the model must share the same request (same order and tools)");
+});
+
+test("without maxIterations the loop is unlimited (continues past 24 tool rounds)", async () => {
+  let calls = 0;
+  const model: ChatModel = {
+    stream(): AsyncIterable<ModelEvent> {
+      calls += 1;
+      const current = step(
+        calls < 25 ? "still working" : "done",
+        calls < 25 ? [{ id: `c${calls}`, name: "echo", arguments: "{}" }] : [],
+      );
+      const response: ModelResponse = {
+        message: { role: "assistant", content: assistantContent(current) },
+        finishReason: toFinishReason(current.finishReason),
+        usage: { ...current.usage },
+        model: current.model,
+        timestamp: FIXED_TIMESTAMP,
+      };
+      return (async function* (): AsyncGenerator<ModelEvent> {
+        yield { type: "completed", response };
+      })();
+    },
+  };
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+    { model, toolExecutor: executor, estimateRequestTokens: () => 0 },
+  );
+
+  assert.equal(result.stopReason, "answer");
+  assert.equal(result.iterations, 25);
+  assert.equal(calls, 25, "the default must not impose an iteration cap");
+  assert.equal(executor.calls.length, 24, "all but the final round execute their tool");
+});
+
+test("maxIterations=1 makes a single model call and does not execute its tools", async () => {
+  const model = new ScriptedModel({
+    responses: [step("first", [{ id: "c1", name: "echo", arguments: "{}" }])],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "x", isError: false }));
+
+  const result = await runAgentLoop(
+    {
+      sessionId: "s1",
+      systemPrompt: "test system prompt",
+      userMessage: "go",
+      history: [],
+      tools: [],
+      maxIterations: 1,
+    },
+    { model, toolExecutor: executor, estimateRequestTokens: () => 0 },
+  );
+
+  assert.equal(result.stopReason, "max_iterations");
+  assert.equal(result.iterations, 1);
+  assert.equal(executor.calls.length, 0, "the final round's tools must not execute");
+});
+
+test("a single round with multiple tools respects the iteration cap (no tools run on the final round)", async () => {
+  const model = new ScriptedModel({
+    responses: [
+      step("round one", [
+        { id: "c1", name: "echo", arguments: "{}" },
+        { id: "c2", name: "echo", arguments: "{}" },
+      ]),
+    ],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "x", isError: false }));
+
+  const result = await runAgentLoop(
+    {
+      sessionId: "s1",
+      systemPrompt: "test system prompt",
+      userMessage: "go",
+      history: [],
+      tools: [],
+      maxIterations: 1,
+    },
+    { model, toolExecutor: executor, estimateRequestTokens: () => 0 },
+  );
+
+  assert.equal(result.stopReason, "max_iterations");
+  assert.equal(result.iterations, 1);
+  assert.equal(executor.calls.length, 0, "neither tool may run on the final (capped) round");
+});
