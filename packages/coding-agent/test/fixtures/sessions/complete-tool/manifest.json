@@ -1,0 +1,15 @@
+{
+  "input_file": "complete-tool.jsonl",
+  "expected_status": "recovered",
+  "expected_error_class": null,
+  "expected_error_mentions": [],
+  "expected_messages": [
+    { "role": "user", "text": "检查并修复构建" },
+    { "role": "assistant", "call_id": "call-01", "name": "read_file", "args": "{\"path\":\"build.log\"}" },
+    { "role": "tool", "call_id": "call-01", "text": "error CS1002", "is_error": false },
+    { "role": "assistant", "text": "缺少分号" }
+  ],
+  "expected_model_calls": 0,
+  "expected_executor_calls": 0,
+  "expected_side_effect_count": 0
+}

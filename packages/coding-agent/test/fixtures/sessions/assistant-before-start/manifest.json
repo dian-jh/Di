@@ -1,0 +1,14 @@
+{
+  "input_file": "assistant-before-start.jsonl",
+  "expected_status": "recovered_with_not_executed",
+  "expected_error_class": null,
+  "expected_error_mentions": [],
+  "expected_messages": [
+    { "role": "user", "text": "检查并修复构建" },
+    { "role": "assistant", "call_id": "call-01", "name": "read_file", "args": "{\"path\":\"build.log\"}" },
+    { "role": "tool", "call_id": "call-01", "text": "Recovery note: this tool call was not executed before the checkpoint. Decide whether it is still needed.", "is_error": false }
+  ],
+  "expected_model_calls": 0,
+  "expected_executor_calls": 0,
+  "expected_side_effect_count": 0
+}

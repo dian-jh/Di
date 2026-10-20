@@ -1,0 +1,10 @@
+{
+  "input_file": "unknown-block.jsonl",
+  "expected_status": "reject_unknown_block",
+  "expected_error_class": "reject_unknown_block",
+  "expected_error_mentions": ["future_tool_state"],
+  "expected_messages": [],
+  "expected_model_calls": 0,
+  "expected_executor_calls": 0,
+  "expected_side_effect_count": 0
+}

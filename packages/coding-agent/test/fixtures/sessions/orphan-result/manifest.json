@@ -1,0 +1,10 @@
+{
+  "input_file": "orphan-result.jsonl",
+  "expected_status": "reject_corrupt",
+  "expected_error_class": "reject_corrupt",
+  "expected_error_mentions": ["call-01"],
+  "expected_messages": [],
+  "expected_model_calls": 0,
+  "expected_executor_calls": 0,
+  "expected_side_effect_count": 0
+}

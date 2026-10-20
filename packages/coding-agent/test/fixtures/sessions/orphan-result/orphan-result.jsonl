@@ -1,0 +1,6 @@
+{"timestamp":"2026-10-19T03:04:05.006Z","ordinal":0,"type":"session_meta","payload":{"session_id":"0123456789abcdef0123456789abcdef","id":"0123456789abcdef0123456789abcdef","timestamp":"2026-10-19T03:04:05.006Z","cwd":"C:\\work\\demo","originator":"di","cli_version":"0.1.0","source":"cli","thread_source":"user","model_provider":"deepseek"}}
+{"timestamp":"2026-10-19T03:04:05.010Z","ordinal":1,"type":"checkpoint_turn_started","payload":{"started_at":1792379045000,"history":[],"user":{"role":"user","blocks":[{"type":"text","text":"检查并修复构建"}]}}}
+{"timestamp":"2026-10-19T03:04:06.100Z","ordinal":2,"type":"trajectory_checkpoint","payload":{"message":{"role":"assistant","blocks":[{"type":"reasoning","text":"先检查构建输出"},{"type":"tool_call","id":"call-01","name":"read_file","arguments":"{\"path\":\"build.log\"}"}]}}}
+{"timestamp":"2026-10-19T03:04:06.180Z","ordinal":4,"type":"checkpoint_tool_completed","payload":{"call_id":"call-01","message":{"role":"tool","call_id":"call-01","text":"error CS1002","is_error":false}}}
+{"timestamp":"2026-10-19T03:04:06.500Z","ordinal":5,"type":"trajectory_checkpoint","payload":{"message":{"role":"assistant","blocks":[{"type":"text","text":"缺少分号"}]}}}
+{"timestamp":"2026-10-19T03:04:06.501Z","ordinal":6,"type":"checkpoint_turn_completed","payload":{"stop_reason":"Answer","iterations":2}}
