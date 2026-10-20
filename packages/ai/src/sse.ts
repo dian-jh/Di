@@ -1,4 +1,5 @@
 import type { ModelEvent } from "./types/stream.ts";
+import type { TokenUsage, UsageCost } from "./types/model.ts";
 import type { ProviderChunk } from "./stream-assembler.ts";
 import { ProviderStreamAssembler } from "./stream-assembler.ts";
 
@@ -289,6 +290,11 @@ export interface SseToModelEventsOptions {
   readonly translateEvent: TranslateEvent;
   /** Request start in Unix milliseconds; defaults to stream start. */
   readonly timestamp?: number;
+  /**
+   * Optional per-call cost resolver forwarded to the
+   * {@link ProviderStreamAssembler}; see `ProviderStreamAssemblerOptions.cost`.
+   */
+  readonly cost?: (usage: TokenUsage) => UsageCost | undefined;
   /** Idle deadline forwarded to {@link parseSseStream}. */
   readonly idleTimeoutMs?: number;
   /** Abort signal forwarded to {@link parseSseStream}. */
@@ -314,8 +320,8 @@ export async function* sseToModelEvents(
   stream: ReadableStream<Uint8Array>,
   options: SseToModelEventsOptions,
 ): AsyncGenerator<ModelEvent, void, unknown> {
-  const { model, timestamp, translateEvent, idleTimeoutMs, signal } = options;
-  const assembler = new ProviderStreamAssembler({ model, timestamp });
+  const { model, timestamp, translateEvent, idleTimeoutMs, signal, cost } = options;
+  const assembler = new ProviderStreamAssembler({ model, timestamp, cost });
   let sawFinish = false;
 
   for await (const event of parseSseStream(stream, { idleTimeoutMs, signal })) {

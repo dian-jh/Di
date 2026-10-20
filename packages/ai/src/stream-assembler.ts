@@ -1,6 +1,6 @@
 import type { ContentBlock } from "./types/content.ts";
 import type { AssistantMessage } from "./types/messages.ts";
-import type { FinishReason, ModelResponse, TokenUsage } from "./types/model.ts";
+import type { FinishReason, ModelResponse, TokenUsage, UsageCost } from "./types/model.ts";
 import type { ModelEvent } from "./types/stream.ts";
 
 /**
@@ -64,6 +64,14 @@ export interface ProviderStreamAssemblerOptions {
   readonly model: string;
   /** Request start in Unix milliseconds; defaults to construction time. */
   readonly timestamp?: number;
+  /**
+   * Optional per-call cost resolver (Di baseline `LlmRuntime.CalculateCost`):
+   * receives the final usage and returns the {@link UsageCost}, or `undefined`
+   * when the model/provider has no known rates. A missing resolver or an
+   * `undefined` result leaves {@link ModelResponse.cost} absent — never
+   * fabricated as zero (models-and-auth.md §Token 与缓存计量).
+   */
+  readonly cost?: (usage: TokenUsage) => UsageCost | undefined;
 }
 
 /** A block currently being assembled, keyed by its provider index. */
@@ -90,6 +98,7 @@ export class ProviderStreamAssembler {
   private readonly model: string;
   private readonly timestamp: number;
   private readonly startedAt: number;
+  private readonly costFn: ((usage: TokenUsage) => UsageCost | undefined) | undefined;
   private usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
   private responseId: string | undefined;
   private finishReason: FinishReason | undefined;
@@ -99,6 +108,7 @@ export class ProviderStreamAssembler {
     this.model = options.model;
     this.timestamp = options.timestamp ?? Date.now();
     this.startedAt = performance.now();
+    this.costFn = options.cost;
   }
 
   /** Feed one provider chunk; returns any high-level delta events it produced. */
@@ -156,6 +166,7 @@ export class ProviderStreamAssembler {
       .sort((a, b) => a[0] - b[0])
       .map(([, block]) => block);
     const message: AssistantMessage = { role: "assistant", content };
+    const cost = this.costFn !== undefined ? this.costFn(this.usage) : undefined;
     const response: ModelResponse = {
       message,
       finishReason: this.finishReason,
@@ -164,6 +175,7 @@ export class ProviderStreamAssembler {
       timestamp: this.timestamp,
       durationMs: Math.max(0, performance.now() - this.startedAt),
       ...(this.responseId !== undefined ? { responseId: this.responseId } : {}),
+      ...(cost !== undefined ? { cost } : {}),
     };
     const event: ModelEvent = { type: "completed", response };
     this.completedEvent = event;

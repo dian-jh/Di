@@ -42,6 +42,24 @@ export type {
   ChatModel,
 } from "./types/model.ts";
 
+// Usage aggregation and cost computation (P3 card 4: TokenUsage Add/SumOrNull,
+// per-provider catalog rates, unknown cost stays absent — never fabricated zero).
+export type { ModelCostRates } from "./usage.ts";
+export {
+  tokenUsageZero,
+  tokenUsageAdd,
+  billableInputTokens,
+  cacheHitRate,
+  usageCostZero,
+  usageCostTotal,
+  usageCostAdd,
+  combineCost,
+  calculateCost,
+  costForModel,
+} from "./usage.ts";
+export type { ModelSpec } from "./catalog.ts";
+export { MODEL_CATALOG, findModelCostRates } from "./catalog.ts";
+
 export type {
   ProviderBlockStart,
   ProviderChunk,
