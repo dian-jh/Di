@@ -1,6 +1,6 @@
 # TypeScript Core 迁移：进度表
 
-> **状态：P0–P2.5 各单元、P3.1–P3.5（@di/ai 全部完成）、P4.1–P4.2、P6.1 与四项预研均已完成；P4.3 运行中；P2.6 待派（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
+> **状态：P0–P2.5 各单元、P3.1–P3.5（@di/ai 全部完成）、P4.1–P4.3、P6.1 与四项预研均已完成；P2.6 运行中（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
 > 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
 
@@ -44,9 +44,10 @@
 | P3.3 DeepSeek 请求/响应翻译 | P3.2 | **verified** | 5c36ca2 | 红：`npm test -w @di/ai`(1, 缺 DeepSeek 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 90/90 = 31 新增 + 59 回归)、根 `npm run typecheck`(0) | 无；后续卡：usage/cost（P3.4） |
 | P3.4 usage 聚合与成本计算 | P3.1+P3.2+P3.3 | **verified** | 269ff93 | 红：`npm test -w @di/ai`(1, 缺 billableInputTokens 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck -w @di/ai`(0)、`npm test -w @di/ai`(0, 123/123 = 90 回归 + 33 新增)、根 `npm run typecheck`(0)、`npm test -w @di/agent`(0, 45/45) | 无；后续卡：retry/timeout（P3.5） |
 | P3.5 retry/timeout 与超时 | P3.1..P3.4 | **verified** | bf48fdb、0394c41 | 红：`npm test -w @di/ai`(1, 缺 retry 导出 + 缺 header TIMEOUT rejection + 连接映射 false)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck -w @di/ai`(0)、`npm test -w @di/ai`(0, 150/150=123 回归+27 新)、根 `npm run typecheck`(0)、`npm test -w @di/agent`(0, 50/50) | retry/timeout 完成；P3 阶段全部完成；后续卡：P4.4 输出收集 |
-| P4 八个工具与平台执行 | P1 | in_progress | P4.1–P4.2（见子行）；P4.3 运行中 | 见 P4.1 / P4.2 子行 | 预研已完成（27e3e60） |
+| P4 八个工具与平台执行 | P1 | in_progress | P4.1–P4.3（见子行）；P4.4 待派 | 见 P4.1 / P4.2 / P4.3 子行 | 预研已完成（27e3e60） |
 | P4.1 文件工具 read/write/edit | P6.1, P1.2 | **verified** | 867e936 | 红：`npm test -w @di/coding-agent`(1, 缺 createEditFileTool 导出)；业务红（临时禁 OEM fallback）`node --test test/read-file.test.ts`(1, 35 中 2 失败=GBK 用例)。绿：`npm run build -w @di/coding-agent`(0)、`npm run typecheck`(0)、`npm test -w @di/coding-agent`(0, 114/114=88 工具+26 配置回归)、根 `npm run build`(0)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无；FileShare.None 独占锁纯 Node 不可复刻；原子 rename 未做（保持基线原位写）；无解码器页（如 OEM 437）走显式解码错误（未加 iconv-lite）；后续卡：glob 枚举（P4.2） |
 | P4.2 glob 文件枚举 | P4.1 | **verified** | 1c08756 | 红：`npm test -w @di/coding-agent`(1, 缺 globIsMatch/createGlobTool/GLOB_DEFAULT_LIMIT 导出)。绿：`npm run build -w @di/coding-agent`(0)、`npm run typecheck -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 162 = 114 回归 + 48 新增, 161 pass + 1 win-symlink 平台跳过)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无；Windows 文件符号链接创建需管理员/开发者模式（EPERM）→ symlink-file 用例本机跳过、POSIX CI 运行；后续卡：grep/regex（P4.3） |
+| P4.3 grep/regex 搜索 | P4.2 | **verified** | 37fd82f、6e32deb | 红：`npm test -w @di/coding-agent`(1, SyntaxError 缺 GREP_DEFAULT_LIMIT 导出)。绿：`npm run build -w @di/coding-agent`(0)、`npm run typecheck -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 207 = 162 回归 + 45 新增, 206 pass + 1 win-symlink 平台跳过)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | worker_threads 每调用一个 worker，超时/中止 worker.terminate()（灾难回溯 `(x+x+)+y` 30 x 560ms 内返回）；u flag + \A\z\Z 桥接；.NET 独有语法显式 error 非静默空；GBK/OEM 936 解码匹配；JS \w\d\b 仅 ASCII 未补译（记录已知差异，conformance 门未过）；空标记用 C#「（未找到匹配）」；后续卡：P4.4 输出收集 |
 | P5 检查点、恢复和统计 | P2, P4 | todo | – | 未执行 | 无 |
 | P6 Skills、配置、命令和日志 | P1 | in_progress | P6.1（见子行）；P6.2 待派 | 见 P6.1 子行 | 无 |
 | P6.1 DI_HOME 解析、分层配置合并与 JSONC | P1.1 | **verified** | f96ca98 | 红：`npm run build -w @di/coding-agent && npm test -w @di/coding-agent`(1, 缺导出；再 1, 10/26 断言失败)。绿：`npm run build -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 26/26)、`npm run typecheck -w @di/coding-agent`(0)；`@di/agent` 8/8(0)；TUI 116 pass(0) | 无；`--info` 属 P6.3；资源路径写入属 P6.2 |
@@ -170,6 +171,16 @@
 - **设计决策：** 重试边界=首 ModelEvent——保持 C# `RetryingChatModel` 策略但修复其中途重枚举缺陷（可能重放已发布前缀），对齐 models-and-auth.md §重试边界。provider 中立：`isRetryableError`/`failureOf` 识别 SseStreamError 码 + 任何携带 `LlmFailure` 的错误，不直接依赖 DeepSeek 模块。header-wait 超时放 adapter 而非 wrapper（wrapper 级竞速=总请求超时，文档明确禁止）。取消表示为 `SseStreamError("aborted")`（与 sse.ts 一致）；loop 已传播任何模型流 rejection，无需改 loop。
 - **并行干扰记录：** 根 `npm test` 退出 1 仅因 @di/coding-agent 在途 P4.3 的 grep 红测（37fd82f 中途提交）；@di/ai 150/150 与 @di/agent 50/50 干净。中途出现的 @di/coding-agent TS7006 由并行的 P4.3 agent 修复。未运行真实 API 测试（全部 scripted fetch / loopback）。
 - **未完成门槛：** 无（本卡范围）。P3 阶段全部完成（@di/ai 全包完成）。P3.4 的 cost resolver 仍未接入 DeepSeek adapter（宿主接线步骤，P3.4 交接已记录）。后续卡：P4.4 输出收集（P4.3 grep 在途）。
+
+## P4.3 交接（37fd82f、6e32deb）
+
+- **交付：** `packages/coding-agent/src/core/tools/`（`grep.ts` 工具 + worker pool、`regex-worker.ts` worker 脚本）从 `src/index.ts` 导出；45 个新测试（`test/grep.test.ts`）+ 回归（207 = 162 + 45，206 pass + 1 win-symlink 平台跳过）。对既有文件最小增补并导出：`args.ts` +`getOptionalBool`、`glob.ts` +`formatScanSeconds`、`read.ts` +`splitLines`/`resolveOemDecoder`、`tools/index.ts` 与 `src/index.ts` 新导出。复用 P4.2 `enumerateFiles`/`isExcludedDirectoryName`，无重复遍历/分行逻辑。
+- **平台终止证据（Windows 实测）：** 灾难回溯 `(x+x+)+y` 对 30 个 x（JS 需 >10s、C# 基线亦挂起）→ `elapsed_ms=560.0`、`isError=false`，输出命中 +「[1 个文件正则匹配超时（单文件超过 0.5 秒）已终止并跳过（如 "bad.txt"）…]」，worker 重建后后续文件仍匹配（套内用例 577.96ms）；挂起正则期间 abort → `rejects with AbortError (304.65ms)`（worker 已终止，rejection 为 AbortError 非错误观察）；扫描中 abort（872ms）；扫描预算部分结果。
+- **覆盖场景：** 移植 C# `GrepToolTests.cs` 32 例（`rel:line: text` 格式、每文件行号、glob 过滤、path 作用域、默认大小写敏感、`（未找到匹配）` 标记、非法正则/缺 pattern/非法 JSON/路径不存在/路径为文件错误、二进制 NUL 文件、超大文件跳过 + 诚实提示 + 总数与 3 名样本、100 上限提示、EOF 无换行、空文件、中文内容、CRLF 剥离、500 字符截断、`ignore_case`/`literal`/`context`/`limit` 提示、`^…$`、alternation、pre-aborted abort、abort-during-scan、scan-budget 提示）+ TS 特有：`ignore_case` 大小写不敏感、中文 UTF-8、`\p{L}+`（u flag）、**GBK/OEM-936 内容**经 `TextDecoder("gbk")` 解码匹配（对照 .NET `GetEncoding(936)`）、`\A`/`\z` 桥接 `^`/`$`、.NET 独有语法显式 `error:` 观察、`^$` 无幻影尾空行、UTF-8 BOM 剥离、context 重叠去重（C# `ScanWithContext` 语义）、`limit:0` clamp、非法 `context`/`ignore_case`/`literal` 类型错误观察。
+- **设计决策：** 1) 每 grep 调用一个常驻 worker、跨文件复用，超时/中止后 terminate 重建（避免探针测得 ~40ms/文件 spawn 成本；探针 `worker.terminate()` 5ms 杀进程证据为安全边界）。abort 以 `signal.reason`（AbortError）reject，绝不转错误观察；单文件 job 超时（默认 10s 可注入）嵌在 60s 扫描预算内（每文件检查）——相对 C#（无正则超时）是新增安全边界。2) 恒设 `u` flag：`\p{…}` 可用，.NET identity 转义（`\A`/`\z`/`\Z`/`\R`/`\p`）绝不静默当字面量；`\A`/`\z`/`\Z` 桥接 `^`/`$`（每行无换行，安全）。3) JS 拒绝的 .NET 独有语法（单引号命名组、balanced/conditional 组、`\p{IsScript}`）→ 显式 `error: 无效正则表达式: …`，绝不静默空结果。4) 文件内容解码同 read_file（P4.1/P4.2）：先 strict UTF-8（剥 BOM），再系统 OEM；不可解码文件跳过 + 提示，绝不静默乱码。5) 空标记用 C# `Core/Tools/GrepTool.cs` @09f4e08 的「（未找到匹配）」（任务卡写的「（未找到匹配文件）」是 glob 的标记——记录此差异，两者均含「未找到」且 C# 测试按其断言）。6) 正则超时与解码跳过**抑制**「no match」标记，带样本名 + 可行动提示（对齐 C# 超大跳过规则，绝不把跳过冒充无匹配）。
+- **已知差异 / 未过门槛（grep.ts 头注释记录）：** JS `\w`/`\d`/`\b` 即使 `u` 下仅 ASCII（异于 .NET Unicode 版）——探针的 Unicode 翻译层未在本卡实现，conformance 矩阵的 Unicode shorthand 项未验证；`\p{Is<Script>}` 需 JS `\p{Script=…}`（现显式 error）；字符类内锚翻译（`[\A]`）未处理（罕见边）；变长 lookbehind / atomic 组取决于固定 Node 版本（探针 §待复核）。完整冻结 conformance 矩阵 + 跨平台 fixtures 是单独阶段 gate，非本卡。
+- **并行干扰记录：** P3.5（@di/ai retry/timeout）并行提交 `0394c41`/`cbf1a66`，全程无 broken dist；最终 @di/ai（150）与 @di/agent（50）测试干净。
+- **未完成门槛：** 无（本卡范围）。后续卡：P4.4 输出收集（有界 stdout/stderr 环形缓冲，接入进程 runner / one-shot shell，依赖 P4-win-process-probe 的 Windows 进程树 kill 结论）。
 
 ## P2.5 交接（5ddcf92、b9d584a）
 
