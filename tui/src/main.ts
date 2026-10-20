@@ -1,8 +1,8 @@
 /**
- * TUI 入口：解析 di 二进制 → spawn `--mode rpc` → 装配视图 → 事件循环。
+ * TUI 入口：决策后端启动器 → spawn `--mode rpc` → 装配视图 → 事件循环。
  *
  * 流程：
- * 1. 解析 di 可执行文件（DI_BIN → PATH → ~/.di/bin/di.exe）。
+ * 1. 决策后端启动器（buildBackendLauncher：DI_BIN → TS 编译入口 → resolveDiBin 回退）。
  * 2. 创建 RpcClient 并等待 `ready` 握手（失败则报错退出）。
  * 3. 构建 TuiAltScreen（全屏视口）+ ChatView —— 输入框固定 dock 在终端底部（见 chat-layout.ts）。
  * 4. 客户端事件 → 状态机（state）→ 视图（view.sync）。
@@ -24,24 +24,25 @@ import { selectFoldItem, toggleSelectedFoldItem } from "./app/fold-navigation.ts
 import { normalizeSlash } from "./app/commands.ts";
 import { startInteractiveScreen, terminalScreenMode } from "./app/terminal-mode.ts";
 import { TurnStateMachine } from "./app/state.ts";
-import { CommandError, RpcClient, resolveDiBin } from "./rpc/client.ts";
+import { CommandError, RpcClient } from "./rpc/client.ts";
+import { buildBackendLauncher } from "./rpc/backend-launcher.ts";
 
 async function main(): Promise<number> {
-  const bin = resolveDiBin();
-  if (!bin) {
+  const decision = buildBackendLauncher(process.env);
+  if (decision.kind === "unavailable") {
     console.error(
-      "未找到 di 可执行文件：请设置环境变量 DI_BIN，或确保 `di` 在 PATH / ~/.di/bin 下。",
+      "未找到 di 后端：请设置环境变量 DI_BIN（显式指定二进制），或先构建 TS 后端（packages/coding-agent），或确保 `di` 在 PATH / ~/.di/bin 下。",
     );
     return 1;
   }
+  const { launcher } = decision;
 
   const state = new TurnStateMachine();
   let view: ChatView | null = null;
   let stopping = false;
 
   const client = new RpcClient({
-    bin,
-    args: ["--mode", "rpc"],
+    launcher,
     onReady: (meta) => {
       state.setMeta(meta);
     },
