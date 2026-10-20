@@ -41,3 +41,10 @@ export type {
   ModelResponse,
   ChatModel,
 } from "./types/model.ts";
+
+export type {
+  ProviderBlockStart,
+  ProviderChunk,
+  ProviderStreamAssemblerOptions,
+} from "./stream-assembler.ts";
+export { AssemblerError, ProviderStreamAssembler } from "./stream-assembler.ts";
