@@ -87,8 +87,9 @@ export {
 } from "./core/history.ts";
 export { buildEnvironmentSnapshot } from "./core/environment-snapshot.ts";
 
-// P6.2a skills: SKILL.md frontmatter parsing, repository discovery and
-// same-source conflict resolution.
+// P6.2a + P6.2b skills: SKILL.md frontmatter parsing, repository discovery and
+// same-source conflict resolution (P6.2a); matching, activation, disclosure
+// (advertise + load_skill) and metadata handling (P6.2b).
 export {
   MAX_SKILL_DESCRIPTION_LENGTH,
   MAX_SKILL_NAME_LENGTH,
@@ -103,3 +104,15 @@ export {
 } from "./core/skills/skill-locations.ts";
 export type { AncestorSkillDiscoveryOptions } from "./core/skills/skill-locations.ts";
 export { loadSkills, loadSkillsFromUserAndProject } from "./core/skills/skill-repository.ts";
+export type { ISkillMatcher, LexicalSkillMatcherOptions, SkillMatch } from "./core/skills/skill-matcher.ts";
+export { LexicalSkillMatcher } from "./core/skills/skill-matcher.ts";
+export { computeSkillActivation } from "./core/skills/skill-activation.ts";
+export type { SkillActivationResult } from "./core/skills/skill-activation.ts";
+export { buildAdvertisement, buildSkillSystemContext, estimateSkillTokens } from "./core/skills/skill-context.ts";
+export {
+  LOAD_SKILL_TOOL,
+  createSkillAwareExecutor,
+  executeLoadSkill,
+  isLoadSkillCall,
+  renderLoadedSkill,
+} from "./core/skills/skill-tools.ts";
