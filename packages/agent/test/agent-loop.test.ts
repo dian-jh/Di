@@ -5,15 +5,24 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import type {
+  AgentMessage,
   ChatModel,
   ContentBlock,
   FinishReason,
   ModelEvent,
   ModelRequest,
   ModelResponse,
+  ToolCall,
   ToolSpec,
 } from "@di/ai";
-import type { AgentDependencies, AgentEvent, AgentRequest } from "@di/agent";
+import type {
+  AgentDependencies,
+  AgentEvent,
+  AgentRequest,
+  LoopCheckpoint,
+  ToolObservation,
+  ToolValidator,
+} from "@di/agent";
 import { LoopError, runAgentLoop } from "@di/agent";
 
 import type { Fixture, LoopFixture, ModelScriptJson, ModelStepJson } from "./fixture-schema.ts";
@@ -21,14 +30,16 @@ import { isLoopFixture } from "./fixture-schema.ts";
 import { RecordingExecutor } from "./recording-executor.ts";
 
 /**
- * P2.1 loop tests (docs/migration/typescript-core/loop-and-state.md §"一回合精确时序").
+ * P2.1 + P2.2 loop tests (docs/migration/typescript-core/loop-and-state.md §"一回合精确时序").
  *
- * The pure-answer fixture is the primary contract: a single tool-free model call
- * returns stopReason=answer with the fixture's trajectory, usage, iterations and
- * eventSequence. Expected values come from the C# baseline tests at 09f4e08 —
- * never from generated TS output. The fixture's scripted model yields exactly one
- * `completed` (the non-streaming semantics the fixtures' eventSequence assumes);
- * delta forwarding is exercised by a separate streaming model.
+ * The pure-answer fixture (P2.1) is the tool-free contract; the tool-round-trip
+ * fixture (P2.2) is the primary tool-phase contract: a model tool call is
+ * validated, executed via the injected executor, its observation appended as a
+ * ToolResultMessage, then the model is called again and answers. Expected values
+ * come from the C# baseline tests at 09f4e08 — never from generated TS output.
+ * The fixture's scripted model yields exactly one `completed` per call (the
+ * non-streaming semantics the fixtures' eventSequence assumes); delta forwarding
+ * is exercised by a separate streaming model.
  */
 
 const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -129,6 +140,28 @@ function toolFreeDependencies(model: ChatModel, onEvent?: (event: AgentEvent) =>
     toolExecutor: new RecordingExecutor(() => ({ text: "unexpected tool call", isError: true })),
     estimateRequestTokens: () => 0,
     events: onEvent,
+  };
+}
+
+/** A RecordingExecutor whose canned observations come from the fixture's expected tool calls. */
+function cannedExecutor(fixture: LoopFixture): RecordingExecutor {
+  const canned = new Map<string, ToolObservation>();
+  for (const expected of fixture.expected.toolCalls) {
+    canned.set(expected.id, { text: expected.observation, isError: expected.isError });
+  }
+  return new RecordingExecutor((call) => canned.get(call.id) ?? { text: "unexpected call", isError: true });
+}
+
+/** One scripted completed response with the given text / tool calls and zero usage. */
+function step(text: string | null, toolCalls: readonly { id: string; name: string; arguments: string }[]): ModelStepJson {
+  return {
+    text,
+    toolCalls,
+    finishReason: toolCalls.length > 0 ? "tool-calls" : "stop",
+    failure: null,
+    usage: { inputTokens: 0, outputTokens: 0 },
+    cost: null,
+    model: "fake",
   };
 }
 
@@ -377,32 +410,330 @@ test("out-of-range request parameters are rejected at loop start", async () => {
   }
 });
 
-test("a model tool-call request fails loudly until the tool phase card lands", async () => {
-  const toolCallModel: ChatModel = {
-    stream() {
-      return (async function* (): AsyncGenerator<ModelEvent> {
-        yield {
-          type: "completed",
-          response: {
-            message: {
-              role: "assistant",
-              content: [{ type: "tool-call", id: "c1", name: "echo", arguments: "{}" }],
-            },
-            finishReason: { type: "tool-calls" },
-            usage: { inputTokens: 1, outputTokens: 2 },
-            model: "fake",
-            timestamp: FIXED_TIMESTAMP,
-          },
-        };
-      })();
+test("tool-round-trip fixture: a tool call executes, its observation is appended, and the loop answers", async () => {
+  const fixture = loadLoopFixture("tool-round-trip.json");
+  const model = new ScriptedModel(fixture.input.model);
+  const events: AgentEvent[] = [];
+  const executor = cannedExecutor(fixture);
+
+  const result = await runAgentLoop(toAgentRequest(fixture), {
+    model,
+    toolExecutor: executor,
+    estimateRequestTokens: () => 0,
+    events: (event) => {
+      events.push(event);
+    },
+  });
+
+  assert.equal(result.stopReason, fixture.expected.stopReason);
+  assert.equal(result.answer, fixture.expected.answer);
+  assert.equal(result.iterations, fixture.expected.iterations);
+  assert.deepEqual(result.usage, fixture.expected.usage);
+  assert.equal(result.cost ?? null, fixture.expected.cost);
+  assert.equal(result.failure ?? null, fixture.expected.failure);
+  assert.equal(model.callCount, fixture.expected.modelRequestCount);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    fixture.expected.eventSequence,
+  );
+  assert.deepEqual(
+    executor.records(),
+    fixture.expected.toolCalls.map((call, index) => ({
+      id: call.id,
+      name: call.name,
+      arguments: call.arguments,
+      order: index + 1,
+    })),
+  );
+  assert.equal(result.trajectory.length, fixture.expected.trajectoryCount);
+  assert.deepEqual(result.trajectory, fixture.expected.trajectory);
+});
+
+test("multiple tool calls in one turn execute in order and are all appended", async () => {
+  const model = new ScriptedModel({
+    responses: [
+      step("need both", [
+        { id: "c1", name: "echo", arguments: "{\"v\":1}" },
+        { id: "c2", name: "echo", arguments: "{\"v\":2}" },
+      ]),
+      step("summed", []),
+    ],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: call.arguments, isError: false }));
+
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+    { model, toolExecutor: executor, estimateRequestTokens: () => 0 },
+  );
+
+  assert.equal(result.stopReason, "answer");
+  assert.equal(result.iterations, 2);
+  assert.deepEqual(executor.records(), [
+    { id: "c1", name: "echo", arguments: "{\"v\":1}", order: 1 },
+    { id: "c2", name: "echo", arguments: "{\"v\":2}", order: 2 },
+  ]);
+  assert.equal(result.trajectory.length, 5); // [user, assistant, tool, tool, assistant]
+  const secondTool = result.trajectory[3];
+  assert.ok(secondTool, "expected a tool message at index 3");
+  assert.equal(secondTool.role, "tool");
+  if (secondTool.role === "tool") {
+    assert.equal(secondTool.toolCallId, "c2");
+    assert.equal(secondTool.content, "{\"v\":2}");
+  }
+});
+
+test("a throwing tool becomes an isError observation and the loop continues", async () => {
+  const model = new ScriptedModel({
+    responses: [step("will call", [{ id: "c1", name: "boom", arguments: "{}" }]), step("recovered", [])],
+  });
+  const executor = new RecordingExecutor(() => {
+    throw new Error("kaboom");
+  });
+
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+    { model, toolExecutor: executor, estimateRequestTokens: () => 0 },
+  );
+
+  assert.equal(result.stopReason, "answer");
+  assert.equal(result.iterations, 2);
+  const tool = result.trajectory[2];
+  assert.ok(tool, "expected a tool message at index 2");
+  assert.equal(tool.role, "tool");
+  if (tool.role === "tool") {
+    assert.equal(tool.isError, true);
+    assert.match(tool.content, /error executing tool 'boom'/);
+    assert.match(tool.content, /kaboom/);
+  }
+});
+
+test("toolValidator is invoked before execution", async () => {
+  const model = new ScriptedModel({
+    responses: [step("x", [{ id: "c1", name: "echo", arguments: "{}" }]), step("done", [])],
+  });
+  const validated: ToolCall[] = [];
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+  const validator: ToolValidator = {
+    validate(call: ToolCall) {
+      validated.push(call);
+    },
+  };
+
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+    { model, toolExecutor: executor, toolValidator: validator, estimateRequestTokens: () => 0 },
+  );
+
+  assert.equal(result.stopReason, "answer");
+  assert.deepEqual(validated.map((call) => call.name), ["echo"]);
+  assert.equal(executor.calls.length, 1, "a validated call must be executed");
+});
+
+test("a rejecting toolValidator aborts the run before the tool executes", async () => {
+  const model = new ScriptedModel({
+    responses: [step("x", [{ id: "c1", name: "echo", arguments: "{}" }])],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+  const rejecting: ToolValidator = {
+    validate() {
+      throw new Error("not allowed");
     },
   };
 
   await assert.rejects(
     runAgentLoop(
-      { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "hi", history: [], tools: [] },
-      toolFreeDependencies(toolCallModel),
+      { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+      { model, toolExecutor: executor, toolValidator: rejecting, estimateRequestTokens: () => 0 },
     ),
-    (error: unknown) => error instanceof LoopError && error.code === "tool-phase-not-implemented",
+    /not allowed/,
   );
+  assert.equal(executor.calls.length, 0, "a rejected call must never execute");
+});
+
+test("beforeToolExecution is called with the trajectory before the tool runs", async () => {
+  const model = new ScriptedModel({
+    responses: [step("x", [{ id: "c1", name: "echo", arguments: "{}" }]), step("done", [])],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+  let observedTrajectory: readonly AgentMessage[] | undefined;
+
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+    {
+      model,
+      toolExecutor: executor,
+      estimateRequestTokens: () => 0,
+      beforeToolExecution: (trajectory) => {
+        // Snapshot: the loop mutates the same array in place as it continues.
+        observedTrajectory = [...trajectory];
+      },
+    },
+  );
+
+  assert.equal(result.stopReason, "answer");
+  assert.ok(observedTrajectory, "beforeToolExecution must be invoked");
+  assert.equal(observedTrajectory.length, 2, "hook sees [user, assistant(tool-call)] before the tool runs");
+  assert.equal(executor.calls.length, 1);
+});
+
+test("a throwing beforeToolExecution aborts the run before the tool executes", async () => {
+  const model = new ScriptedModel({
+    responses: [step("x", [{ id: "c1", name: "echo", arguments: "{}" }])],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+
+  await assert.rejects(
+    runAgentLoop(
+      { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+      {
+        model,
+        toolExecutor: executor,
+        estimateRequestTokens: () => 0,
+        beforeToolExecution: () => {
+          throw new Error("hook blocked");
+        },
+      },
+    ),
+    /hook blocked/,
+  );
+  assert.equal(executor.calls.length, 0, "the tool must never run when the pre-execution hook throws");
+});
+
+test("checkpoint.toolStarted failure prevents tool execution", async () => {
+  const model = new ScriptedModel({
+    responses: [step("work", [{ id: "c1", name: "danger", arguments: "{}" }])],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "ran", isError: false }));
+  const checkpoint: LoopCheckpoint = {
+    appendMessage: () => {},
+    toolStarted: () => {
+      throw new Error("disk full");
+    },
+    toolCompleted: () => {},
+  };
+
+  await assert.rejects(
+    runAgentLoop(
+      { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "do it", history: [], tools: [] },
+      { model, toolExecutor: executor, estimateRequestTokens: () => 0, checkpoint },
+    ),
+    /disk full/,
+  );
+  assert.equal(executor.calls.length, 0, "the tool must never run when the intent checkpoint fails");
+});
+
+test("checkpoint and observer see toolStarted before toolCompleted around the execution", async () => {
+  const model = new ScriptedModel({
+    responses: [step("x", [{ id: "c1", name: "echo", arguments: "{}" }]), step("done", [])],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+  const checkpointOrder: string[] = [];
+  const checkpoint: LoopCheckpoint = {
+    appendMessage: () => {
+      checkpointOrder.push("appendMessage");
+    },
+    toolStarted: () => {
+      checkpointOrder.push("toolStarted");
+    },
+    toolCompleted: () => {
+      checkpointOrder.push("toolCompleted");
+    },
+  };
+  const events: AgentEvent[] = [];
+
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+    {
+      model,
+      toolExecutor: executor,
+      estimateRequestTokens: () => 0,
+      checkpoint,
+      events: (event) => {
+        events.push(event);
+      },
+    },
+  );
+
+  assert.equal(result.stopReason, "answer");
+  assert.deepEqual(checkpointOrder, ["appendMessage", "toolStarted", "toolCompleted", "appendMessage"]);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ["turnCompleted", "toolStarted", "toolCompleted", "turnCompleted"],
+  );
+});
+
+test("finalOutputTool returns the raw arguments as the answer without executing", async () => {
+  const model = new ScriptedModel({
+    responses: [step("finishing", [{ id: "f1", name: "finish", arguments: "{\"answer\":\"42\"}" }])],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "should not run", isError: false }));
+
+  const result = await runAgentLoop(
+    {
+      sessionId: "s1",
+      systemPrompt: "test system prompt",
+      userMessage: "go",
+      history: [],
+      tools: [],
+      finalOutputTool: "finish",
+    },
+    { model, toolExecutor: executor, estimateRequestTokens: () => 0 },
+  );
+
+  assert.equal(result.stopReason, "final_output_tool");
+  assert.equal(result.answer, "{\"answer\":\"42\"}");
+  assert.equal(result.iterations, 1);
+  assert.equal(executor.calls.length, 0);
+});
+
+test("maxIterations stops the loop and does not execute tools on the final turn", async () => {
+  const model = new ScriptedModel({
+    responses: [step("still working", [{ id: "c1", name: "echo", arguments: "{}" }]),
+      step("still working", [{ id: "c2", name: "echo", arguments: "{}" }]),
+      step("still working", [{ id: "c3", name: "echo", arguments: "{}" }])],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "x", isError: false }));
+
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [], maxIterations: 3 },
+    { model, toolExecutor: executor, estimateRequestTokens: () => 0 },
+  );
+
+  assert.equal(result.stopReason, "max_iterations");
+  assert.equal(result.iterations, 3);
+  assert.equal(executor.calls.length, 2, "the first two rounds execute; the third round's tools must not run");
+});
+
+test("usage accumulates across the tool round-trip model calls", async () => {
+  const model = new ScriptedModel({
+    responses: [
+      {
+        text: "need",
+        toolCalls: [{ id: "c1", name: "echo", arguments: "{}" }],
+        finishReason: "tool-calls",
+        failure: null,
+        usage: { inputTokens: 10, outputTokens: 5 },
+        cost: null,
+        model: "fake",
+      },
+      {
+        text: "done",
+        toolCalls: [],
+        finishReason: "stop",
+        failure: null,
+        usage: { inputTokens: 20, outputTokens: 7 },
+        cost: null,
+        model: "fake",
+      },
+    ],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+    { model, toolExecutor: executor, estimateRequestTokens: () => 0 },
+  );
+
+  assert.equal(result.iterations, 2);
+  assert.deepEqual(result.usage, { inputTokens: 30, outputTokens: 12 });
 });
