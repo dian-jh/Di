@@ -17,9 +17,11 @@ import {
  * plugs the P3.3 wire translator into the P3.2 `TranslateEvent` seam.
  *
  * Auth header and base URL are per-request (never global). The host injects the
- * resolved API key and the fetch implementation (@di/ai is Web-API-only). Retry/
- * backoff and the response-header wait timeout are later card P3.5 — this adapter
- * throws structured errors but does not retry.
+ * resolved API key and the fetch implementation (@di/ai is Web-API-only).
+ * Retry/backoff lives in the P3.5 {@link RetryingChatModel} wrapper — this
+ * adapter throws structured errors but does not retry. It does own the
+ * response-header wait timeout (default 60s) and maps fetch-level connection
+ * failures to a retryable `CONNECTION` {@link DeepSeekError}.
  */
 export interface DeepSeekAdapterOptions {
   /** Provider model id actually invoked; carried into request + ModelResponse. */
@@ -32,6 +34,14 @@ export interface DeepSeekAdapterOptions {
   readonly fetch?: (input: string, init?: RequestInit) => Promise<Response>;
   /** Idle deadline between SSE frames, forwarded to `sseToModelEvents`. */
   readonly idleTimeoutMs?: number;
+  /**
+   * Response-header wait timeout in ms (C# `DeepSeekDefaults.RequestTimeoutSeconds`,
+   * default 60s): the server must start responding within this window or the
+   * request fails with a retryable `TIMEOUT` {@link DeepSeekError}. `<= 0`
+   * disables the timer. This is NOT a total-duration timeout — a long-thinking
+   * stream is bounded only by `idleTimeoutMs` between SSE frames.
+   */
+  readonly headerTimeoutMs?: number;
 }
 
 export class DeepSeekAdapter implements ChatModel {
@@ -40,6 +50,7 @@ export class DeepSeekAdapter implements ChatModel {
   private readonly baseUrl: string;
   private readonly fetchImpl: (input: string, init?: RequestInit) => Promise<Response>;
   private readonly idleTimeoutMs: number | undefined;
+  private readonly headerTimeoutMs: number;
 
   constructor(options: DeepSeekAdapterOptions) {
     this.model = options.model;
@@ -47,6 +58,7 @@ export class DeepSeekAdapter implements ChatModel {
     this.baseUrl = options.baseUrl ?? deepSeekDefaults.baseUrl;
     this.fetchImpl = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.idleTimeoutMs = options.idleTimeoutMs;
+    this.headerTimeoutMs = options.headerTimeoutMs ?? deepSeekDefaults.requestTimeoutSeconds * 1000;
   }
 
   async *stream(request: ModelRequest, signal?: AbortSignal): AsyncIterable<ModelEvent> {
@@ -55,16 +67,20 @@ export class DeepSeekAdapter implements ChatModel {
     }
 
     const wire = toWireRequest(request, this.model);
-    const response = await this.fetchImpl(`${this.baseUrl}${deepSeekDefaults.chatCompletionsPath}`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-        authorization: `Bearer ${this.apiKey}`,
+    const response = await this.fetchWithHeaderTimeout(
+      `${this.baseUrl}${deepSeekDefaults.chatCompletionsPath}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+          authorization: `Bearer ${this.apiKey}`,
+        },
+        body: serializeRequest(wire),
+        signal,
       },
-      body: serializeRequest(wire),
       signal,
-    });
+    );
 
     if (!response.ok) {
       const bodyText = await safeReadBody(response);
@@ -86,6 +102,56 @@ export class DeepSeekAdapter implements ChatModel {
       idleTimeoutMs: this.idleTimeoutMs,
       signal,
     });
+  }
+
+  /**
+   * Send the request with a response-header wait timeout (C#
+   * `DeepSeekAdapter.SendAsync`). `fetch` settles as soon as the response headers
+   * arrive, so a timer that aborts the request is exactly a header-wait timeout —
+   * it never touches the (already streaming) body. Caller cancellation always
+   * wins over the timer; a fetch-level network failure (connection refused / DNS
+   * / reset) maps to a retryable `CONNECTION` {@link DeepSeekError} so the retry
+   * wrapper can classify it.
+   */
+  private async fetchWithHeaderTimeout(
+    url: string,
+    init: RequestInit,
+    signal: AbortSignal | undefined,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const onOuterAbort = (): void => controller.abort();
+    // An already-aborted caller signal must not start a request: abort the linked
+    // controller up front (a fresh listener would never observe the past event).
+    if (signal?.aborted) {
+      controller.abort();
+    }
+    const headerTimer = this.headerTimeoutMs > 0
+      ? setTimeout(() => controller.abort(), this.headerTimeoutMs)
+      : undefined;
+    signal?.addEventListener("abort", onOuterAbort, { once: true });
+    try {
+      return await this.fetchImpl(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      // Caller cancellation always wins over the header timer and is rethrown
+      // raw (an AbortError) so the loop can recognize the hard cancel.
+      if (signal?.aborted) {
+        throw error;
+      }
+      if (controller.signal.aborted) {
+        throw new DeepSeekError({
+          message: `DeepSeek 响应头等待超时（${this.headerTimeoutMs} ms）。`,
+          code: deepSeekErrorCodes.timeout,
+        });
+      }
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new DeepSeekError({
+        message: `无法连接 DeepSeek：${detail}`,
+        code: deepSeekErrorCodes.connection,
+      });
+    } finally {
+      if (headerTimer !== undefined) clearTimeout(headerTimer);
+      signal?.removeEventListener("abort", onOuterAbort);
+    }
   }
 }
 

@@ -75,6 +75,20 @@ export type {
 } from "./sse.ts";
 export { SseEventParser, SseStreamError, parseSseStream, sseToModelEvents } from "./sse.ts";
 
+// Retry/timeout policy (P3 card 5: bounded retry, Retry-After, header-wait and
+// SSE idle timeouts, first-ModelEvent retry boundary, cancellation never retries).
+export type { RetryPolicyOptions, RetrySleep } from "./retry/index.ts";
+export {
+  RETRY_DEFAULTS,
+  resolveRetryOptions,
+  isRetryableFailure,
+  isRetryableError,
+  failureOf,
+  retryDelayMs,
+  RetryingChatModel,
+  defaultRetrySleep,
+} from "./retry/index.ts";
+
 // DeepSeek provider adapter (P3.3 request/response translation).
 export {
   deepSeekDefaults,

@@ -107,3 +107,27 @@ test("caller cancellation during the header wait propagates as an abort, not a t
   setTimeout(() => controller.abort(), 20);
   await assert.rejects(rejection, (err) => (err as Error).name === "AbortError");
 });
+
+test("an already-aborted signal fails the request as an abort, never a timeout", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let fetchCalled = false;
+  // Mirrors real fetch: an already-aborted signal rejects before any network IO.
+  const fetchImpl = async (_url: string, init?: RequestInit): Promise<Response> =>
+    new Promise((_resolve, reject) => {
+      fetchCalled = true;
+      const signal = init?.signal;
+      if (signal?.aborted) {
+        reject(abortError());
+        return;
+      }
+      signal?.addEventListener("abort", () => reject(abortError()), { once: true });
+    });
+  const adapter = new DeepSeekAdapter({ model: "m", apiKey: "k", fetch: fetchImpl, headerTimeoutMs: 50 });
+
+  await assert.rejects(
+    collect(adapter.stream(request, controller.signal)),
+    (err) => (err as Error).name === "AbortError",
+  );
+  assert.equal(fetchCalled, true); // the request was attempted, then aborted — no timeout
+});

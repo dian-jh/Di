@@ -46,6 +46,12 @@ export const deepSeekDefaults = {
   chatCompletionsPath: "/chat/completions",
   maxTokensLimit: 393_216,
   stopLimit: 16,
+  /**
+   * Response-header wait timeout in seconds (C# `RequestTimeoutSeconds` = 60):
+   * the server must start responding within this window or the request fails
+   * with a retryable `TIMEOUT`. Not a total-duration timeout.
+   */
+  requestTimeoutSeconds: 60,
 } as const;
 
 const ThinkingType = {

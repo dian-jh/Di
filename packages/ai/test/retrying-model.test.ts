@@ -206,7 +206,7 @@ test("an abort during the retry wait rejects and never issues a second attempt",
     controller.abort();
     throw new SseStreamError("aborted", "retry wait aborted");
   };
-  const retrying = new RetryingChatModel(model, {}, abortingSleep);
+  const retrying = new RetryingChatModel(model, { jitterRatio: 0 }, abortingSleep);
 
   await assert.rejects(
     collect(retrying.stream(request, controller.signal)),
