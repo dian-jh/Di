@@ -1,6 +1,6 @@
 # TypeScript Core 迁移：进度表
 
-> **状态：P0、P1.1、P1.2 与 P3.1 已完成；P2 / P3.2 / P6.1 进行中（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
+> **状态：P0、P1.1、P1.2、P2.1、P3.1、P3.2 与 P6.1 已完成；P2.2 / P3.3 派发中、P4.1 运行中（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
 > 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
 
@@ -32,13 +32,15 @@
 | P1 最小工作区、词汇和夹具 | P0 | **verified** | P1.1（见子行）+ P1.2（a8144ea、731f8b5） | 见 P1.1 / P1.2 子行 | 无 |
 | P1.1 根 workspace、@di/ai 词汇与假模型无工具答案红→绿 | P0 | **verified** | 见本单元交接（`git log -1`） | `npm install`(0)；红测 `npm test -w @di/ai`(1, ERR_MODULE_NOT_FOUND)；绿测 `npm test -w @di/ai`(0, 1 pass)；`npm run build`(0)；`npm run typecheck`(0)；`npm.cmd --prefix tui test`(0, 116 pass)；`npm.cmd --prefix tui run build`(0) | 无 |
 | P1.2 记录型假执行器与跨语言 fixtures | P1.1 | **verified** | a8144ea、731f8b5 | 红：`npm run typecheck -w @di/agent`(2, TS2305 导出缺失)；`npm test -w @di/agent`(1, fixtures ENOENT)。绿：`npm run typecheck -w @di/agent`(0)、`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 8 pass)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
-| P2 纯循环与宿主状态 | P1 | in_progress | P2.1（见子行） | 见 P2.1 子行 | 无 |
+| P2 纯循环与宿主状态 | P1 | in_progress | P2.1（见子行）；P2.2 派发中 | 见 P2.1 子行 | 无 |
 | P2.1 无工具答案路径与消息良构 | P1.2 | **verified** | 见 P2.1 交接 | 红：`npm test -w @di/agent`(1, 缺 runAgentLoop 导出)、`npm run typecheck -w @di/agent`(2, TS2305)。绿：`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 18 pass)、`npm run typecheck -w @di/agent`(0)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
-| P3 通用模型与 DeepSeek | P1 | in_progress | P3.1（见子行）；P3.2 进行中 | 见 P3.1 子行 | 无 |
-| P3.1 provider chunk assembler | P1.1 | **verified** | c0eb1de | 红：`npm test -w @di/ai`(1, 缺 AssemblerError 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 27/27, 含 P1.1 回归) | 无；后续卡：SSE framing（P3.2，进行中） |
-| P4 八个工具与平台执行 | P1 | todo | – | 未执行 | 预研已完成（27e3e60）；工具实现未开始（待 P6.1 完成后派 P4.1） |
+| P3 通用模型与 DeepSeek | P1 | in_progress | P3.1、P3.2（见子行）；P3.3 派发中 | 见子行 | 无 |
+| P3.1 provider chunk assembler | P1.1 | **verified** | c0eb1de | 红：`npm test -w @di/ai`(1, 缺 AssemblerError 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 27/27, 含 P1.1 回归) | 无；后续卡：SSE framing（P3.2） |
+| P3.2 HTTP/SSE framing | P3.1 | **verified** | e0a2457 | 红：`npm test -w @di/ai`(1, 缺 SseEventParser 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 59/59 = 32 新增 + 27 回归) | 无；后续卡：DeepSeek 翻译（P3.3） |
+| P4 八个工具与平台执行 | P1 | in_progress | P4.1 运行中 | 未执行 | 预研已完成（27e3e60） |
 | P5 检查点、恢复和统计 | P2, P4 | todo | – | 未执行 | 无 |
-| P6 Skills、配置、命令和日志 | P1 | in_progress | P6.1 进行中 | 未执行 | 无 |
+| P6 Skills、配置、命令和日志 | P1 | in_progress | P6.1（见子行）；P6.2 待派 | 见 P6.1 子行 | 无 |
+| P6.1 DI_HOME 解析、分层配置合并与 JSONC | P1.1 | **verified** | f96ca98 | 红：`npm run build -w @di/coding-agent && npm test -w @di/coding-agent`(1, 缺导出；再 1, 10/26 断言失败)。绿：`npm run build -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 26/26)、`npm run typecheck -w @di/coding-agent`(0)；`@di/agent` 8/8(0)；TUI 116 pass(0) | 无；`--info` 属 P6.3；资源路径写入属 P6.2 |
 | P7 TS 宿主 / RPC / 原 TUI | P3, P4, P5, P6 | todo | – | 未执行 | 无 |
 | P8 ChatGPT 认证 | P3, 凭据存储接口 | todo | – | 未执行 | 预研已完成（27e3e60）；ChatGPT auth 实现未开始 |
 | P9 本地 Runner、切换与完成 | P7, P8 | todo | – | 未执行 | 无 |
@@ -81,6 +83,21 @@
 - **实现决策：** trajectory = history + userMessage（不触碰调用方数组）；模型请求上下文 = 非空 systemPrompt 稳定前缀 + trajectory + 非空 systemContext 尾部 system 消息（镜像 `ReAct.BuildContext`）；单次模型调用，delta（textDelta/reasoningDelta/toolCallDelta）按序 await 转发；`completed` 取最后一次、缺 `completed` 抛 `LoopError("missing-completed")`；usage/cost 按 C# `TokenUsage.Add` / `CombineCost` 语义累加（可空字段单侧存在保留另一侧）；`checkpoint.appendMessage` 先于 `turnCompleted`；无工具调用返回 `stopReason=answer`；模型返回工具调用抛 `LoopError("tool-phase-not-implemented")`（诚实边界，不伪造答案、不静默执行工具）。事件顺序：纯答案路径事件序列为 `["turnCompleted"]`（ScriptedModel 只发 `completed`，与 fixture eventSequence 一致）；delta 转发另用流式模型单独测试。
 - **消息良构：** `maxIterations` 整数且 >= 0（0=无限）、`maxTokens` 正整数、`contextTokenBudget` 整数且 >= 0，越界在 loop 启动时抛 `RangeError`（不静默 clamp）；空 userMessage / 空 tools 正常处理不崩溃；provider 空 stream / 缺 finish 拒绝。
 - **未完成门槛：** 无（本卡范围）。工具往返（P2.2）、迭代上限 / 预算暂停、软停 / 硬取消、观察事件异常隔离、跨回合历史 / 快照、模型切换均为后续 P2 卡；`runAgentLoop` 当前对工具调用直接抛错，P2.2 落地前不可接真实工具。
+
+## P3.2 交接（e0a2457）
+
+- **交付：** `packages/ai/src/sse.ts`（`SseEvent` / `SseEventParser` / `SseStreamError` / `parseSseStream` / `TranslateEvent` / `sseToModelEvents`）从 `@di/ai` 公开导出；32 个测试 + 回归（59/59）。纯 push 式 SSE 状态机：per-char 扫描 + pending-CR 标志使 `\n` / `\r\n` / 孤立 `\r` 均能断行，CRLF 跨 chunk 分裂正确合并；W3C 字段语法（data/event/id、`:` 注释）、多行 data 以 `\n` 连接、空行派发；EOF 派发未决 data（不伪造空事件——红测抓到并修复）。字节解码用流式 `TextDecoder` + EOF flush，多字节跨帧正确重装。
+- **Idle 超时 / 中止：** `readWithGuard` 对每次 read 竞速 `setTimeout`，settle/abort 时总是清 timer（无泄漏，进程干净退出）；超时抛 `SseStreamError("timeout")`；调用方 signal reject 为 `SseStreamError("aborted")` 并 `reader.cancel()` 关闭连接；底层 `AbortError` 映射为 `aborted` 而非 `connection`。
+- **连接错误映射：** `ModelEvent` 无错误变体 → 传输/协议失败从 `AsyncIterable` **抛** `SseStreamError(code)`（永不挂起、不伪造成功）；in-band provider 错误以 `completed` 到达（finishReason `{type:"error"|"aborted", failure}`）；EOF 无终态 finish = 协议截断 → `SseStreamError("connection")`（可重试）。`IteratorClose` 保证消费者提前 break 时释放 reader 锁并关闭连接。
+- **依赖形状：** 直接消费 P3.1 的 `ProviderStreamAssembler` / `ProviderChunk` / `AssemblerError`（未改动）；缺终态由 glue 跟踪 `sawFinish` 抛 `"connection"`，不依赖 `AssemblerError("missing-finish")`。
+- **未完成门槛：** 无（本卡范围）。DeepSeek 线协议翻译 + `[DONE]`/坏 JSON 跳过（P3.3，`TranslateEvent` 接缝已留）、usage/cost（P3.4）、retry/backoff + 响应头等待 + 非 2xx/Retry-After 映射（P3.5）。
+
+## P6.1 交接（f96ca98）
+
+- **交付：** `packages/coding-agent/src/core/config/`（`di-home.ts` 的 `DiHome`、`di-config.ts` 的 `DiConfig.merge`/`load` + `DEFAULT_CONFIG`、`jsonc.ts` 的 `parseJsonc`/`parseJsonObject`/`ConfigParseError`）从 `src/index.ts` 导出；26 个测试。DI_HOME：env 优先、空白回退 `<userHome>/.di`、非空原样使用（相对路径保持相对，不调用 `GetFullPath`，与 C# 一致）；env/userHome 显式注入，无隐藏全局读取；测试全部隔离临时目录，用户配置只读不被创建/覆盖。
+- **合并：** 每来源扁平化为小写 `:`-key map，后层按 key 覆盖（深层合并而非浅层 spread，有专门测试拦截 `{...user,...project}`）；优先级 default → user → project → env；env 变量 `__`→`:`（单 `_` 字面量）、全部加载（对齐裸 `AddEnvironmentVariables()` 无前缀过滤）；JSON 值保留原生类型（number/bool/null），`get` 对 present-null 返回 `null`、missing 返回 `undefined`，`has()` 区分；未知键无害可寻址；非对象根/坏文件抛 `ConfigParseError`（对齐 .NET 坏配置失败），缺失文件可选。
+- **JSONC 依赖（按 operator-guide 新增依赖规则）：** `jsonc-parser@3.3.1`（精确固定，MIT）。用途：解析容忍注释+尾逗号的用户/项目配置与默认值。公共 API：`parse`、`printParseErrorCode`、`ParseError`（仅类型导入）。最小 Node：纯 JS 无依赖。**集成前最小探针 6/6 通过**（exit 0）：命名 ESM 导入解析、行/块注释与尾逗号零错误、number/float/bool/null 保留、坏文档填充带 offset/length 的错误、`printParseErrorCode` 返回字符串。锁文件 diff 仅含 `jsonc-parser` 条目 + coding-agent 依赖，无其它churn。
+- **未完成门槛：** 资源路径解析/写入（`sessions/` `logs/` `artifacts/` 权限受控 `auth/`、跨 dev checkout/安装包/任意 CWD 定位一致）属 P6.2；`--info` 如实报告属 P6.3 CLI。
 
 ## 下一张任务卡（P2 第二个单元：工具往返）
 
