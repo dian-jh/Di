@@ -158,7 +158,7 @@ export function createReadFileTool(
 }
 
 /** Resolve the OEM decoder for a non-UTF-8 file: explicit override or discovery. */
-async function resolveOemDecoder(options?: ReadFileToolOptions): Promise<LegacyDecoder | undefined> {
+export async function resolveOemDecoder(options?: ReadFileToolOptions): Promise<LegacyDecoder | undefined> {
   const codePage = options?.oemCodePage ?? (await discoverOemCodePage());
   if (codePage === undefined) return undefined;
   if (codePage === 65001) return undefined; // OEM is UTF-8; strict already failed.
@@ -182,7 +182,7 @@ function describeReadFailure(error: unknown): string {
  * `\n` are line terminators, a trailing terminator adds no empty line, and an
  * empty file has zero lines.
  */
-function splitLines(text: string): string[] {
+export function splitLines(text: string): string[] {
   if (text.length === 0) return [];
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const parts = normalized.split("\n");

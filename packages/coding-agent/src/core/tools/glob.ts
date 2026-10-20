@@ -122,7 +122,7 @@ function optionalPath(args: Readonly<Record<string, unknown>>): string | undefin
 }
 
 /** Format the budget like C# `TimeSpan.TotalSeconds.ToString("0.#")`. */
-function formatScanSeconds(ms: number): string {
+export function formatScanSeconds(ms: number): string {
   const seconds = Math.round((ms / 1000) * 10) / 10;
   return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1);
 }

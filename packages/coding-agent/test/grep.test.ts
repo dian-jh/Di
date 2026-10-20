@@ -146,12 +146,14 @@ test("oversized files are reported instead of silently skipped", async () => {
 });
 
 test("multiple oversized files report the total count with a sample", async () => {
+  // Scoped to its own directory so earlier tests' oversized files cannot change
+  // the total (shared base).
   const big = "x".repeat(GREP_MAX_BYTES_FOR_TEST) + "hit\n";
-  write("a.dat", big);
-  write("b.dat", big);
-  write("c.dat", big);
-  write("d.dat", big);
-  const obs = await run({ pattern: "hit" });
+  write("oversize/a.dat", big);
+  write("oversize/b.dat", big);
+  write("oversize/c.dat", big);
+  write("oversize/d.dat", big);
+  const obs = await run({ pattern: "hit", path: "oversize" });
   assert.ok(obs.text.includes("4 个文件超过 1 MiB 已跳过"), obs.text);
   assert.ok(obs.text.includes("a.dat"), obs.text);
   assert.ok(!obs.text.includes("d.dat"), obs.text);
@@ -202,8 +204,10 @@ test("match at EOF without trailing newline is reported", async () => {
 });
 
 test("empty file returns not-found", async () => {
-  write("a.txt", "");
-  const obs = await run({ pattern: "." });
+  // Scoped so the `.` pattern (matches any non-empty line) cannot hit leftover
+  // files from earlier tests in the shared base.
+  write("empty/a.txt", "");
+  const obs = await run({ pattern: ".", path: "empty" });
   assert.ok(obs.text.includes("未找到"), obs.text);
 });
 
@@ -307,11 +311,13 @@ test("scan budget exceeded returns a partial-result notice instead of no-match",
 test("pathological regex terminates via worker.terminate within a bounded time (Windows ReDoS evidence)", async () => {
   // (x+x+)+y against 30 x's + '!' is exponential in JS (>10s at n=28, probe §timeout).
   // A 500ms per-job timeout must terminate the worker and return — never hang.
-  write("bad.txt", "x".repeat(30) + "!");
-  write("good.txt", "xxy\n"); // matches (x+x+)+y quickly, no backtracking
+  // Scoped to its own directory so leftover files from the scan-budget test do
+  // not inflate the measured elapsed.
+  write("re/bad.txt", "x".repeat(30) + "!");
+  write("re/good.txt", "xxy\n"); // matches (x+x+)+y quickly, no backtracking
 
   const started = performance.now();
-  const obs = await run({ pattern: "(x+x+)+y" }, undefined, { regexTimeoutMs: 500 });
+  const obs = await run({ pattern: "(x+x+)+y", path: "re" }, undefined, { regexTimeoutMs: 500 });
   const elapsed = performance.now() - started;
 
   assert.equal(obs.isError, false, obs.text);
@@ -322,10 +328,14 @@ test("pathological regex terminates via worker.terminate within a bounded time (
 });
 
 test("abort during a hanging regex job terminates the worker and rejects with AbortError", async () => {
-  write("bad.txt", "x".repeat(28) + "!");
+  write("re-abort/bad.txt", "x".repeat(28) + "!");
   const controller = new AbortController();
   const started = performance.now();
-  const promise = run({ pattern: "(x+x+)+y" }, controller.signal, { regexTimeoutMs: 30_000 });
+  const promise = run(
+    { pattern: "(x+x+)+y", path: "re-abort" },
+    controller.signal,
+    { regexTimeoutMs: 30_000 },
+  );
   await new Promise((resolve) => setTimeout(resolve, 300));
   controller.abort();
   await assert.rejects(promise, { name: "AbortError" });
@@ -375,8 +385,9 @@ test("UTF-8 BOM is stripped so the first line matches cleanly", async () => {
 // ---- content encoding for matching (P4-win-encoding-probe) ----
 
 test("GBK (OEM 936) encoded content is matched via OEM decode", async () => {
-  // "中文内容" in GBK bytes; strict UTF-8 fails -> OEM 936 (gbk) decode matches.
-  writeBytes("gbk.txt", Buffer.from([0xd6, 0xd0, 0xce, 0xc4, 0xc4, 0xda, 0xcd, 0xe8]));
+  // "中文内容" in GBK bytes (verified via .NET GetEncoding(936)); strict UTF-8
+  // fails -> OEM 936 (gbk) decode matches.
+  writeBytes("gbk.txt", Buffer.from([0xd6, 0xd0, 0xce, 0xc4, 0xc4, 0xda, 0xc8, 0xdd]));
   const obs = await run({ pattern: "中文" }, undefined, { oemCodePage: 936 });
   assert.ok(obs.text.includes("gbk.txt:1: 中文内容"), obs.text);
 });
@@ -384,21 +395,27 @@ test("GBK (OEM 936) encoded content is matched via OEM decode", async () => {
 // ---- edge args ----
 
 test("context windows with close matches do not duplicate lines", async () => {
+  // C# ScanWithContext dedup: hits at lines 3 and 4 with context 2 emit windows
+  // [1..5] then [6..6]. The second match line (4) is rendered once as a context
+  // line of the first window (`a.txt-4-`), never re-emitted with its own `:`.
   write("a.txt", "one\ntwo\nthree\nfour\nfive\nsix\nseven");
   const obs = await run({ pattern: "three|four", context: 2 });
   const lines = obs.text.split("\n").filter((l) => l.startsWith("a.txt"));
+  assert.ok(lines.includes("a.txt:3: three"), obs.text); // first match keeps `:` format
   const counts = new Map<string, number>();
   for (const l of lines) counts.set(l, (counts.get(l) ?? 0) + 1);
   for (const [l, c] of counts) assert.equal(c, 1, `duplicate context line: ${l}`);
-  for (const n of [1, 2, 3, 4, 5, 6]) {
-    const marker = n === 3 || n === 4 ? `a.txt:${n}:` : `a.txt-${n}-`;
-    assert.ok(lines.some((l) => l.startsWith(marker)), `missing line ${n}`);
+  for (const n of [1, 2, 4, 5, 6]) {
+    assert.ok(lines.some((l) => l.startsWith(`a.txt-${n}-`)), `missing context line ${n}`);
   }
+  assert.ok(!lines.some((l) => l.startsWith("a.txt-7")), "window should stop at line 6");
 });
 
 test("limit of zero clamps to one result (C# Math.Max(1, limit))", async () => {
-  write("a.txt", "hit\nhit\nhit\n");
-  const obs = await run({ pattern: "hit", limit: 0 });
+  // Scoped so leftover "hit" files from the scan-budget test cannot satisfy the
+  // clamp before this file does.
+  write("clamp/a.txt", "hit\nhit\nhit\n");
+  const obs = await run({ pattern: "hit", path: "clamp", limit: 0 });
   const matchLines = obs.text.split("\n").filter((l) => l.startsWith("a.txt:"));
   assert.equal(matchLines.length, 1);
   assert.ok(obs.text.includes("1 条匹配上限"), obs.text);

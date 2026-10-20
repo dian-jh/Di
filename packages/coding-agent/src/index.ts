@@ -23,6 +23,15 @@ export {
 } from "./core/tools/read.ts";
 export { createGlobTool, GLOB_DEFAULT_LIMIT, GLOB_DEFAULT_SCAN_BUDGET_MS } from "./core/tools/glob.ts";
 export { globIsMatch, globToRegex } from "./core/tools/glob-matcher.ts";
+export {
+  createGrepTool,
+  GREP_DEFAULT_LIMIT,
+  GREP_DEFAULT_SCAN_BUDGET_MS,
+  GREP_MAX_FILE_BYTES,
+  GREP_MAX_MATCH_LINE_CHARS,
+  GREP_REGEX_TIMEOUT_MS,
+} from "./core/tools/grep.ts";
 export type { CoreTool } from "./core/tools/index.ts";
 export type { ReadFileToolOptions } from "./core/tools/read.ts";
 export type { GlobToolOptions } from "./core/tools/glob.ts";
+export type { GrepToolOptions } from "./core/tools/grep.ts";

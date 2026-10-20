@@ -4,13 +4,16 @@ import type { CoreTool } from "./types.ts";
 import { createReadFileTool, type ReadFileToolOptions } from "./read.ts";
 import { createWriteFileTool } from "./write.ts";
 import { createEditFileTool } from "./edit.ts";
+import { createGrepTool, type GrepToolOptions } from "./grep.ts";
 
 export type { CoreTool } from "./types.ts";
 export type { ReadFileToolOptions } from "./read.ts";
+export type { GrepToolOptions } from "./grep.ts";
 export { READ_FILE_MAX_BYTES, READ_FILE_MAX_OUTPUT_LINES, READ_FILE_MAX_OUTPUT_CHARS } from "./read.ts";
 export { createReadFileTool } from "./read.ts";
 export { createWriteFileTool } from "./write.ts";
 export { createEditFileTool } from "./edit.ts";
+export { createGrepTool, GREP_DEFAULT_LIMIT, GREP_DEFAULT_SCAN_BUDGET_MS, GREP_MAX_FILE_BYTES, GREP_MAX_MATCH_LINE_CHARS, GREP_REGEX_TIMEOUT_MS } from "./grep.ts";
 
 /**
  * The three file tools in canonical order (read/write/edit), the first slice of

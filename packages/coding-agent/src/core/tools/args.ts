@@ -62,6 +62,21 @@ export function getOptionalInt(
   return { ok: true, value };
 }
 
+/** Optional boolean; absent is fine, present-but-invalid is an error (C# TryGetOptionalBool). */
+export function getOptionalBool(
+  args: Readonly<Record<string, unknown>>,
+  name: string,
+): ParseResult<boolean | undefined> {
+  if (!(name in args)) {
+    return { ok: true, value: undefined };
+  }
+  const value = args[name];
+  if (typeof value !== "boolean") {
+    return { ok: false, error: `error: 参数 '${name}' 必须是布尔值` };
+  }
+  return { ok: true, value };
+}
+
 /** Build the JSON-Schema `parameters` object for a tool definition. */
 export function toolSchema(
   required: readonly (readonly [name: string, type: string, description: string])[],
