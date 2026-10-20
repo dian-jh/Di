@@ -35,6 +35,23 @@ export type { CoreTool } from "./core/tools/index.ts";
 export type { ReadFileToolOptions } from "./core/tools/read.ts";
 export type { GlobToolOptions } from "./core/tools/glob.ts";
 export type { GrepToolOptions } from "./core/tools/grep.ts";
+export {
+  BoundedByteBuffer,
+  OutputBuffer,
+  OUTPUT_HEAD_BYTES,
+  OUTPUT_HEAD_CHARS,
+  OUTPUT_MAX_BYTES,
+  OUTPUT_MAX_CHARS,
+  OUTPUT_TAIL_BYTES,
+  OUTPUT_TAIL_CHARS,
+} from "./core/tools/output-buffer.ts";
+export {
+  PROCESS_DRAIN_BUDGET_MS,
+  PROCESS_KILL_BUDGET_MS,
+  ProcessResult,
+  runProcess,
+} from "./core/tools/process-runner.ts";
+export type { ProcessRunOptions } from "./core/tools/process-runner.ts";
 
 export { AgentSession, SessionBusyError, SessionModelError } from "./core/agent-session.ts";
 export type {
