@@ -1268,3 +1268,179 @@ test("an AbortError thrown by a tool propagates as a rejection, never an isError
     "toolStarted fires, but an AbortError must never surface as a toolCompleted error observation",
   );
 });
+
+// ---------------------------------------------------------------------------
+// P2.5 observer vs checkpoint error isolation
+// (loop-and-state.md §"事件 sink 是观测旁路，不是控制面": observer failures are
+// caught, ordered through onObserverError, and never stall the loop, block an
+// authorized tool, or turn a success into a failure; checkpoint failures stay
+// fail-closed — the error aborts the loop unchanged. C# baseline ReAct.Emit is
+// fire-and-forget and the event bus isolates subscriber exceptions.)
+// ---------------------------------------------------------------------------
+
+test("an events-sink throw after turnCompleted does not block the authorized tool or change the stop reason", async () => {
+  const model = new ScriptedModel({
+    responses: [
+      step("need data", [{ id: "c1", name: "echo", arguments: "{}" }]),
+      step("done", []),
+    ],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+  const emitted: AgentEvent[] = [];
+  const diagnosed: { error: unknown; event: AgentEvent }[] = [];
+
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+    {
+      model,
+      toolExecutor: executor,
+      estimateRequestTokens: () => 0,
+      events: (event) => {
+        if (event.type === "turnCompleted" && event.iteration === 1) {
+          throw new Error("observer boom");
+        }
+        emitted.push(event);
+      },
+      onObserverError: (error, event) => {
+        diagnosed.push({ error, event });
+      },
+    },
+  );
+
+  assert.equal(result.stopReason, "answer", "a bad observer must not turn a success into a failure");
+  assert.equal(result.iterations, 2);
+  assert.equal(executor.calls.length, 1, "the already-authorized tool must still execute");
+  assert.deepEqual(
+    emitted.map((event) => event.type),
+    ["toolStarted", "toolCompleted", "turnCompleted"],
+    "events after the throw still flow in order",
+  );
+  assert.equal(diagnosed.length, 1, "onObserverError is called only when the sink throws");
+  assert.equal(diagnosed[0]?.event.type, "turnCompleted");
+  assert.equal((diagnosed[0]?.event as Extract<AgentEvent, { type: "turnCompleted" }>).iteration, 1);
+  assert.match((diagnosed[0]?.error as Error).message, /observer boom/);
+});
+
+test("a throwing events sink keeps later events flowing and onObserverError sees (error, event) in order", async () => {
+  const model = new ScriptedModel({
+    responses: [
+      step("need data", [{ id: "c1", name: "echo", arguments: "{}" }]),
+      step("done", []),
+    ],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+  const diagnosed: { error: unknown; event: AgentEvent }[] = [];
+
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+    {
+      model,
+      toolExecutor: executor,
+      estimateRequestTokens: () => 0,
+      events: () => {
+        throw new Error("observer boom");
+      },
+      onObserverError: (error, event) => {
+        diagnosed.push({ error, event });
+      },
+    },
+  );
+
+  assert.equal(result.stopReason, "answer", "a bad observer must not turn a success into a failure");
+  assert.equal(result.iterations, 2);
+  assert.equal(executor.calls.length, 1, "the authorized tool must still execute despite a bad observer");
+  assert.deepEqual(
+    diagnosed.map((entry) => entry.event.type),
+    ["turnCompleted", "toolStarted", "toolCompleted", "turnCompleted"],
+    "every event reaches onObserverError in emission order",
+  );
+  for (const entry of diagnosed) {
+    assert.match((entry.error as Error).message, /observer boom/);
+  }
+});
+
+test("a throwing onObserverError is swallowed and the loop continues (no unhandled rejection)", async () => {
+  const model = new ScriptedModel({
+    responses: [
+      step("need data", [{ id: "c1", name: "echo", arguments: "{}" }]),
+      step("done", []),
+    ],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+
+  // The node:test runner fails a test on an unhandled rejection, so the run
+  // resolving cleanly with the loop intact is the observable proof that the
+  // diagnostic callback's own throw was swallowed rather than rethrown.
+  const result = await runAgentLoop(
+    { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+    {
+      model,
+      toolExecutor: executor,
+      estimateRequestTokens: () => 0,
+      events: () => {
+        throw new Error("observer boom");
+      },
+      onObserverError: () => {
+        throw new Error("diagnostic boom");
+      },
+    },
+  );
+
+  assert.equal(result.stopReason, "answer", "a throwing diagnostic callback must not fail the turn");
+  assert.equal(result.iterations, 2);
+  assert.equal(executor.calls.length, 1, "the authorized tool still executes");
+});
+
+test("a throwing checkpoint.appendMessage aborts the run with that error and no tool runs", async () => {
+  const model = new ScriptedModel({
+    responses: [
+      step("need data", [{ id: "c1", name: "echo", arguments: "{}" }]),
+      step("done", []),
+    ],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+  const checkpoint: LoopCheckpoint = {
+    appendMessage: () => {
+      throw new Error("append boom");
+    },
+    toolStarted: () => {},
+    toolCompleted: () => {},
+  };
+
+  await assert.rejects(
+    runAgentLoop(
+      { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+      { model, toolExecutor: executor, estimateRequestTokens: () => 0, checkpoint },
+    ),
+    /append boom/,
+  );
+  assert.equal(model.callCount, 1, "no next model call may start after the message checkpoint fails");
+  assert.equal(executor.calls.length, 0, "no tool may run when the assistant-message checkpoint fails");
+});
+
+test("a throwing checkpoint.toolCompleted aborts the run and prevents the next model call", async () => {
+  const model = new ScriptedModel({
+    responses: [
+      step("need data", [{ id: "c1", name: "echo", arguments: "{}" }]),
+      step("should never be reached", []),
+    ],
+  });
+  const executor = new RecordingExecutor((call) => ({ text: "ok", isError: false }));
+  const checkpoint: LoopCheckpoint = {
+    appendMessage: () => {},
+    toolStarted: () => {},
+    toolCompleted: () => {
+      throw new Error("result boom");
+    },
+  };
+
+  await assert.rejects(
+    runAgentLoop(
+      { sessionId: "s1", systemPrompt: "test system prompt", userMessage: "go", history: [], tools: [] },
+      { model, toolExecutor: executor, estimateRequestTokens: () => 0, checkpoint },
+    ),
+    /result boom/,
+  );
+  assert.equal(executor.calls.length, 1, "the tool already executed; its result checkpoint failed");
+  assert.equal(model.callCount, 1, "no next model call may start when the result checkpoint fails (fail-closed)");
+});
