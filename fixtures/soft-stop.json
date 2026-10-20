@@ -1,0 +1,62 @@
+{
+  "id": "soft-stop",
+  "kind": "loop",
+  "scenario": "soft-stop",
+  "description": "Soft stop requested right after the model produced tool calls, before tool execution (phase boundary B1). The loop returns stopReason=interrupted, executes no tool, issues no further model call, and preserves the model's visible text as the answer. The interrupted event is emitted.",
+  "source": {
+    "baseline": "09f4e0816c1b2dc42461e79a968b46e811d3880c",
+    "tests": [
+      "Di.Tests/AgentLoop/ReActInterruptTests.cs::StopRequested_AfterModelProducedToolCalls_DoesNotExecuteTools"
+    ],
+    "docs": "docs/migration/typescript-core/loop-and-state.md §中断、取消与并发生命周期; docs/modules/interrupt.md"
+  },
+  "input": {
+    "sessionId": "soft-stop",
+    "systemPrompt": "test system prompt",
+    "userMessage": "hello",
+    "history": [],
+    "systemContext": null,
+    "tools": [],
+    "contextTokenBudget": null,
+    "maxIterations": 8,
+    "maxTokens": null,
+    "reasoningEffort": null,
+    "finalOutputTool": null,
+    "interrupt": { "softStopAfterTurn": 1 },
+    "model": {
+      "responses": [
+        {
+          "text": "let me check",
+          "toolCalls": [{ "id": "c1", "name": "echo", "arguments": "{}" }],
+          "finishReason": "tool-calls",
+          "failure": null,
+          "usage": { "inputTokens": 0, "outputTokens": 0 },
+          "cost": null,
+          "model": "fake"
+        }
+      ]
+    }
+  },
+  "expected": {
+    "stopReason": "interrupted",
+    "answer": "let me check",
+    "iterations": 1,
+    "usage": { "inputTokens": 0, "outputTokens": 0 },
+    "cost": null,
+    "failure": null,
+    "modelRequestCount": 1,
+    "eventSequence": ["turnCompleted", "interrupted"],
+    "toolCalls": [],
+    "trajectoryCount": 2,
+    "trajectory": [
+      { "role": "user", "content": [{ "type": "text", "text": "hello" }] },
+      {
+        "role": "assistant",
+        "content": [
+          { "type": "text", "text": "let me check" },
+          { "type": "tool-call", "id": "c1", "name": "echo", "arguments": "{}" }
+        ]
+      }
+    ]
+  }
+}

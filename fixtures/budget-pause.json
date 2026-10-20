@@ -1,0 +1,42 @@
+{
+  "id": "budget-pause",
+  "kind": "loop",
+  "scenario": "budget-pause",
+  "description": "The estimated full request exceeds the host-provided contextTokenBudget before the first model call. The loop returns stopReason=context_limit, never calls the model, and preserves the trajectory (the oversized user message). ContextLimit is an explicit pause: no auto-trim, no summary.",
+  "source": {
+    "baseline": "09f4e0816c1b2dc42461e79a968b46e811d3880c",
+    "tests": [
+      "Di.Tests/AgentLoop/ReActTests.cs::RunAsync_ContextBudgetExceededBeforeModelCall_ReturnsContextLimit"
+    ],
+    "docs": "docs/migration/typescript-core/loop-and-state.md §AgentSession 历史与恢复 (ContextLimit 显式暂停)"
+  },
+  "input": {
+    "sessionId": "budget-pause",
+    "systemPrompt": "test system prompt",
+    "userMessage": "this request is too large",
+    "history": [],
+    "systemContext": null,
+    "tools": [],
+    "contextTokenBudget": 1,
+    "maxIterations": 8,
+    "maxTokens": null,
+    "reasoningEffort": null,
+    "finalOutputTool": null,
+    "model": { "responses": [] }
+  },
+  "expected": {
+    "stopReason": "context_limit",
+    "answer": "",
+    "iterations": 0,
+    "usage": { "inputTokens": 0, "outputTokens": 0 },
+    "cost": null,
+    "failure": null,
+    "modelRequestCount": 0,
+    "eventSequence": [],
+    "toolCalls": [],
+    "trajectoryCount": 1,
+    "trajectory": [
+      { "role": "user", "content": [{ "type": "text", "text": "this request is too large" }] }
+    ]
+  }
+}

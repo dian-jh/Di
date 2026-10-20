@@ -1,0 +1,67 @@
+{
+  "id": "hard-cancel",
+  "kind": "loop",
+  "scenario": "hard-cancel",
+  "description": "Hard cancel: the run's AbortSignal is aborted while a tool executes (cancelAfterTool). The run rejects with an AbortError instead of producing a normal stopReason; the host maps that rejection to the wire 'cancelled'. Fields other than rejects document the observable partial state at the abort point (not a returned AgentResult).",
+  "source": {
+    "baseline": "09f4e0816c1b2dc42461e79a968b46e811d3880c",
+    "tests": [
+      "Di.Tests/AgentLoop/ReActTests.cs::RunAsync_UnlimitedLoopChecksCancellationBetweenToolAndNextModelCall"
+    ],
+    "docs": "docs/migration/typescript-core/loop-and-state.md §中断、取消与并发生命周期 (hard abort 通过 AbortError rejection 表达)"
+  },
+  "input": {
+    "sessionId": "hard-cancel",
+    "systemPrompt": "test system prompt",
+    "userMessage": "hello",
+    "history": [],
+    "systemContext": null,
+    "tools": [
+      { "name": "echo", "description": "test tool", "parameters": { "type": "object", "properties": {} } }
+    ],
+    "contextTokenBudget": null,
+    "maxIterations": 0,
+    "maxTokens": null,
+    "reasoningEffort": null,
+    "finalOutputTool": null,
+    "interrupt": { "cancelAfterTool": true },
+    "model": {
+      "responses": [],
+      "fallback": {
+        "text": "working",
+        "toolCalls": [{ "id": "c1", "name": "echo", "arguments": "{}" }],
+        "finishReason": "tool-calls",
+        "failure": null,
+        "usage": { "inputTokens": 0, "outputTokens": 0 },
+        "cost": null,
+        "model": "fake"
+      }
+    }
+  },
+  "expected": {
+    "stopReason": null,
+    "rejects": { "errorName": "AbortError" },
+    "answer": "",
+    "iterations": 1,
+    "usage": { "inputTokens": 0, "outputTokens": 0 },
+    "cost": null,
+    "failure": null,
+    "modelRequestCount": 1,
+    "eventSequence": ["turnCompleted", "toolStarted", "toolCompleted"],
+    "toolCalls": [
+      { "id": "c1", "name": "echo", "arguments": "{}", "observation": "done", "isError": false }
+    ],
+    "trajectoryCount": 3,
+    "trajectory": [
+      { "role": "user", "content": [{ "type": "text", "text": "hello" }] },
+      {
+        "role": "assistant",
+        "content": [
+          { "type": "text", "text": "working" },
+          { "type": "tool-call", "id": "c1", "name": "echo", "arguments": "{}" }
+        ]
+      },
+      { "role": "tool", "toolCallId": "c1", "content": "done", "isError": false }
+    ]
+  }
+}

@@ -1,0 +1,237 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://di.local/fixtures/schema.json",
+  "title": "Di TypeScript Core cross-language fixture",
+  "description": "Shared input/expected contract between the C# baseline (09f4e08) and the TypeScript core. Expected values are derived from the baseline tests or leaf docs, never from generated TS output. The authoritative human-readable documentation is fixtures/README.md.",
+  "type": "object",
+  "required": ["id", "scenario", "description", "input", "expected"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "kind": { "enum": ["loop", "host-recovery"], "default": "loop" },
+    "scenario": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "source": {
+      "type": "object",
+      "properties": {
+        "baseline": { "type": "string" },
+        "tests": { "type": "array", "items": { "type": "string" } },
+        "docs": { "type": "string" }
+      }
+    },
+    "input": {
+      "oneOf": [
+        {
+          "description": "Pure-loop input: an AgentRequest plus a scripted fake model and optional interrupt timing.",
+          "type": "object",
+          "required": [
+            "sessionId",
+            "systemPrompt",
+            "userMessage",
+            "history",
+            "tools",
+            "contextTokenBudget",
+            "maxIterations",
+            "model"
+          ],
+          "properties": {
+            "sessionId": { "type": "string" },
+            "systemPrompt": { "type": "string" },
+            "userMessage": { "type": "string" },
+            "history": { "type": "array", "items": { "$ref": "#/definitions/message" } },
+            "systemContext": { "type": ["string", "null"] },
+            "tools": { "type": "array", "items": { "$ref": "#/definitions/toolSpec" } },
+            "contextTokenBudget": { "type": ["number", "null"], "minimum": 0 },
+            "maxIterations": { "type": "number", "minimum": 0 },
+            "maxTokens": { "type": ["number", "null"], "minimum": 1 },
+            "reasoningEffort": { "type": ["string", "null"] },
+            "finalOutputTool": { "type": ["string", "null"] },
+            "interrupt": {
+              "type": "object",
+              "properties": {
+                "softStopAfterTurn": { "type": "number", "minimum": 1 },
+                "cancelAfterTool": { "type": "boolean" }
+              }
+            },
+            "model": { "$ref": "#/definitions/modelScript" }
+          }
+        },
+        {
+          "description": "Host-recovery input: a checkpointed trajectory whose tool outcome is unknown.",
+          "type": "object",
+          "required": ["sessionId", "checkpointState", "attemptedPrompt", "checkpointedTrajectory"],
+          "properties": {
+            "sessionId": { "type": "string" },
+            "checkpointState": { "type": "string" },
+            "attemptedPrompt": { "type": "string" },
+            "checkpointedTrajectory": { "type": "array", "items": { "$ref": "#/definitions/message" } }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "oneOf": [
+        {
+          "description": "Pure-loop expected outcome (an AgentResult plus event/executor contract).",
+          "type": "object",
+          "required": ["stopReason", "answer", "iterations", "usage", "modelRequestCount", "eventSequence", "toolCalls", "trajectoryCount"],
+          "properties": {
+            "stopReason": {
+              "type": ["string", "null"],
+              "enum": ["answer", "final_output_tool", "max_iterations", "error", "interrupted", "context_limit", null]
+            },
+            "rejects": { "type": "object", "properties": { "errorName": { "type": "string" } } },
+            "answer": { "type": "string" },
+            "iterations": { "type": "number", "minimum": 0 },
+            "usage": { "$ref": "#/definitions/tokenUsage" },
+            "cost": { "type": ["object", "null"], "additionalProperties": { "type": "number" } },
+            "failure": {
+              "type": ["object", "null"],
+              "properties": {
+                "message": { "type": "string" },
+                "code": { "type": "string" },
+                "status": { "type": "number" },
+                "providerRetryAfterMs": { "type": "number" },
+                "requestId": { "type": "string" }
+              }
+            },
+            "modelRequestCount": { "type": "number", "minimum": 0 },
+            "eventSequence": { "type": "array", "items": { "type": "string" } },
+            "toolCalls": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "name", "arguments", "observation", "isError"],
+                "properties": {
+                  "id": { "type": "string" },
+                  "name": { "type": "string" },
+                  "arguments": { "type": "string" },
+                  "observation": { "type": "string" },
+                  "isError": { "type": "boolean" }
+                }
+              }
+            },
+            "trajectoryCount": { "type": "number", "minimum": 0 },
+            "trajectory": { "type": "array", "items": { "$ref": "#/definitions/message" } }
+          }
+        },
+        {
+          "description": "Host-recovery expected outcome: fail-closed block.",
+          "type": "object",
+          "required": ["blocksAutoRetry", "requires", "modelRequestCount", "toolCalls"],
+          "properties": {
+            "blocksAutoRetry": { "type": "boolean" },
+            "requires": { "type": "string" },
+            "modelRequestCount": { "type": "number", "minimum": 0 },
+            "toolCalls": { "type": "array" }
+          }
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "message": {
+      "type": "object",
+      "oneOf": [
+        { "required": ["role", "text"], "properties": { "role": { "const": "system" }, "text": { "type": "string" } } },
+        {
+          "required": ["role", "content"],
+          "properties": {
+            "role": { "enum": ["user", "assistant"] },
+            "content": { "type": "array", "items": { "$ref": "#/definitions/contentBlock" } }
+          }
+        },
+        {
+          "required": ["role", "toolCallId", "content", "isError"],
+          "properties": {
+            "role": { "const": "tool" },
+            "toolCallId": { "type": "string" },
+            "content": { "type": "string" },
+            "isError": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "contentBlock": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string" },
+        "text": { "type": "string" },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "arguments": { "type": "string" }
+      }
+    },
+    "toolSpec": {
+      "type": "object",
+      "required": ["name", "description", "parameters"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "parameters": { "type": "object" },
+        "strict": { "type": "boolean" }
+      }
+    },
+    "toolCall": {
+      "type": "object",
+      "required": ["id", "name", "arguments"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "arguments": { "type": "string" }
+      }
+    },
+    "tokenUsage": {
+      "type": "object",
+      "required": ["inputTokens", "outputTokens"],
+      "properties": {
+        "inputTokens": { "type": "number" },
+        "outputTokens": { "type": "number" },
+        "totalTokens": { "type": "number" },
+        "cacheReadTokens": { "type": "number" },
+        "cacheWriteTokens": { "type": "number" },
+        "reasoningTokens": { "type": "number" }
+      }
+    },
+    "llmFailure": {
+      "type": ["object", "null"],
+      "properties": {
+        "message": { "type": "string" },
+        "code": { "type": "string" },
+        "status": { "type": "number" },
+        "providerRetryAfterMs": { "type": "number" },
+        "requestId": { "type": "string" }
+      }
+    },
+    "modelStep": {
+      "type": "object",
+      "oneOf": [
+        {
+          "description": "Completed model response for this call.",
+          "required": ["text", "toolCalls", "finishReason", "usage", "model"],
+          "properties": {
+            "text": { "type": ["string", "null"] },
+            "toolCalls": { "type": "array", "items": { "$ref": "#/definitions/toolCall" } },
+            "finishReason": { "enum": ["stop", "tool-calls", "max-tokens"] },
+            "usage": { "$ref": "#/definitions/tokenUsage" },
+            "cost": { "type": ["object", "null"] },
+            "model": { "type": "string" }
+          }
+        },
+        {
+          "description": "Model call rejects with a non-retryable failure fact.",
+          "required": ["failure"],
+          "properties": { "failure": { "$ref": "#/definitions/llmFailure" } }
+        }
+      ]
+    },
+    "modelScript": {
+      "type": "object",
+      "required": ["responses"],
+      "properties": {
+        "responses": { "type": "array", "items": { "$ref": "#/definitions/modelStep" } },
+        "fallback": { "$ref": "#/definitions/modelStep" }
+      }
+    }
+  }
+}

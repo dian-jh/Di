@@ -1,0 +1,34 @@
+{
+  "id": "recovery-unknown-tool-outcome",
+  "kind": "host-recovery",
+  "scenario": "recovery",
+  "description": "Host recovery boundary (P5): a previous turn checkpointed a tool intent but its outcome is unknown (crash or cancel before the result was written). Auto-continuation of the same session must be blocked fail-closed until history reset or manual review; no model call and no tool side effect may start. This is a host-level (AgentSession) contract, not a pure-loop run.",
+  "source": {
+    "baseline": "09f4e0816c1b2dc42461e79a968b46e811d3880c",
+    "tests": [
+      "Di.Tests/AgentLoop/AgentRunnerTests.cs::UnknownToolOutcome_BlocksInProcessRetryUntilHistoryReset"
+    ],
+    "docs": "docs/migration/typescript-core/loop-and-state.md §AgentSession 历史与恢复; docs/migration/typescript-core/sessions-and-compatibility.md"
+  },
+  "input": {
+    "sessionId": "recovery-unknown-tool-outcome",
+    "checkpointState": "tool-intent-written-result-unknown",
+    "attemptedPrompt": "continue",
+    "checkpointedTrajectory": [
+      { "role": "user", "content": [{ "type": "text", "text": "write file" }] },
+      {
+        "role": "assistant",
+        "content": [
+          { "type": "text", "text": "writing" },
+          { "type": "tool-call", "id": "c1", "name": "write", "arguments": "{\"path\":\"a.txt\"}" }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "blocksAutoRetry": true,
+    "requires": "reset-or-manual-review",
+    "modelRequestCount": 0,
+    "toolCalls": []
+  }
+}

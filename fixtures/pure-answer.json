@@ -1,0 +1,55 @@
+{
+  "id": "pure-answer",
+  "kind": "loop",
+  "scenario": "pure-answer",
+  "description": "Model returns a tool-free final answer in a single iteration. The loop stops with stopReason=answer, executes no tool, and the trajectory is exactly [user, assistant].",
+  "source": {
+    "baseline": "09f4e0816c1b2dc42461e79a968b46e811d3880c",
+    "tests": [
+      "Di.Tests/AgentLoop/ReActTests.cs::RunAsync_ModelReturnsNoToolCall_ReturnsAnswerWithTrajectory"
+    ],
+    "docs": "docs/migration/typescript-core/loop-and-state.md §iteration 与停止理由"
+  },
+  "input": {
+    "sessionId": "pure-answer",
+    "systemPrompt": "test system prompt",
+    "userMessage": "hello",
+    "history": [],
+    "systemContext": null,
+    "tools": [],
+    "contextTokenBudget": null,
+    "maxIterations": 8,
+    "maxTokens": null,
+    "reasoningEffort": null,
+    "finalOutputTool": null,
+    "model": {
+      "responses": [
+        {
+          "text": "final answer",
+          "toolCalls": [],
+          "finishReason": "stop",
+          "failure": null,
+          "usage": { "inputTokens": 0, "outputTokens": 0 },
+          "cost": null,
+          "model": "fake"
+        }
+      ]
+    }
+  },
+  "expected": {
+    "stopReason": "answer",
+    "answer": "final answer",
+    "iterations": 1,
+    "usage": { "inputTokens": 0, "outputTokens": 0 },
+    "cost": null,
+    "failure": null,
+    "modelRequestCount": 1,
+    "eventSequence": ["turnCompleted"],
+    "toolCalls": [],
+    "trajectoryCount": 2,
+    "trajectory": [
+      { "role": "user", "content": [{ "type": "text", "text": "hello" }] },
+      { "role": "assistant", "content": [{ "type": "text", "text": "final answer" }] }
+    ]
+  }
+}
