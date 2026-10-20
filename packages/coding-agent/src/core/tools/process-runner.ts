@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess, StdioOptions } from "node:child_process";
+import { basename } from "node:path";
 import { messageOf } from "./errors.ts";
 import { BoundedByteBuffer } from "./output-buffer.ts";
 import { smartDecode, type LegacyDecoder } from "./encoding.ts";
 import { resolveOemDecoder } from "./read.ts";
+import { ProcessDiagnostics } from "../logging/process-diagnostics.ts";
 
 /**
  * One-shot process runner (port of `Core/Tools/ProcessRunner.cs` at 09f4e08 +
@@ -35,6 +37,25 @@ export const PROCESS_KILL_BUDGET_MS = 5000;
 /** POSIX SIGTERM grace before SIGKILL when killing the process group. */
 const POSIX_KILL_GRACE_MS = 1500;
 
+/**
+ * Process-diagnostics knobs (P7a closing the P6.4 emission seam; C#
+ * `Core/Tools/ProcessRunner.cs` at baseline 09f4e08): the runner emits bypass
+ * `proc: start / start_failed / running / timeout / exited` lines through the
+ * static {@link ProcessDiagnostics} hook. The heartbeat cadence and the
+ * slow-success threshold are injectable so tests observe them without a
+ * multi-second run (production defaults mirror C#).
+ */
+export interface ProcessDiagnosticsOptions {
+  /** Heartbeat cadence, ms (C# 5000); `proc: running` lines emitted while the process lives. */
+  readonly heartbeatIntervalMs?: number;
+  /** Heartbeat tick cadence, ms (C# 1000); the process-liveness poll. */
+  readonly heartbeatTickMs?: number;
+  /** Minimum timeout for the heartbeat to start, ms (C# 3000 = `timeout >= 3s`). */
+  readonly heartbeatMinTimeoutMs?: number;
+  /** Minimum elapsed time for the `proc: exited` slow-success line, ms (C# 2000). */
+  readonly exitedMinElapsedMs?: number;
+}
+
 export interface ProcessRunOptions {
   /** Working directory (spawn cwd). */
   readonly cwd?: string;
@@ -54,6 +75,8 @@ export interface ProcessRunOptions {
   readonly killBudgetMs?: number;
   /** Override the OEM code page used for non-UTF-8 decode (undefined = auto-discover). */
   readonly oemCodePage?: number;
+  /** Process-diagnostic knobs (heartbeat cadence / slow-success threshold); undefined = C# defaults. */
+  readonly diagnostics?: ProcessDiagnosticsOptions;
 }
 
 /** One process execution result, rendered as the tool observation text. */
@@ -88,7 +111,14 @@ export async function runProcess(
     drainBudgetMs = PROCESS_DRAIN_BUDGET_MS,
     killBudgetMs = PROCESS_KILL_BUDGET_MS,
     oemCodePage,
+    diagnostics,
   } = options;
+  const heartbeatIntervalMs = diagnostics?.heartbeatIntervalMs ?? 5000;
+  const heartbeatTickMs = diagnostics?.heartbeatTickMs ?? 1000;
+  const heartbeatMinTimeoutMs = diagnostics?.heartbeatMinTimeoutMs ?? 3000;
+  const exitedMinElapsedMs = diagnostics?.exitedMinElapsedMs ?? 2000;
+  const programName = basename(file);
+  const startedAt = Date.now();
 
   // Already-cancelled at entry: propagate cancel without starting anything.
   if (externalSignal?.aborted === true) {
@@ -137,6 +167,7 @@ export async function runProcess(
       detached: process.platform !== "win32",
     });
   } catch (error) {
+    diagnose(`proc: start_failed name=${programName} error=${truncateField(messageOf(error))}`);
     cleanup();
     return new ProcessResult(-1, "", `无法启动进程: ${messageOf(error)}`);
   }
@@ -157,11 +188,25 @@ export async function runProcess(
     child.once("error", (error) => resolve(error));
   });
   if (spawnFailure !== null) {
+    diagnose(`proc: start_failed name=${programName} error=${truncateField(messageOf(spawnFailure))}`);
     destroyStreams();
     await Promise.allSettled(drainTasks);
     cleanup();
     return new ProcessResult(-1, "", `无法启动进程: ${messageOf(spawnFailure)}`);
   }
+
+  // ---- process-level diagnostics (proc: lines, see ProcessDiagnostics) ----
+  // The bypass hook must never affect execution: diagnose() guards everything.
+  diagnose(
+    `proc: start name=${programName} pid=${child.pid ?? 0} timeout_s=${formatTimeoutSeconds(timeoutMs)}` +
+      ` cwd=${truncateField(cwd ?? "")} cmd=<<${truncateField(commandLine(file, args))}>>`,
+  );
+  const heartbeat = startHeartbeatMonitor(child, timeoutMs, programName, startedAt, {
+    intervalMs: heartbeatIntervalMs,
+    tickMs: heartbeatTickMs,
+    minTimeoutMs: heartbeatMinTimeoutMs,
+  });
+  if (heartbeat !== null) cleanupFns.push(heartbeat.stop);
 
   const childExit = new Promise<number | null>((resolve) => {
     child.once("exit", (code) => resolve(code));
@@ -194,6 +239,12 @@ export async function runProcess(
     if (!closed) destroyStreams();
     await Promise.allSettled(drainTasks);
     const partial = await decodeOutput(buffer, outputEncoding, oemCodePage);
+    if (!externalAbort) {
+      diagnose(
+        `proc: timeout name=${programName} pid=${child.pid ?? 0} elapsed_ms=${Date.now() - startedAt}` +
+          ` partial=<<${truncateField(partial, 300)}>>`,
+      );
+    }
     cleanup();
     if (externalAbort) {
       throw new DOMException("The operation was aborted.", "AbortError");
@@ -220,6 +271,12 @@ export async function runProcess(
     throw new DOMException("The operation was aborted.", "AbortError");
   }
   const output = await decodeOutput(buffer, outputEncoding, oemCodePage);
+  // Slow-success (>=2s default): a normal multi-second command gets a record too,
+  // so a later timeout can be compared against how long the command normally took.
+  const elapsedMs = Date.now() - startedAt;
+  if (elapsedMs >= exitedMinElapsedMs) {
+    diagnose(`proc: exited name=${programName} pid=${child.pid ?? 0} exit=${exitCode ?? -1} elapsed_ms=${elapsedMs}`);
+  }
   cleanup();
   return new ProcessResult(exitCode, output, null);
 }
@@ -366,6 +423,70 @@ function mergeEnv(overrides: Readonly<Record<string, string>> | undefined): Node
 function formatTimeoutSeconds(timeoutMs: number | undefined): string {
   const seconds = (timeoutMs ?? 0) / 1000;
   return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1);
+}
+
+// ---- process-level diagnostics (proc: lines, see ProcessDiagnostics) ----
+
+/**
+ * Emit one process-diagnostic line: the hook is nullable and exceptions are
+ * swallowed — diagnostics are a bypass observation and must never affect the
+ * process they are watching (C# `ProcessRunner.Diagnose`).
+ */
+function diagnose(message: string): void {
+  try {
+    ProcessDiagnostics.log?.(message);
+  } catch {
+    // Diagnostics never throw.
+  }
+}
+
+/** Collapse control characters and truncate long fields (C# `TruncateField`: 200, 300 for partial). */
+function truncateField(text: string, max = 200): string {
+  const flat = text.replace(/\r/g, " ").replace(/\n/g, " ");
+  return flat.length <= max ? flat : flat.slice(0, max) + "…";
+}
+
+/** Reconstruct the command line for the `proc: start` line (C# `BuildCommandLine`). */
+function commandLine(file: string, args: readonly string[]): string {
+  return args.length === 0 ? file : `${file} ${args.join(" ")}`;
+}
+
+/**
+ * Heartbeat monitor (C# `StartHeartbeatMonitorAsync`): poll the process liveness
+ * every `tickMs` (C# 1s) and emit a `proc: running` line every `intervalMs`
+ * (C# 5s) while it lives within the timeout. Only started when the timeout is
+ * long enough to matter (C# `timeout >= 3s`). Returns a stop token, or null
+ * when the monitor is not started; the monitor is also stopped when the process
+ * exits and via the caller's cleanup list.
+ */
+function startHeartbeatMonitor(
+  child: ChildProcess,
+  timeoutMs: number | undefined,
+  name: string,
+  startedAt: number,
+  options: { intervalMs: number; tickMs: number; minTimeoutMs: number },
+): { stop: () => void } | null {
+  if (timeoutMs === undefined || timeoutMs < options.minTimeoutMs) return null;
+  let stopped = false;
+  let lastBeat = 0;
+  const interval = setInterval(() => {
+    if (stopped) return;
+    if (child.exitCode !== null || child.signalCode !== null) {
+      clearInterval(interval);
+      return;
+    }
+    const elapsedMs = Date.now() - startedAt;
+    if (elapsedMs - lastBeat >= options.intervalMs) {
+      lastBeat = elapsedMs;
+      diagnose(`proc: running name=${name} pid=${child.pid ?? 0} elapsed_ms=${elapsedMs}`);
+    }
+  }, options.tickMs);
+  return {
+    stop: () => {
+      stopped = true;
+      clearInterval(interval);
+    },
+  };
 }
 
 /** A cancellable timer so a lost race does not leave a pending Timeout resource. */

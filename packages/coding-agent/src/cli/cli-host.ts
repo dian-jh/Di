@@ -7,6 +7,7 @@ import type { EventBus } from "../core/events/event-bus.ts";
 import type { ReplOptions } from "../modes/repl.ts";
 import type { CliArgs } from "./args.ts";
 import type { TextWriter } from "./io.ts";
+import { createCliHost } from "./cli-host-compose.ts";
 
 /**
  * CLI host seam (the composition root; C# `Di.Cli/CliHost.cs` at baseline
@@ -53,6 +54,12 @@ export interface CliHost {
   readonly reasoningEffort?: string | null;
   /** REPL display configuration (output redirect sets UseAnsi false). */
   readonly replOptions?: ReplOptions;
+  /**
+   * Dispose chain (C# `CliHost.IDisposable`): writes `di exiting`, closes the
+   * DiLog file, clears the ProcessDiagnostics hook. The dispatch shell calls it
+   * after the mode body; idempotent.
+   */
+  readonly dispose?: () => void;
 }
 
 /**
@@ -70,13 +77,13 @@ export type CliHostFactory = (
   workspace: string,
   stderr: TextWriter,
   useAnsi: boolean,
-) => CliHost;
+) => CliHost | Promise<CliHost>;
 
 /**
- * Default host factory: the real composition root is a later phase (P7), so this
- * fails closed with an honest message instead of pretending to build a working
- * host. Injected factories replace it in tests / embedded hosts.
+ * Default host factory — the REAL composition root (P7a): AgentSession + tools +
+ * skills + sessionStore + DiLog + createSessionRunner, with `--resume` recovery
+ * and the P6.4 emission seams. It is async (layered config load); the dispatch
+ * shell awaits it and turns a thrown/rejected factory into the documented
+ * host-failure envelope. Injected factories replace it in tests / embedded hosts.
  */
-export const defaultCliHostFactory: CliHostFactory = () => {
-  throw new Error("CLI 宿主组合尚未在 TypeScript 后端实现（P7 接线）。");
-};
+export const defaultCliHostFactory: CliHostFactory = createCliHost;

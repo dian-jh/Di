@@ -51,7 +51,7 @@ export {
   ProcessResult,
   runProcess,
 } from "./core/tools/process-runner.ts";
-export type { ProcessRunOptions } from "./core/tools/process-runner.ts";
+export type { ProcessDiagnosticsOptions, ProcessRunOptions } from "./core/tools/process-runner.ts";
 
 export { AgentSession, SessionBusyError, SessionModelError, SessionRecoveryBlockedError } from "./core/agent-session.ts";
 export type {
@@ -126,10 +126,12 @@ export {
 export type { CliArgs, CliArgsParseResult, CliDiagnostic } from "./cli/args.ts";
 export { AppMode, CliMode } from "./cli/mode.ts";
 export { CLI_NAME, CLI_VERSION, CliInfo, HELP_TEXT } from "./cli/cli-info.ts";
-export { LineTextReader, StringTextWriter, nullTextReader } from "./cli/io.ts";
+export { LineTextReader, StringTextWriter, createStdinReader, nullTextReader } from "./cli/io.ts";
 export type { TextReader, TextWriter } from "./cli/io.ts";
 export type { CliHost, CliHostFactory } from "./cli/cli-host.ts";
 export { defaultCliHostFactory } from "./cli/cli-host.ts";
+export { createCliHost } from "./cli/cli-host-compose.ts";
+export type { ComposeCliHostOptions } from "./cli/cli-host-compose.ts";
 export { CliApp } from "./cli/cli-app.ts";
 export { AUTH_CHATGPT_NOT_AVAILABLE, AUTH_USAGE, runAuthCommand } from "./cli/auth-command.ts";
 
@@ -140,6 +142,7 @@ export { AUTH_CHATGPT_NOT_AVAILABLE, AUTH_USAGE, runAuthCommand } from "./cli/au
 export { EventBus, EventConsumer } from "./core/events/event-bus.ts";
 export type { EventHandler } from "./core/events/event-bus.ts";
 export type { LogEvent, ModelCallStartedEvent, RunStartedEvent } from "./core/events/log-events.ts";
+export { ModelCallProbe } from "./core/events/model-call-probe.ts";
 
 // P6.4 run logging: per-day lifecycle log (DiLog + DiLogOptions + LogLevel) and
 // the ProcessDiagnostics static hook (default no-op; host wires it to DiLog).

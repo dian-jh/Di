@@ -92,10 +92,12 @@ export class CliApp {
         return stats(cliArgs.stats, stdout, stderr);
 
       default: {
-        // Host-required paths: build the composition root, then dispatch.
+        // Host-required paths: build the composition root (P7a real host; the
+        // factory is async — layered config load), then dispatch. The dispose
+        // chain (DiLog `di exiting` etc.) runs after the mode body.
         let host: CliHost;
         try {
-          host = this.hostFactory(cliArgs, workspace, stderr, useAnsi);
+          host = await this.hostFactory(cliArgs, workspace, stderr, useAnsi);
         } catch (error) {
           if (cliArgs.mode === "json") {
             stdout.writeLine(JSON.stringify({ error: { code: "session_resume", message: errorMessage(error) } }));
@@ -104,21 +106,25 @@ export class CliApp {
           }
           return 1;
         }
-        switch (mode) {
-          case AppMode.ListModels:
-            return await listModels(host, cliArgs.listModels ?? "", stdout, stderr);
-          case AppMode.SkillEval:
-            return await skillEval(host, cliArgs.skillEval, stdout, stderr);
-          case AppMode.Interactive:
-            // --resume forces simple interaction: REPL without trying the TUI, and no
-            // auto-requested model (the REPL waits for the user's first line).
-            return await runInteractive(host, stdin, stdout, stderr, stdinTty, stdoutTty, this.tui, cliArgs.resume !== undefined, signal);
-          case AppMode.Rpc:
-            return await runRpcMode(host, cliArgs, stdin, stdout, stderr, signal);
-          case AppMode.Json:
-            return await runJsonMode(host, cliArgs, stdin, stdout, stderr, signal);
-          default:
-            return await runPrintMode(host, cliArgs, stdin, stdout, stderr, stdoutTty, signal);
+        try {
+          switch (mode) {
+            case AppMode.ListModels:
+              return await listModels(host, cliArgs.listModels ?? "", stdout, stderr);
+            case AppMode.SkillEval:
+              return await skillEval(host, cliArgs.skillEval, stdout, stderr);
+            case AppMode.Interactive:
+              // --resume forces simple interaction: REPL without trying the TUI, and no
+              // auto-requested model (the REPL waits for the user's first line).
+              return await runInteractive(host, stdin, stdout, stderr, stdinTty, stdoutTty, this.tui, cliArgs.resume !== undefined, signal);
+            case AppMode.Rpc:
+              return await runRpcMode(host, cliArgs, stdin, stdout, stderr, signal);
+            case AppMode.Json:
+              return await runJsonMode(host, cliArgs, stdin, stdout, stderr, signal);
+            default:
+              return await runPrintMode(host, cliArgs, stdin, stdout, stderr, stdoutTty, signal);
+          }
+        } finally {
+          host.dispose?.();
         }
       }
     }
