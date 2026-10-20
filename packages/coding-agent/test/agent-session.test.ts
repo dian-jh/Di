@@ -8,7 +8,9 @@ import type {
   ModelEvent,
   ModelRequest,
   ModelResponse,
+  TokenUsage,
   ToolCall,
+  UsageCost,
 } from "@di/ai";
 import { textOfMessage } from "@di/ai";
 import type { ToolExecutor, ToolObservation } from "@di/agent";
@@ -23,26 +25,33 @@ import {
 } from "@di/coding-agent";
 
 /**
- * P2.6 card 6: cross-turn history, environment snapshot and the budget tracker —
- * the `AgentSession` host (docs/migration/typescript-core/loop-and-state.md
- * §"AgentSession 历史与恢复" / §"中断、取消与并发生命周期"; C# baseline
- * `Core/AgentLoop/AgentRunner.cs` `RunAsync` / `TrimHistoryByTokens` /
- * `SanitizeHistory`).
+ * P2.6 card 6 + P2.7 card 7 (model switching): cross-turn history, environment
+ * snapshot, the budget tracker and the model-resolution / usage-cost ledger — the
+ * `AgentSession` host (docs/migration/typescript-core/loop-and-state.md
+ * §"模型与 Skills 切换" / §"预算、成本与 usage 记账"; C# baseline
+ * `Core/AgentLoop/AgentRunner.cs` `RunAsync` / `_modelFactory` +
+ * `Core/Llm/LlmRuntime.cs` `ResolveModelAsync` / `CalculateCost`).
  *
  * Every business case is red by ASSERTION (never a path / missing-export error):
  * turn A's trajectory appears in turn B's history; whole user-turn trim keeps the
  * most recent turn; unpaired tool calls are sanitized in persisted history while
  * the result trajectory is NOT rewritten; a `context_limit` pause preserves the
  * trajectory until reset; the stable snapshot is appended only when changed;
- * concurrent prompt/reset is rejected per the busy policy; and the budget tracker
+ * concurrent prompt/reset is rejected per the busy policy; the budget tracker
  * sees the accumulated trajectory before tool execution plus the trimmed estimate
- * at turn end.
+ * at turn end; a swapped model takes effect at the next turn boundary with A+B
+ * usage/cost accumulated in the session ledger; a mid-turn `setModel` keeps the
+ * running turn on the old model stream without polluting the ledger; a model
+ * resolution failure rejects at the turn boundary with an explicit error and
+ * does not disturb committed history; and no model window invents no token limit.
  */
 
-/** One canned model step: an assistant text and/or tool calls. */
+/** One canned model step: an assistant text and/or tool calls, plus optional reported usage/cost. */
 interface Step {
   text: string;
   toolCalls?: readonly { id: string; name: string; arguments: string }[];
+  usage?: TokenUsage;
+  cost?: UsageCost;
 }
 
 /** Scripted ChatModel yielding exactly one `completed` per call; repeats the last step. */
@@ -67,7 +76,8 @@ class FakeModel implements ChatModel {
     const response: ModelResponse = {
       message: { role: "assistant", content: assistantContent(step) },
       finishReason: (step.toolCalls?.length ?? 0) > 0 ? { type: "tool-calls" } : { type: "stop" },
-      usage: { inputTokens: 0, outputTokens: 0 },
+      usage: step.usage ?? { inputTokens: 0, outputTokens: 0 },
+      ...(step.cost !== undefined ? { cost: step.cost } : {}),
       model: "fake",
       timestamp: 1_700_000_000_000,
     };
@@ -105,11 +115,13 @@ class FakeExecutor implements ToolExecutor {
 class GatedModel implements ChatModel {
   private release_: () => void = () => {};
   private readonly gate_: Promise<void>;
+  private readonly usage_: TokenUsage;
 
-  constructor() {
+  constructor(usage: TokenUsage = { inputTokens: 0, outputTokens: 0 }) {
     this.gate_ = new Promise<void>((resolve) => {
       this.release_ = resolve;
     });
+    this.usage_ = usage;
   }
 
   release(): void {
@@ -123,7 +135,7 @@ class GatedModel implements ChatModel {
       response: {
         message: { role: "assistant", content: [{ type: "text", text: "done" }] },
         finishReason: { type: "stop" },
-        usage: { inputTokens: 0, outputTokens: 0 },
+        usage: this.usage_,
         model: "fake",
         timestamp: 1_700_000_000_000,
       },
@@ -365,6 +377,116 @@ test("model change takes effect at the next turn boundary", async () => {
   await session.runTurn({ userMessage: "乙" });
   assert.equal(modelA.callCount, 1, "turn B ran on the swapped model");
   assert.equal(modelB.callCount, 1);
+});
+
+test("after setModel(B), turn B runs on B and A+B usage/cost accumulate in the session ledger", async () => {
+  const usageA: TokenUsage = { inputTokens: 5, outputTokens: 7 };
+  const costA: UsageCost = { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0 };
+  const usageB: TokenUsage = { inputTokens: 9, outputTokens: 11 };
+  const costB: UsageCost = { input: 0.003, output: 0.004, cacheRead: 0, cacheWrite: 0 };
+  const modelA = new FakeModel([{ text: "from-A", usage: usageA, cost: costA }]);
+  const modelB = new FakeModel([{ text: "from-B", usage: usageB, cost: costB }]);
+  const session = new AgentSession(
+    { systemPrompt: "sys", tokenBudget: 10_000 },
+    { model: modelA, toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  const resultA = await session.runTurn({ userMessage: "甲" });
+  assert.equal(resultA.stopReason, "answer");
+  session.setModel(modelB);
+  const resultB = await session.runTurn({ userMessage: "乙" });
+  assert.equal(resultB.stopReason, "answer");
+  assert.equal(modelA.callCount, 1);
+  assert.equal(modelB.callCount, 1, "turn B ran on the swapped model");
+  // Cross-turn usage/cost ledger: the host accumulates each run's usage/cost.
+  assert.notEqual(session.usage, undefined, "the session must expose a cross-turn usage ledger");
+  assert.deepEqual(session.usage, { inputTokens: 14, outputTokens: 18 }, "A+B usage accumulate");
+  assert.notEqual(session.cost, undefined, "the session must expose the cross-turn cost ledger");
+  assert.deepEqual(
+    session.cost,
+    { input: 0.004, output: 0.006, cacheRead: 0, cacheWrite: 0 },
+    "A+B cost accumulate component-wise",
+  );
+});
+
+test("a mid-turn setModel keeps the running turn on the old model stream and does not pollute the ledger", async () => {
+  const modelA = new GatedModel({ inputTokens: 5, outputTokens: 7 });
+  const modelB = new FakeModel([{ text: "from-B", usage: { inputTokens: 9, outputTokens: 11 } }]);
+  const session = new AgentSession(
+    { systemPrompt: "sys", tokenBudget: 10_000 },
+    { model: modelA, toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  // Turn A blocks on the gate; the test swaps the model while it is running.
+  const turnA = session.runTurn({ userMessage: "甲" });
+  session.setModel(modelB);
+  modelA.release();
+  const resultA = await turnA;
+  assert.equal(resultA.answer, "done", "the running turn completed on the old model stream");
+  assert.equal(modelB.callCount, 0, "the swapped model was not used by the running turn");
+  assert.notEqual(session.usage, undefined, "the session must expose a cross-turn usage ledger");
+  assert.deepEqual(session.usage, { inputTokens: 5, outputTokens: 7 }, "only turn A's usage is in the ledger");
+  const resultB = await session.runTurn({ userMessage: "乙" });
+  assert.equal(resultB.stopReason, "answer");
+  assert.equal(modelB.callCount, 1, "the swap takes effect at the next turn boundary");
+  assert.deepEqual(session.usage, { inputTokens: 14, outputTokens: 18 }, "turn B's usage accumulates at the next boundary");
+});
+
+test("a model resolution failure rejects at the turn boundary with an explicit error and does not disturb committed history", async () => {
+  const model = new FakeModel([{ text: "answer-甲" }, { text: "never" }]);
+  let failResolution = false;
+  const session = new AgentSession(
+    {
+      systemPrompt: "sys",
+      tokenBudget: 10_000,
+      resolveModel: (current) => {
+        if (failResolution) throw new Error("provider/model catalog unavailable");
+        return current;
+      },
+    },
+    { model, toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  const resultA = await session.runTurn({ userMessage: "甲" });
+  assert.equal(resultA.stopReason, "answer");
+  failResolution = true;
+  // Resolution failure rejects the turn with an explicit error (no silent fallback).
+  await assert.rejects(
+    session.runTurn({ userMessage: "乙" }),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      (error as { code?: string }).code === "model-resolve-failed",
+  );
+  assert.equal(model.callCount, 1, "no model call happened for the rejected turn");
+  // Committed cross-turn history is untouched by the rejected turn.
+  assert.deepEqual(
+    session.history.map((message) => textOfMessage(message)),
+    ["甲", "answer-甲"],
+  );
+  // The session is not stuck busy after the rejected turn.
+  failResolution = false;
+  const resultC = await session.runTurn({ userMessage: "丙" });
+  assert.equal(resultC.stopReason, "answer");
+});
+
+test("no model window invents no token limit while the ledger still accumulates (regression)", async () => {
+  const model = new FakeModel([
+    { text: "a1", usage: { inputTokens: 2, outputTokens: 3 } },
+    { text: "a2", usage: { inputTokens: 4, outputTokens: 5 } },
+    { text: "a3", usage: { inputTokens: 6, outputTokens: 7 } },
+  ]);
+  const session = new AgentSession(
+    { systemPrompt: "sys" }, // no tokenBudget, no maxHistoryTurns → no invented limit
+    { model, toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  await session.runTurn({ userMessage: "甲" });
+  await session.runTurn({ userMessage: "乙" });
+  const third = await session.runTurn({ userMessage: "丙" });
+  // Regression: without a known model window, no token limit is invented.
+  assert.deepEqual(
+    third.history.filter((m) => m.role === "user").map((m) => textOfMessage(m)),
+    ["甲", "乙"],
+  );
+  assert.notEqual(session.usage, undefined, "the session must expose a cross-turn usage ledger");
+  assert.deepEqual(session.usage, { inputTokens: 12, outputTokens: 15 });
 });
 
 test("a soft-stop request is honored and cleared at turn end (no leak into the next turn)", async () => {
