@@ -5,16 +5,27 @@ import type {
   ModelResponse,
   TokenUsage,
   ToolCall,
+  ToolResultMessage,
   UsageCost,
   UserMessage,
 } from "@di/ai";
 import { textOfMessage } from "@di/ai";
+import type { ToolObservation } from "./tools.ts";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.ts";
 
 /**
- * P2.1 tool-free answer path (Di baseline `Core/AgentLoop/ReAct.cs`
- * `RunCoreAsync`'s no-tool branch; contract per
+ * ReAct loop (Di baseline `Core/AgentLoop/ReAct.cs` `RunCoreAsync`; contract per
  * docs/migration/typescript-core/loop-and-state.md §"一回合精确时序").
+ *
+ * P2.1 landed the tool-free answer path; P2.2 adds the tool phase: after the
+ * model returns tool call(s), each call is validated, the pre-execution hook and
+ * hard-signal check gate it, the checkpoint intent is written, `toolStarted` is
+ * emitted, the tool executes (a throwing tool becomes an `isError` observation,
+ * never a crash or a fabricated success), `toolCompleted` is emitted, the
+ * observation is appended as a `ToolResultMessage`, and the checkpoint result is
+ * written before the next model call. Multiple tools in one round execute in
+ * order. `finalOutputTool` returns the raw arguments as the answer;
+ * `maxIterations` stops the loop and does not execute tools on the final turn.
  *
  * Pure loop logic only: no Node IO, no fs, no disk. The loop never mutates the
  * caller's `history` array; every run builds its own trajectory.
@@ -37,11 +48,10 @@ const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 /**
  * Run one agent turn against an injected {@link ChatModel}.
  *
- * P2.1 implements the tool-free answer path: validate the request, synthesize
- * the trajectory (history + user message), call the model stream once, append
- * the assistant message, emit events in the documented order, and return
- * `stopReason === "answer"` when the model made no tool calls. A model that
- * requests tool calls fails loudly until the tool round-trip card lands.
+ * The loop alternates model and tool phases until the model answers without
+ * tool calls, the caller's `finalOutputTool` is hit, or `maxIterations` is
+ * exhausted. A model call is always made before any tool runs, so an explicit
+ * budget of `N` means at most N model calls (0 = unlimited).
  */
 export async function runAgentLoop(
   request: AgentRequest,
@@ -52,53 +62,111 @@ export async function runAgentLoop(
 
   // Trajectory = history + current user message, without touching the caller's array.
   const trajectory: AgentMessage[] = [...request.history, userMessage(request.userMessage)];
+  const maxIterations = request.maxIterations ?? 0;
 
   let usage: TokenUsage = ZERO_USAGE;
   let cost: UsageCost | undefined;
   let iterations = 0;
 
-  // Phase boundary B0: hard abort before starting any model call.
-  signal?.throwIfAborted();
+  while (maxIterations === 0 || iterations < maxIterations) {
+    // Phase boundary B0: hard abort before starting any model call.
+    signal?.throwIfAborted();
 
-  // Model phase: one call. (Iteration/budget guards are later P2 cards.)
-  iterations += 1;
-  const response = await streamModel(request, trajectory, dependencies, signal);
+    // Model phase: one call per iteration.
+    iterations += 1;
+    const response = await streamModel(request, trajectory, dependencies, signal);
 
-  usage = addUsage(usage, response.usage);
-  cost = combineCost(cost, response.cost);
-  trajectory.push(response.message);
+    usage = addUsage(usage, response.usage);
+    cost = combineCost(cost, response.cost);
+    trajectory.push(response.message);
 
-  // The full assistant message is durable before anything else happens.
-  await dependencies.checkpoint?.appendMessage(response.message);
+    // The full assistant message is durable before anything else happens.
+    await dependencies.checkpoint?.appendMessage(response.message);
 
-  const turnCompleted: AgentEvent = {
-    type: "turnCompleted",
-    iteration: iterations,
-    usage,
-    finishReason: response.finishReason,
-    ...(cost === undefined ? {} : { cost }),
-  };
-  await emit(dependencies, turnCompleted);
-
-  const toolCalls = response.message.content.filter(isToolCall);
-  if (toolCalls.length === 0) {
-    return {
-      answer: lastAssistantText(trajectory),
-      trajectory,
-      history: request.history,
+    const turnCompleted: AgentEvent = {
+      type: "turnCompleted",
+      iteration: iterations,
       usage,
-      cost,
-      iterations,
-      stopReason: "answer",
+      finishReason: response.finishReason,
+      ...(cost === undefined ? {} : { cost }),
     };
+    await emit(dependencies, turnCompleted);
+
+    const toolCalls = response.message.content.filter(isToolCall);
+    if (toolCalls.length === 0) {
+      return {
+        answer: lastAssistantText(trajectory),
+        trajectory,
+        history: request.history,
+        usage,
+        cost,
+        iterations,
+        stopReason: "answer",
+      };
+    }
+
+    // Tool phase: process the model's calls in the order given.
+    for (const call of toolCalls) {
+      // Final-output tool: the model declares the task complete; its arguments are the answer.
+      if (request.finalOutputTool !== undefined && call.name === request.finalOutputTool) {
+        return {
+          answer: call.arguments,
+          trajectory,
+          history: request.history,
+          usage,
+          cost,
+          iterations,
+          stopReason: "final_output_tool",
+        };
+      }
+
+      // Explicit positive budget exhausted: do not run tools whose observations
+      // no further model call would consume; the loop then returns max_iterations.
+      if (maxIterations > 0 && iterations >= maxIterations) {
+        break;
+      }
+
+      // Validation, the pre-execution hook and the hard-signal check gate the tool.
+      await dependencies.toolValidator?.validate(call, signal);
+      await dependencies.beforeToolExecution?.(trajectory);
+      signal?.throwIfAborted();
+
+      // Write-ahead intent: on failure the tool never runs.
+      await dependencies.checkpoint?.toolStarted(call);
+      await emit(dependencies, { type: "toolStarted", call });
+
+      // Execute; a throwing tool becomes an error observation, never a crash.
+      const observation = await executeTool(dependencies, call, signal);
+      const toolResult: ToolResultMessage = {
+        role: "tool",
+        toolCallId: call.id,
+        content: observation.text,
+        isError: observation.isError,
+      };
+
+      await emit(dependencies, {
+        type: "toolCompleted",
+        call,
+        observation: observation.text,
+        isError: observation.isError,
+      });
+      trajectory.push(toolResult);
+
+      // The result is durable before the next model call is allowed to start.
+      await dependencies.checkpoint?.toolCompleted(toolResult);
+    }
   }
 
-  // Honest boundary: the tool round-trip is a later P2 card. Fail loudly rather
-  // than fabricating an answer or silently executing tools.
-  throw new LoopError(
-    "tool-phase-not-implemented",
-    `runAgentLoop: the model requested ${toolCalls.length} tool call(s), but tool execution is not implemented in this card.`,
-  );
+  // Explicit iteration budget exhausted (no remaining model calls).
+  return {
+    answer: lastAssistantText(trajectory),
+    trajectory,
+    history: request.history,
+    usage,
+    cost,
+    iterations,
+    stopReason: "max_iterations",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +267,40 @@ function buildModelRequest(request: AgentRequest, trajectory: readonly AgentMess
 /** Await the observer sink to preserve event order (error isolation is a later P2 card). */
 async function emit(dependencies: AgentDependencies, event: AgentEvent): Promise<void> {
   await dependencies.events?.(event);
+}
+
+// ---------------------------------------------------------------------------
+// Tool phase
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute one tool call. A throwing tool becomes an `isError` observation the
+ * model can recover from; only a hard-cancel `AbortError` propagates as a
+ * rejection (loop-and-state.md: AbortError must never become a plain
+ * observation). No fake success is ever fabricated.
+ */
+async function executeTool(
+  dependencies: AgentDependencies,
+  call: ToolCall,
+  signal: AbortSignal | undefined,
+): Promise<ToolObservation> {
+  try {
+    return await dependencies.toolExecutor.execute(call, signal);
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    return { text: `error executing tool '${call.name}': ${errorMessage(error)}`, isError: true };
+  }
+}
+
+/** True when `error` is a DOM-style AbortError (hard-cancel), never an observation. */
+function isAbortError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { readonly name?: unknown }).name === "AbortError";
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 // ---------------------------------------------------------------------------
