@@ -11,7 +11,10 @@
  * trajectory preserved). P2.4 adds soft-stop (`interruptRequested` -> `interrupted`
  * at both phase boundaries, never starting a pending tool or another model call)
  * and hard cancel (`AbortSignal` rejection, never an `isError` observation).
- * Observer-error isolation lands in a later P2 card.
+ * P2.5 isolates observer errors: `events` is a side channel caught and ordered
+ * through `onObserverError` (its own errors swallowed) — it never stalls the
+ * loop, blocks an authorized tool or fails a successful turn; checkpoint hooks
+ * stay fail-closed (errors abort the loop unchanged).
  */
 
 export type {

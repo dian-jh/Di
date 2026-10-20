@@ -38,6 +38,14 @@ import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from ".
  * `AbortSignal` (loop top + pre-tool `throwIfAborted`, mid-stream/mid-tool
  * `AbortError` propagates as a rejection and is never turned into an `isError`
  * observation).
+ * P2.5 isolates observer errors: the event sink is an observation side channel,
+ * never the control plane — a throwing/rejecting `events` listener is caught,
+ * ordered through `onObserverError(error, event)` (whose own throw/rejection is
+ * swallowed), and must never stall the loop, block an already-authorized tool or
+ * turn a successful turn into a failure. Checkpoint hooks (`appendMessage` /
+ * `toolStarted` / `toolCompleted`) keep the opposite fail-closed policy: their
+ * errors abort the loop unchanged (intent before execution; a failed result
+ * checkpoint means no next model call).
  *
  * Pure loop logic only: no Node IO, no fs, no disk. The loop never mutates the
  * caller's `history` array; every run builds its own trajectory.
@@ -296,9 +304,28 @@ function buildModelRequest(request: AgentRequest, trajectory: readonly AgentMess
 // Observation
 // ---------------------------------------------------------------------------
 
-/** Await the observer sink to preserve event order (error isolation is a later P2 card). */
+/**
+ * Await the observer sink to preserve event order. The sink is an observation
+ * side channel, never the control plane (loop-and-state.md §"事件 sink 是观测
+ * 旁路，不是控制面"; C# `ReAct.Emit` is fire-and-forget and the event bus
+ * isolates subscriber exceptions). A throwing/rejecting listener is caught and
+ * handed — in order — to the `onObserverError` diagnostic callback; if that
+ * callback itself throws synchronously or rejects, its error is swallowed too.
+ * A bad observer must never stall the loop, block an already-authorized tool,
+ * or turn a successful turn into a failure. `onObserverError` is invoked only
+ * when the sink throws.
+ */
 async function emit(dependencies: AgentDependencies, event: AgentEvent): Promise<void> {
-  await dependencies.events?.(event);
+  try {
+    await dependencies.events?.(event);
+  } catch (error) {
+    try {
+      await dependencies.onObserverError?.(error, event);
+    } catch {
+      // The diagnostic side channel failed as well; swallow it. No unhandled
+      // rejection may escape the observer path.
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
