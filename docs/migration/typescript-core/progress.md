@@ -1,6 +1,6 @@
 # TypeScript Core 迁移：进度表
 
-> **状态：P0、P1.1、P1.2、P2.1、P2.2、P3.1、P3.2 与 P6.1 已完成；P3.3 派发中、P4.1 运行中（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
+> **状态：P0、P1.1、P1.2、P2.1、P2.2、P2.3、P3.1、P3.2 与 P6.1 已完成；P3.3 运行中（@di/ai deepseek 在途）、P4.1 已提交（867e936，本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
 > 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
 
@@ -32,9 +32,10 @@
 | P1 最小工作区、词汇和夹具 | P0 | **verified** | P1.1（见子行）+ P1.2（a8144ea、731f8b5） | 见 P1.1 / P1.2 子行 | 无 |
 | P1.1 根 workspace、@di/ai 词汇与假模型无工具答案红→绿 | P0 | **verified** | 见本单元交接（`git log -1`） | `npm install`(0)；红测 `npm test -w @di/ai`(1, ERR_MODULE_NOT_FOUND)；绿测 `npm test -w @di/ai`(0, 1 pass)；`npm run build`(0)；`npm run typecheck`(0)；`npm.cmd --prefix tui test`(0, 116 pass)；`npm.cmd --prefix tui run build`(0) | 无 |
 | P1.2 记录型假执行器与跨语言 fixtures | P1.1 | **verified** | a8144ea、731f8b5 | 红：`npm run typecheck -w @di/agent`(2, TS2305 导出缺失)；`npm test -w @di/agent`(1, fixtures ENOENT)。绿：`npm run typecheck -w @di/agent`(0)、`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 8 pass)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
-| P2 纯循环与宿主状态 | P1 | in_progress | P2.1、P2.2（见子行）；P2.3 待派 | 见 P2.1 / P2.2 子行 | 无 |
+| P2 纯循环与宿主状态 | P1 | in_progress | P2.1、P2.2、P2.3（见子行）；P2.4 待派 | 见 P2.1 / P2.2 / P2.3 子行 | 无 |
 | P2.1 无工具答案路径与消息良构 | P1.2 | **verified** | 见 P2.1 交接 | 红：`npm test -w @di/agent`(1, 缺 runAgentLoop 导出)、`npm run typecheck -w @di/agent`(2, TS2305)。绿：`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 18 pass)、`npm run typecheck -w @di/agent`(0)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
 | P2.2 工具往返 | P2.1 | **verified** | 409321d、725f90e | 红：`npm test -w @di/agent`(1, 29 中 12 失败 = 全部工具相位用例，`LoopError tool-phase-not-implemented`)。绿：`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 29/29)、`npm run typecheck -w @di/agent`(0)、根 `npm run typecheck`(2, 仅 P4.1 在途的 @di/coding-agent 缺 createFileTools 等导出；@di/agent 与 @di/ai 均 0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
+| P2.3 迭代上限与预算暂停 | P2.2 | **verified** | eb849ed、03f92d4 | 红：`npm test -w @di/agent`(1, 39 中 5 失败 = 全部 context-budget guard 用例：模型被错误调用 / 估算器未被调用)。绿：`npm run build -w @di/agent`(0)、`npm test -w @di/agent`(0, 39/39)、`npm run typecheck -w @di/agent`(0)、根 `npm run typecheck`(2, 仅 P3.3 在途的 @di/ai 的 src/providers 与 deepseek 测试文件；@di/agent 与 @di/coding-agent 均 0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无 |
 | P3 通用模型与 DeepSeek | P1 | in_progress | P3.1、P3.2（见子行）；P3.3 派发中 | 见子行 | 无 |
 | P3.1 provider chunk assembler | P1.1 | **verified** | c0eb1de | 红：`npm test -w @di/ai`(1, 缺 AssemblerError 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 27/27, 含 P1.1 回归) | 无；后续卡：SSE framing（P3.2） |
 | P3.2 HTTP/SSE framing | P3.1 | **verified** | e0a2457 | 红：`npm test -w @di/ai`(1, 缺 SseEventParser 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 59/59 = 32 新增 + 27 回归) | 无；后续卡：DeepSeek 翻译（P3.3） |
@@ -108,12 +109,20 @@
 - **JSONC 依赖（按 operator-guide 新增依赖规则）：** `jsonc-parser@3.3.1`（精确固定，MIT）。用途：解析容忍注释+尾逗号的用户/项目配置与默认值。公共 API：`parse`、`printParseErrorCode`、`ParseError`（仅类型导入）。最小 Node：纯 JS 无依赖。**集成前最小探针 6/6 通过**（exit 0）：命名 ESM 导入解析、行/块注释与尾逗号零错误、number/float/bool/null 保留、坏文档填充带 offset/length 的错误、`printParseErrorCode` 返回字符串。锁文件 diff 仅含 `jsonc-parser` 条目 + coding-agent 依赖，无其它churn。
 - **未完成门槛：** 资源路径解析/写入（`sessions/` `logs/` `artifacts/` 权限受控 `auth/`、跨 dev checkout/安装包/任意 CWD 定位一致）属 P6.2；`--info` 如实报告属 P6.3 CLI。
 
-## 下一张任务卡（P2 第三个单元：迭代上限与预算暂停）
+## P2.3 交接（eb849ed、03f92d4）
 
-- **ID：** P2.3-iteration-and-budget
-- **输入：** 现有 `runAgentLoop`（P2.2，已含 `maxIterations` 循环顶 guard `while (maxIterations === 0 || iterations < maxIterations)` 与工具相位内"预算耗尽不执行剩余工具"边界，均返回 `max_iterations`）；`AgentRequest.contextTokenBudget` 与依赖注入 `estimateRequestTokens`；C# 基线 `ReAct.RunCoreAsync` 的 context estimate guard 与 `StopContextLimit`；`fixtures/budget-pause.json`（`budget-pause` 场景：`contextTokenBudget=1`，期望 stopReason=context_limit、answer=""、iterations=0、modelRequestCount=0、eventSequence=[]、trajectory 保留 `[user]`）。
-- **行为：** 在每次发起下一次模型请求前执行 context 预算 guard（顺序：硬取消 → 软停止 → context 检查，预算检查在模型请求之前）：`contextTokenBudget === 0` 无条件返回 `context_limit`；`estimateRequestTokens(modelRequest) > contextTokenBudget` 返回 `context_limit`（估算值**恰等于**预算可继续），保留完整 trajectory 与已发生 usage；预算未设置不启用该 guard。`context_limit` 的 `answer` 为轨迹中 user（越过 history 前缀）之后最后一个 assistant 文本——对齐 C# `StopContextLimit`，budget-pause fixture 的 "" 即 history 为空时无 assistant。显式 `maxIterations` 语义 P2.2 已实现，本卡补边界测试确认无默认上限（缺省 > 24 轮继续）、`maxIterations=1`、多工具单轮 + N 上限；不静默 clamp、不改默认 0=无限。
-- **红测：** 以 `budget-pause.json` 期望断言 runAgentLoop：注入 `estimateRequestTokens` 使估算 > 预算（或 `contextTokenBudget=0`）时 stopReason=context_limit、trajectory 深度相等、modelRequestCount=0；当前实现未实现 context guard（仍会发起模型调用 / 抛 missing-completed），先红。
-- **实现：** 最小实现：模型请求构造后、发起前插入 `maybeContextLimit(modelRequest, contextTokenBudget, estimateRequestTokens)` 纯检查，命中即返回 `context_limit` 结果（复用 `StopContextLimit` 的 answer 语义，不裁剪 / 不摘要 / 不触发任何模型副作用）。不引入 Node Buffer / fs——估算由注入 helper 完成（loop-and-state.md：纯 loop 不调用 Node API）。
-- **绿测：** `npm test -w @di/agent`（P2.2 回归 + 新用例）；`npm run typecheck -w @di/agent`；根 `npm run typecheck`（P4.1 在途的 @di/coding-agent 红不计）；`npm.cmd --prefix tui test`（116 pass）与 `npm.cmd --prefix tui run build`。
-- **后续卡（按 operator-guide P2 顺序）：** 软停与硬取消 → 观察事件与 checkpoint hook 异常隔离 → 历史 / 快照 / budget tracker → 模型切换。
+- **交付：** `packages/agent/src/agent-loop.ts` 的 `runAgentLoop` 加入 context 预算 guard：每次发起下一次模型请求前（硬取消之后、iteration 递增之前；对齐 `ReAct.RunCoreAsync` 次序：硬取消 → 软停止 → context 检查，软停止属后卡，占位注释保留），构造本次模型请求 `buildModelRequest` 后调用注入的 `estimateRequestTokens`。`contextTokenBudget === 0` 无条件返回 `context_limit`；`estimate > contextTokenBudget` 返回 `context_limit`（估算恰等于预算可继续）；预算未设置不启用 guard。`streamModel` 改为接收预先构造的 `modelRequest`，保证估算器与模型看到完全相同的请求（测试用引用同一性锁定）。
+- **answer 语义：** `context_limit` 的 answer 对齐 C# `StopContextLimit`——跳过 history 前缀 + 当前 user 后的最后一个 assistant 文本；空 history 时 ""（budget-pause fixture 命中）。新增 `contextLimitAnswer`（区别于 `lastAssistantText`：后者不过滤 history 前缀，`RunAsync_ContextLimitDoesNotReturnAnOldHistoryAnswer` 语义有专门测试）。`context_limit` 保留完整 trajectory 与已发生 usage/cost，绝不自动裁剪/摘要（显式暂停）。
+- **测试：** `packages/agent/test/agent-loop.test.ts` 新增 10 条（budget-pause fixture 全断言、`contextTokenBudget=0` 无条件暂停、估算=预算可继续、无预算禁用 guard、工具往返后预算越线保留轨迹与 usage、answer 不返回旧 history assistant、估算器与模型共享同一请求、无默认迭代上限 >24 轮继续、`maxIterations=1`、多工具单轮 + N 上限）。红测 `npm test -w @di/agent` 退出 1（39 中 5 失败 = 全部新 guard 用例：模型被错误调用或估算器未被调用）；实现后 39/39（P2.2 29 回归 + 新 10）。
+- **并行干扰记录：** P3.3 在途重建 `@di/ai` dist 曾使 dist 指向不存在的 `providers/types/content.js`，导致 `@di/agent` 测试 import 失败；本单元已用提交态 `@di/ai` src 重建干净 dist 恢复验证（未触碰 P3.3 的 src 文件）。若后续再现 `@di/ai` dist 破损，属 P3.3 在途状态，非 P2.3 失败。
+- **未完成门槛：** 无（本卡范围）。软停 / 硬取消（P2.4）、观察事件与 checkpoint hook 异常隔离、历史 / 快照 / budget tracker、模型切换均为后续 P2 卡。
+
+## 下一张任务卡（P2 第四个单元：软停与硬取消）
+
+- **ID：** P2.4-soft-stop-hard-cancel
+- **输入：** 现有 `runAgentLoop`（P2.3，已含 context-budget guard、`maxIterations`、工具相位与 loop-top 的 `signal?.throwIfAborted()`）；`AgentDependencies.interruptRequested?: () => boolean`（软停止轮询，loop-and-state.md §"建议公开的最小 loop types" 已定义）；C# 基线 `ReAct.RunCoreAsync` 的两个相位边界软停止检查（进入模型相位前 / 模型刚产出 tool calls 后工具尚未启动时）与 `StopInterrupted`；`fixtures/soft-stop.json`（`softStopAfterTurn: 1`：模型第 1 次返回工具调用后请求软停；期望 stopReason=interrupted、answer="let me check"、iterations=1、modelRequestCount=1、eventSequence=["turnCompleted","interrupted"]、toolCalls=[]、trajectoryCount=2）与 `fixtures/hard-cancel.json`（`cancelAfterTool: true`：首工具执行完成后 abort；期望 rejects `AbortError`、iterations=1、eventSequence=["turnCompleted","toolStarted","toolCompleted"]、toolCalls=[c1 done]、trajectoryCount=3）。
+- **行为：** 软停止（`interruptRequested()` 返回 true 时）在两个相位边界检查：进入下一次模型调用前（优先于 context guard；次序 硬取消 → 软停止 → context 检查）与模型刚返回 tool calls、工具尚未执行时。命中即返回 `stopReason=interrupted`（发 `{ type: "interrupted" }` 事件），不执行未启动的工具、不再发起模型调用，保留已产生轨迹 / usage，answer 为模型可见文本（soft-stop fixture 的 "let me check"）。硬取消沿用 AbortSignal：loop-top 与工具执行前 `signal?.throwIfAborted()`；模型流 / 工具执行中的 AbortError 向上 rejection（hard-cancel fixture：`rejects AbortError`，轨迹保留已完成的工具观察）；AbortError 绝不能转成普通 isError 观察（P2.2 已隔离，需回归确认）。
+- **红测：** 以 `soft-stop.json` 期望断言：模型返回工具调用后 `interruptRequested()` 返回 true 时 stopReason=interrupted、工具不执行、无后续模型调用；当前实现没有 `interruptRequested` 检查（会执行工具并继续 / 返回 answer），先红。软停在 loop-top（context guard 之前）的命中、硬取消 fixture（工具完成后 abort 的 AbortError rejection 与事件 / 轨迹保留）、模型流中途 abort 的 rejection 也应有测试。
+- **实现：** 最小实现：loop-top 的硬取消之后、context guard 之前插入 `interruptRequested?.()` 检查（命中返回 interrupted 结果）；工具相位 for 循环之前（final-output-tool 检查之后）插入软停止检查（命中返回 interrupted，绝不启动工具）。复用 `StopInterrupted` 的 answer 语义（模型可见文本即答案）与既有 `signal?.throwIfAborted()` 点位；模型流 / 工具执行中途取消的透传语义如需补强仅在测试层落实，不改模型流接口。
+- **绿测：** `npm test -w @di/agent`（P2.3 回归 39 + 新用例）；`npm run typecheck -w @di/agent`；根 `npm run typecheck`（P3.3 在途的 @di/ai 红不计）；`npm.cmd --prefix tui test`（116 pass）与 `npm.cmd --prefix tui run build`。
+- **后续卡（按 operator-guide P2 顺序）：** 观察事件与 checkpoint hook 异常隔离 → 历史 / 快照 / budget tracker → 模型切换。
