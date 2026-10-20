@@ -6,6 +6,7 @@ import type {
   ToolSpec,
 } from "@di/ai";
 import type {
+  AgentDependencies,
   AgentEvent,
   AgentRequest,
   AgentResult,
@@ -14,7 +15,15 @@ import type {
   ToolValidator,
 } from "@di/agent";
 import { runAgentLoop } from "@di/agent";
-import type { InputBudgetTracker } from "./budget.ts";
+import { InputBudgetTracker, estimateMemoryTokens } from "./budget.ts";
+import { buildEnvironmentSnapshot } from "./environment-snapshot.ts";
+import {
+  dropOldestTurns,
+  sanitizeHistory,
+  trimHistoryByTokens,
+  trimHistoryByTurns,
+  userMessageCount,
+} from "./history.ts";
 
 /**
  * AgentSession — the Node host that owns cross-turn state (loop-and-state.md
@@ -23,10 +32,24 @@ import type { InputBudgetTracker } from "./budget.ts";
  * live ONLY here. `runAgentLoop` (@di/agent) stays a pure loop that never
  * persists next-turn history.
  *
- * P2.6-card scope: cross-turn history, the environment snapshot, the budget
- * tracker and the busy/serialize policy of `runTurn`; model/skills switching
- * takes effect at turn boundaries; a `context_limit` pause preserves the
- * trajectory until `resetHistory`.
+ * P2.6-card behavior (mirrors `Core/AgentLoop/AgentRunner.cs` `RunAsync`):
+ * - `runTurn` is the only session-turn entry; one session serializes turns
+ *   (concurrent prompt or `resetHistory` while a turn is running → busy).
+ * - each turn merges the full loop trajectory into cross-turn memory, trims
+ *   oldest whole user-turns by the estimated budget (keeping the most recent
+ *   turn), then sanitizes only the tail (`SanitizeHistory`) before persisting —
+ *   the returned result trajectory is never rewritten;
+ * - a `context_limit` stop sets `preserveHistoryUntilReset` so the next turn does
+ *   not auto-trim that paused trajectory / generate a summary;
+ * - model/skills changes take effect at turn boundaries (`setModel` /
+ *   `setActiveSkills` are read at turn start, never mid-stream);
+ * - a stable environment snapshot is appended as a history system message only
+ *   when its text changes (never re-injecting stable prefix bytes each turn);
+ * - the budget tracker feeds ESTIMATED values (never billed usage): it sees the
+ *   current turn's accumulated assistant/tool trajectory before tool execution
+ *   and the trimmed memory estimate at turn end; no model window → no invented
+ *   token limit (`maxHistoryTurns` is only an explicit positive-number fallback
+ *   when there is no token budget).
  */
 
 /** Session-level rejection mirroring the RPC busy envelope code (`busy`). */
@@ -101,6 +124,11 @@ export class AgentSession {
   private readonly deps_: AgentSessionDeps;
   private readonly sessionId_ = `session-${randomUUID()}`;
   private history_: AgentMessage[] = [];
+  private preserveHistoryUntilReset_ = false;
+  private lastHistoryBudget_: number | undefined;
+  private lastSnapshotText_: string | undefined;
+  private running_ = false;
+  private softStopRequested_ = false;
   private model_: ChatModel;
   private activeSkills_: readonly ActiveSkill[] = [];
 
@@ -151,42 +179,194 @@ export class AgentSession {
 
   /** Request a soft stop for the running turn (the loop polls it at phase boundaries). */
   requestSoftStop(): void {
-    // Scaffold: soft-stop wiring lands with the P2.6 implementation.
-  }
-
-  /** Clear all cross-turn memory. Only allowed when no turn is running. */
-  resetHistory(): void {
-    // Scaffold: busy policy / full reset lands with the P2.6 implementation.
-    this.history_ = [];
+    this.softStopRequested_ = true;
   }
 
   /**
-   * The only session-turn entry. Scaffold: delegates to the pure loop and returns
-   * the result WITHOUT the host behavior (history persistence, busy rejection,
-   * snapshot, budget tracker, preserve flag, soft-stop wiring). Each business
-   * assertion in `agent-session.test.ts` fails until the host logic lands.
+   * Clear all cross-turn memory. Only allowed when no turn is running — the
+   * in-use array is never cleared concurrently (loop-and-state.md §"中断、取消与
+   * 并发生命周期"). Mirrors C# `AgentRunner.ResetHistory` (snapshot marker and
+   * budget tracker holder are reset too so the snapshot is re-injected next turn).
+   */
+  resetHistory(): void {
+    if (this.running_) {
+      throw new SessionBusyError("AgentSession: cannot reset history while a turn is running");
+    }
+    this.history_ = [];
+    this.preserveHistoryUntilReset_ = false;
+    this.lastHistoryBudget_ = undefined;
+    this.lastSnapshotText_ = undefined;
+    this.config_.budgetTracker?.update(0);
+  }
+
+  /**
+   * The only session-turn entry. A concurrent prompt is rejected per the busy
+   * policy. Each turn:
+   * 1. trims existing memory when the budget shrank (or this is the first turn)
+   *    and history is not being preserved,
+   * 2. appends the stable environment snapshot only when its text changed,
+   * 3. pre-trims oldest whole user-turns while the full incoming-request estimate
+   *    exceeds the budget (mirroring C# `EstimateIncomingRequestTokens`),
+   * 4. runs the pure loop with `beforeToolExecution` feeding the budget tracker
+   *    the accumulated trajectory (estimated values only),
+   * 5. persists the trajectory: `context_limit` preserves it verbatim and sets
+   *    `preserveHistoryUntilReset`; other stops trim oldest whole user-turns by
+   *    budget (falling back to `maxHistoryTurns` only when no budget exists) then
+   *    sanitize the tail — the returned result trajectory is never rewritten.
    */
   async runTurn(options: SessionTurnOptions): Promise<AgentResult> {
-    const request: AgentRequest = {
-      sessionId: this.sessionId_,
-      systemPrompt: this.config_.systemPrompt,
-      userMessage: options.userMessage,
-      history: this.history_,
-      tools: this.config_.tools ?? [],
-      contextTokenBudget: this.config_.tokenBudget,
-      maxIterations: options.maxIterations,
-      maxTokens: options.maxTokens,
-      reasoningEffort: options.reasoningEffort,
-      finalOutputTool: options.finalOutputTool,
-    };
-    return runAgentLoop(
-      request,
-      {
-        model: this.model_,
+    if (this.running_) {
+      throw new SessionBusyError("AgentSession: a turn is already running; concurrent prompt rejected (busy policy)");
+    }
+    this.running_ = true;
+    try {
+      const tokenBudget = this.config_.tokenBudget;
+      const maxHistoryTurns = this.config_.maxHistoryTurns ?? 0;
+      // Turn-boundary model read: setModel takes effect only here, never mid-stream.
+      const model = this.model_;
+
+      // Start-of-turn trim when the budget shrank (or this is the first turn) and
+      // history is not being preserved (C# `_lastHistoryBudget is null ||
+      // SoftThreshold < _lastHistoryBudget`). Trims whole user-turns, keeps the
+      // most recent one, then sanitizes; a still-over-budget history is cleared.
+      if (
+        !this.preserveHistoryUntilReset_ &&
+        tokenBudget !== undefined &&
+        (this.lastHistoryBudget_ === undefined || tokenBudget < this.lastHistoryBudget_)
+      ) {
+        const trimmed = sanitizeHistory(trimHistoryByTokens(this.history_, tokenBudget));
+        this.history_ = estimateMemoryTokens(trimmed) > tokenBudget ? [] : [...trimmed];
+        if (this.lastSnapshotText_ !== undefined && !this.history_.some((m) => m.role === "system" && m.text === this.lastSnapshotText_)) {
+          this.lastSnapshotText_ = undefined;
+        }
+        this.syncTracker_(this.history_);
+      }
+
+      // Stable environment snapshot: appended as a history system message only
+      // when the text changes — never re-injecting stable prefix bytes per turn.
+      if (this.config_.workingDirectory !== undefined) {
+        const snapshot = buildEnvironmentSnapshot(this.config_.workingDirectory);
+        if (snapshot !== this.lastSnapshotText_) {
+          this.lastSnapshotText_ = snapshot;
+          this.history_ = [...this.history_, { role: "system", text: snapshot }];
+        }
+      }
+
+      // Volatile skill context at the request tail (turn-boundary active skills).
+      const skillContext = buildSkillContext(this.activeSkills_);
+      const systemContext = combineSystemContext(skillContext, options.systemContext);
+
+      // Whole-request pre-trim (C# `EstimateIncomingRequestTokens`): drop oldest
+      // whole user-turns while the estimate of the incoming request exceeds the
+      // budget and more than one user turn remains. Skipped while preserving a
+      // paused trajectory (context_limit).
+      if (!this.preserveHistoryUntilReset_ && tokenBudget !== undefined && tokenBudget > 0) {
+        while (
+          userMessageCount(this.history_) > 1 &&
+          this.estimateIncomingRequest_(this.history_, options.userMessage, systemContext) > tokenBudget
+        ) {
+          this.history_ = [...dropOldestTurns(this.history_, 1)];
+        }
+      }
+
+      const request: AgentRequest = {
+        sessionId: this.sessionId_,
+        systemPrompt: this.config_.systemPrompt,
+        userMessage: options.userMessage,
+        history: this.history_,
+        tools: this.config_.tools ?? [],
+        contextTokenBudget: tokenBudget,
+        maxIterations: options.maxIterations,
+        maxTokens: options.maxTokens,
+        reasoningEffort: options.reasoningEffort,
+        finalOutputTool: options.finalOutputTool,
+        ...(systemContext !== undefined ? { systemContext } : {}),
+      };
+
+      const dependencies: AgentDependencies = {
+        model,
         toolExecutor: this.deps_.toolExecutor,
         estimateRequestTokens: this.deps_.estimateRequestTokens,
-      },
-      options.signal,
-    );
+        beforeToolExecution: (trajectory) => this.syncTracker_(trajectory),
+        interruptRequested: () => this.softStopRequested_,
+        ...(this.config_.events !== undefined ? { events: this.config_.events } : {}),
+        ...(this.config_.onObserverError !== undefined ? { onObserverError: this.config_.onObserverError } : {}),
+        ...(this.config_.checkpoint !== undefined ? { checkpoint: this.config_.checkpoint } : {}),
+        ...(this.config_.toolValidator !== undefined ? { toolValidator: this.config_.toolValidator } : {}),
+      };
+
+      const result = await runAgentLoop(request, dependencies, options.signal);
+
+      // Turn end: persist cross-turn memory. `context_limit` is an explicit pause
+      // (C# `AgentStopReason.ContextLimit`): the trajectory is preserved verbatim
+      // and the next turn does not auto-trim it or generate a summary
+      // (preserveHistoryUntilReset). Other stops trim oldest whole user-turns by
+      // the estimated budget (falling back to `maxHistoryTurns` only when no
+      // budget exists), then sanitize only the tail — the result trajectory is
+      // never rewritten.
+      if (result.stopReason === "context_limit") {
+        this.history_ = [...result.trajectory];
+        this.preserveHistoryUntilReset_ = true;
+      } else {
+        const trimmed =
+          tokenBudget !== undefined
+            ? trimHistoryByTokens(result.trajectory, tokenBudget)
+            : trimHistoryByTurns(result.trajectory, maxHistoryTurns);
+        this.history_ = [...sanitizeHistory(trimmed)];
+        this.preserveHistoryUntilReset_ = false;
+      }
+      this.lastHistoryBudget_ = tokenBudget;
+      // Trimming may have cut the earliest snapshot out of history: reset the
+      // marker so the next turn re-injects it (a long session never loses the
+      // environment context).
+      if (this.lastSnapshotText_ !== undefined && !this.history_.some((m) => m.role === "system" && m.text === this.lastSnapshotText_)) {
+        this.lastSnapshotText_ = undefined;
+      }
+      this.syncTracker_(this.history_);
+      return result;
+    } finally {
+      this.running_ = false;
+      // Never carry a stale soft-stop flag or signal into the next turn.
+      this.softStopRequested_ = false;
+    }
   }
+
+  /** Whole-request estimate mirroring the loop's buildModelRequest (system + trajectory + volatile tail). */
+  private estimateIncomingRequest_(
+    history: readonly AgentMessage[],
+    userMessage: string,
+    systemContext: string | undefined,
+  ): number {
+    const messages: AgentMessage[] = [];
+    if (this.config_.systemPrompt.trim().length > 0) {
+      messages.push({ role: "system", text: this.config_.systemPrompt });
+    }
+    messages.push(...history);
+    messages.push({ role: "user", content: [{ type: "text", text: userMessage }] });
+    if (systemContext !== undefined && systemContext.trim().length > 0) {
+      messages.push({ role: "system", text: systemContext });
+    }
+    return this.deps_.estimateRequestTokens({ messages, tools: this.config_.tools });
+  }
+
+  /** Feed the shared tracker an ESTIMATED value (never billed usage). */
+  private syncTracker_(messages: readonly AgentMessage[]): void {
+    this.config_.budgetTracker?.update(estimateMemoryTokens(messages));
+  }
+}
+
+/** Active-skill instructions injected at the request tail (turn-boundary read). */
+function buildSkillContext(activeSkills: readonly ActiveSkill[]): string | undefined {
+  if (activeSkills.length === 0) return undefined;
+  return activeSkills.map((skill) => `【已激活 Skill：${skill.name}】\n${skill.instructions}`).join("\n\n");
+}
+
+/** Combine active-skill context with an optional per-turn volatile system context. */
+function combineSystemContext(
+  skillContext: string | undefined,
+  turnContext: string | undefined,
+): string | undefined {
+  if (skillContext === undefined) return turnContext;
+  if (turnContext === undefined || turnContext.trim().length === 0) return skillContext;
+  return skillContext + "\n\n" + turnContext;
 }

@@ -9,10 +9,9 @@ import type {
   ModelRequest,
   ModelResponse,
   ToolCall,
-  ToolObservation,
 } from "@di/ai";
 import { textOfMessage } from "@di/ai";
-import type { ToolExecutor } from "@di/agent";
+import type { ToolExecutor, ToolObservation } from "@di/agent";
 import {
   AgentSession,
   InputBudgetTracker,
