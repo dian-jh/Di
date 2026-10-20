@@ -19,7 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json",
-    "test": "node --test test/*.test.ts test/skills/*.test.ts test/commands/*.test.ts"
+    "test": "node --test test/*.test.ts test/cli/*.test.ts test/skills/*.test.ts test/commands/*.test.ts"
   },
   "dependencies": {
     "@di/agent": "*",
