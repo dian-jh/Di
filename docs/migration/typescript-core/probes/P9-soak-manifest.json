@@ -1,0 +1,68 @@
+{
+  "id": "P9-soak-manifest",
+  "version": 1,
+  "description": "Frozen soak thresholds per validation-and-release.md 47-55. Frozen BEFORE the 10h full run, from the >=30-min warm-up on the same machine/OS/Node. NEVER adjusted by run results; if a gate fails, the run is diagnosed/re-run under a new run id.",
+  "frozenAtUtc": "2026-10-21T06:21:58Z",
+  "frozenBeforeFullRun": true,
+  "basis": {
+    "warmupRunId": "soak-2026-10-21T05-44-29-569Z",
+    "warmupStartUtc": "2026-10-21T05:44:29.569Z",
+    "warmupWallMin": 35,
+    "warmupWallMs": 2100012,
+    "warmupTurns": 5444,
+    "warmupTurnFail": 0,
+    "warmupResumeSpawns": 18,
+    "warmupResumeOk": 18,
+    "warmupClears": 181,
+    "warmupFinalCheckpointBytes": 35755394,
+    "warmupArtifactRoot": "C:\\Users\\52143\\AppData\\Local\\Temp\\p9-soak\\warmup",
+    "machine": "Windows 11 Enterprise (build 26100), Node v24.16.0, x64",
+    "harness": "packages/coding-agent/test/soak/soak-runner.mjs",
+    "gateChecker": "packages/coding-agent/test/soak/soak-check.mjs"
+  },
+  "soakParams": {
+    "durationMin": 600,
+    "sampleIntervalSec": 30,
+    "resumeEveryTurns": 300,
+    "clearEveryTurns": 30,
+    "turnDelayMs": 200,
+    "model": "soak-fake (deterministic, no real provider)",
+    "tool": "soak_child (real child spawn; force-kill every 3rd)",
+    "diHome": "isolated temp DI_HOME, artifacts outside repo",
+    "phase": "full"
+  },
+  "thresholds": {
+    "rss_max_delta_bytes": 20971520,
+    "handle_max_delta": 8,
+    "child_process_max": 1,
+    "child_sustained_max": 0,
+    "resume_p95_max_ms": 60000,
+    "turn_fail_max": 0,
+    "resume_fail_max": 0,
+    "wall_clock_min": 600
+  },
+  "thresholdDerivation": {
+    "rss_max_delta_bytes": "warmup observed delta = 3.78MB (baseline 133MB -> max 137MB); frozen at 20MB = ~5x headroom. History is bounded by clear-every-30, so RSS must stay near the warmup plateau; a real leak/accumulation passes well beyond 20MB.",
+    "handle_max_delta": "warmup observed handle delta = 0; frozen at 8 as a floor (smoke observed transient handles up to 4 during turns).",
+    "child_process_max": "1: a transient tool child (~25-40ms live) may land exactly on a sample boundary. Any sample with active_children > 1 is a residue.",
+    "child_sustained_max": "0: active_children > 0 across 2 consecutive samples = a child alive >=60s = a leak (all tool children are force-finished within 5s).",
+    "resume_p95_max_ms": "warmup resume p95 = 2080ms with a 34MB checkpoint. Resume latency is dominated by loadRecovery reading the whole checkpoint, and checkpoint size is ~linear in wall time (clear-window bounded, constant turn rate) -> projected 10h p95 = 2080ms x (600/35) = 35.7s. Frozen at 60s = ~1.7x headroom over the honest projection; worse-than-linear resume degradation fails.",
+    "turn_fail_max": "0 turn failures tolerated (warmup 5444/5444 ok).",
+    "resume_fail_max": "0 resume-child failures tolerated (warmup 18/18 ok).",
+    "wall_clock_min": "600 = the real 10h wall-clock gate; never derived from iteration counts."
+  },
+  "failureCriteria": [
+    "max RSS - baseline RSS > rss_max_delta_bytes (RSS over limit)",
+    "monotonic RSS growth: max RSS over last 2h - max RSS over first 2h > rss_max_delta_bytes (多个采样窗口单调增长)",
+    "handle_count not returning to baseline: last - baseline > handle_max_delta (句柄数不回落)",
+    "child residue: active_children > child_process_max at any sample, or > child_sustained_max across 2 consecutive samples (子进程残留)",
+    "turn failures accumulating > turn_fail_max (失败/恢复错误递增)",
+    "resume-child failures > resume_fail_max",
+    "resume p95 > resume_p95_max_ms (resume 延迟超限)",
+    "wall-clock < wall_clock_min (not actually 10h)"
+  ],
+  "documentedDivergences": [
+    "ContextLimit pause is NOT exercised in the soak: the host runner seam (createCliHost) wires AgentSession without tokenBudget, so contextTokenBudget stays undefined and shouldPauseForContextLimit returns false. ContextLimit semantics are unit-tested in packages/agent (shouldPauseForContextLimit / stopContextLimit) and packages/coding-agent agent-session tests. The soak instead exercises the existing reset/clear interface via periodic runner.resetHistory() per validation-and-release.md 51.",
+    "Session checkpoint grows within each clear window because the production writer emits checkpoint_turn_started with the full accumulated history on every turn (agent-session.ts:428) - this is the real C#-mirroring writer behavior. clear-every-30 bounds it to ~linear growth in wall time (~580MB projected at 10h). File growth is expected per validation-and-release.md 51."
+  ]
+}
