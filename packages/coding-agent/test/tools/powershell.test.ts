@@ -25,7 +25,20 @@ import { createPowerShellTool, ShellSession, powershellSessionShell } from "@di/
  */
 
 const base = mkdtempSync(join(tmpdir(), "di-ps-"));
-test.after(() => rmSync(base, { recursive: true, force: true }));
+test.after(async () => {
+  // Session kills are fire-and-forget (taskkill tree ~1-2s); a live powershell
+  // session still holds `base` as its cwd, so Windows refuses the delete. Retry
+  // until the pending kills release the directory (bounded ~6s).
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      rmSync(base, { recursive: true, force: true });
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+  rmSync(base, { recursive: true, force: true });
+});
 
 function args(command: string, workingDir?: string, timeout?: number): string {
   const parts: string[] = [`"command":${JSON.stringify(command)}`];
@@ -136,9 +149,13 @@ test("⑭ nonexistent shell executable returns 无法启动", async () => {
     sessionKind: "powershell",
   });
   const tool = createPowerShellTool(base, { session });
-  const obs = await tool.execute(args("Write-Output x"));
-  assert.ok(obs.text.startsWith("error:"), obs.text);
-  assert.ok(obs.text.includes("无法启动"), obs.text);
+  try {
+    const obs = await tool.execute(args("Write-Output x"));
+    assert.ok(obs.text.startsWith("error:"), obs.text);
+    assert.ok(obs.text.includes("无法启动"), obs.text);
+  } finally {
+    session.dispose();
+  }
 });
 
 // ---- 边界 ----
@@ -209,18 +226,26 @@ test("㉓ with a session, state persists across calls", async () => {
   mkdirSync(join(base, "work"), { recursive: true });
   const session = new ShellSession(base, powershellSessionShell);
   const tool = createPowerShellTool(base, { session });
-  await tool.execute(args("cd work"));
-  const result = await tool.execute(args("(Get-Location).Path"));
-  assert.ok(result.text.startsWith("exit: 0"), result.text);
-  assert.ok(result.text.includes("work"), result.text);
+  try {
+    await tool.execute(args("cd work"));
+    const result = await tool.execute(args("(Get-Location).Path"));
+    assert.ok(result.text.startsWith("exit: 0"), result.text);
+    assert.ok(result.text.includes("work"), result.text);
+  } finally {
+    session.dispose();
+  }
 });
 
 test("㉔ with a session, the working_dir param is ignored", async () => {
   const session = new ShellSession(base, powershellSessionShell);
   const tool = createPowerShellTool(base, { session });
-  await tool.execute(args("$env:DI_T='yes'", "sub/that/does/not/exist"));
-  const result = await tool.execute(args("Write-Output $env:DI_T", "sub/that/does/not/exist"));
-  assert.ok(result.text.includes("yes"), result.text);
+  try {
+    await tool.execute(args("$env:DI_T='yes'", "sub/that/does/not/exist"));
+    const result = await tool.execute(args("Write-Output $env:DI_T", "sub/that/does/not/exist"));
+    assert.ok(result.text.includes("yes"), result.text);
+  } finally {
+    session.dispose();
+  }
 });
 
 test("㉕ with a session, the definition omits working_dir and describes persistence", () => {
@@ -236,18 +261,26 @@ test("㉕ with a session, the definition omits working_dir and describes persist
 test("㉖ with a session, timeout self-heals", async () => {
   const session = new ShellSession(base, powershellSessionShell);
   const tool = createPowerShellTool(base, { session, timeoutSeconds: 0.3 });
-  const timedOut = await tool.execute(args("Start-Sleep -Seconds 5"));
-  assert.ok(timedOut.text.startsWith("error:"), timedOut.text);
-  assert.ok(timedOut.text.includes("秒"), timedOut.text);
-  const after = await tool.execute(args("Write-Output recovered"));
-  assert.ok(after.text.startsWith("exit: 0"), after.text);
-  assert.ok(after.text.includes("recovered"), after.text);
+  try {
+    const timedOut = await tool.execute(args("Start-Sleep -Seconds 5"));
+    assert.ok(timedOut.text.startsWith("error:"), timedOut.text);
+    assert.ok(timedOut.text.includes("秒"), timedOut.text);
+    const after = await tool.execute(args("Write-Output recovered"));
+    assert.ok(after.text.startsWith("exit: 0"), after.text);
+    assert.ok(after.text.includes("recovered"), after.text);
+  } finally {
+    session.dispose();
+  }
 });
 
 test("㉗ with a session, unknown command returns exit 1", async () => {
   const session = new ShellSession(base, powershellSessionShell);
   const tool = createPowerShellTool(base, { session });
-  const result = await tool.execute(args("definitely_not_a_real_command_xyz"));
-  assert.ok(result.text.startsWith("exit: 1"), result.text);
-  assert.ok(!result.text.startsWith("error:"), result.text);
+  try {
+    const result = await tool.execute(args("definitely_not_a_real_command_xyz"));
+    assert.ok(result.text.startsWith("exit: 1"), result.text);
+    assert.ok(!result.text.startsWith("error:"), result.text);
+  } finally {
+    session.dispose();
+  }
 });

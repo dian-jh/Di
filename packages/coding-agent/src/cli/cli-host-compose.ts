@@ -22,7 +22,7 @@ import { ancestorAgentsSkillDirectories, userAgentsSkillsDirectory } from "../co
 import { loadSkills } from "../core/skills/skill-repository.ts";
 import { createSkillAwareExecutor, LOAD_SKILL_TOOL } from "../core/skills/skill-tools.ts";
 import type { Skill } from "../core/skills/skill.ts";
-import { createBashTool, createFileTools, createToolExecutor } from "../core/tools/index.ts";
+import { createBashTool, createFileTools, createPowerShellTool, createPythonTool, createToolExecutor } from "../core/tools/index.ts";
 import { createGlobTool } from "../core/tools/glob.ts";
 import { createGrepTool } from "../core/tools/grep.ts";
 import type { CoreTool } from "../core/tools/types.ts";
@@ -152,14 +152,20 @@ export async function createCliHost(
   const effectiveProvider = !isBlank(args.provider) ? args.provider! : configuredProvider;
   const defaultModel = args.model ?? configuredDefaultModel;
 
-  // Tools: the P4.x set in canonical order read/write/edit/glob/grep/bash over
-  // the workspace (C# `CoreTools` canonical order first slice; the one-shot
-  // shell tool lands here so the "运行命令与代码" instruction is honest).
+  // Tools: the P4.x set in canonical order read/write/edit/glob/grep/bash/
+  // powershell/python over the workspace (C# `CoreTools` canonical order). The
+  // shell tools are registered in ONE-SHOT mode here, consistent with the P4.5
+  // decision for the platform shell; persistent-session mode (a shared
+  // ShellSession injected into createPowerShellTool / createBashTool) is fully
+  // implemented and tested, and wiring a host-managed persistent session (with
+  // dispose lifecycle) is a follow-up.
   const tools = options.tools ?? [
     ...createFileTools(workspace),
     createGlobTool(workspace),
     createGrepTool(workspace),
     createBashTool(workspace),
+    createPowerShellTool(workspace),
+    createPythonTool(workspace),
   ];
   const toolSpecs = tools.map((tool) => tool.spec);
 

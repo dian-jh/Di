@@ -27,7 +27,20 @@ const base = mkdtempSync(join(tmpdir(), "di-session-"));
 const sub = join(base, "work");
 mkdirSync(sub, { recursive: true });
 mkdirSync(join(base, "other"), { recursive: true });
-test.after(() => rmSync(base, { recursive: true, force: true }));
+test.after(async () => {
+  // Session kills are fire-and-forget (taskkill tree ~1-2s); a session cmd that
+  // is still alive holds `base` as its cwd, so Windows refuses the delete. Retry
+  // until the pending kills release the directory (bounded ~6s).
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      rmSync(base, { recursive: true, force: true });
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+  rmSync(base, { recursive: true, force: true });
+});
 
 const IS_WINDOWS = process.platform === "win32";
 const TIMEOUT_MS = 10_000;

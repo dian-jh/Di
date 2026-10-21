@@ -6,11 +6,15 @@ import { createWriteFileTool } from "./write.ts";
 import { createEditFileTool } from "./edit.ts";
 import { createGrepTool, type GrepToolOptions } from "./grep.ts";
 import { createBashTool, PLATFORM_SHELL_NAME, type BashToolOptions } from "./bash.ts";
+import { createPowerShellTool, type PowerShellToolOptions } from "./powershell.ts";
+import { createPythonTool, type PythonToolOptions } from "./python.ts";
 
 export type { CoreTool } from "./types.ts";
 export type { ReadFileToolOptions } from "./read.ts";
 export type { GrepToolOptions } from "./grep.ts";
 export type { BashToolOptions } from "./bash.ts";
+export type { PowerShellToolOptions } from "./powershell.ts";
+export type { PythonToolOptions } from "./python.ts";
 export { READ_FILE_MAX_BYTES, READ_FILE_MAX_OUTPUT_LINES, READ_FILE_MAX_OUTPUT_CHARS } from "./read.ts";
 export { createReadFileTool } from "./read.ts";
 export { createWriteFileTool } from "./write.ts";
@@ -22,12 +26,25 @@ export {
   BASH_MAX_TIMEOUT_SECONDS,
   PLATFORM_SHELL_NAME,
 } from "./bash.ts";
+export {
+  createPowerShellTool,
+  POWERSHELL_DEFAULT_TIMEOUT_SECONDS,
+  POWERSHELL_MAX_TIMEOUT_SECONDS,
+} from "./powershell.ts";
+export { createPythonTool, PYTHON_DEFAULT_TIMEOUT_SECONDS } from "./python.ts";
+export {
+  ShellSession,
+  platformDefaultShell,
+  platformSessionShell,
+  powershellSessionShell,
+} from "./shell-session.ts";
+export type { ShellCommand, ShellSessionKind } from "./shell-session.ts";
 
 /**
  * The three file tools in canonical order (read/write/edit), the first slice of
- * the 8-tool registry (`Core/Tools/CoreTools.cs` canonical order). Glob/grep
- * and the one-shot shell tool (`createBashTool`) extend the registry; the
- * persistent ShellSession / PowerShell / Python tools arrive in later P4 cards.
+ * the 8-tool registry (`Core/Tools/CoreTools.cs` canonical order). Glob/grep,
+ * the one-shot shell tool (`createBashTool`) and the PowerShell / Python tools
+ * (`createPowerShellTool` / `createPythonTool`) extend the registry.
  */
 export function createFileTools(
   baseDirectory: string,

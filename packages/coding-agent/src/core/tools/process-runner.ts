@@ -88,6 +88,13 @@ export interface ProcessRunOptions {
    * existing behavior is unchanged (args-array spawn, no shell quoting).
    */
   readonly shell?: boolean;
+  /**
+   * Redirect the child's stdin as a pipe and close it immediately after spawn
+   * (C# `redirectInput: true` semantics — the child's stdin starts at EOF, never
+   * inheriting the caller's handle; `sys.stdin.isatty()` is false and reads hit
+   * EOF at once). The Python tool uses this for its process-level sandbox.
+   */
+  readonly closeStdin?: boolean;
 }
 
 /** One process execution result, rendered as the tool observation text. */
@@ -124,6 +131,7 @@ export async function runProcess(
     oemCodePage,
     diagnostics,
     shell = false,
+    closeStdin = false,
   } = options;
   const heartbeatIntervalMs = diagnostics?.heartbeatIntervalMs ?? 5000;
   const heartbeatTickMs = diagnostics?.heartbeatTickMs ?? 1000;
@@ -224,6 +232,18 @@ export async function runProcess(
     return new ProcessResult(-1, "", `无法启动进程: ${messageOf(spawnFailure)}`);
   }
 
+  // C# `redirectInput: true` semantics: the child's stdin pipe hits EOF at once
+  // (python sandbox — the code must not reach the caller's terminal, and an
+  // inherited orphan pipe could wedge startup). The caller opts in by passing a
+  // "pipe" stdin in `stdio` plus `closeStdin: true`.
+  if (closeStdin) {
+    try {
+      child.stdin?.end();
+    } catch {
+      // child already gone: closing a dead write end is harmless.
+    }
+  }
+
   // ---- process-level diagnostics (proc: lines, see ProcessDiagnostics) ----
   // The bypass hook must never affect execution: diagnose() guards everything.
   diagnose(
@@ -322,8 +342,13 @@ async function drainStream(stream: NodeJS.ReadableStream | null, buffer: Bounded
   }
 }
 
-/** Kill the process tree: Windows taskkill /PID /T /F; POSIX group SIGTERM->SIGKILL. */
-async function killProcessTree(child: ChildProcess): Promise<void> {
+/**
+ * Kill the process tree: Windows `taskkill /PID <pid> /T /F`; POSIX group
+ * SIGTERM -> short grace -> SIGKILL (P4-win-process-probe conclusions). Shared by
+ * the one-shot runner and the persistent ShellSession (which kills its whole
+ * session tree on timeout / user exit / cancel).
+ */
+export async function killProcessTree(child: ChildProcess): Promise<void> {
   // Already exited naturally (benign race): nothing to kill (probe §4: taskkill
   // on a dead PID returns 128 — skip it).
   if (child.exitCode !== null || child.signalCode !== null) return;

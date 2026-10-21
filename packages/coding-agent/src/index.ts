@@ -37,11 +37,21 @@ export {
   BASH_MAX_TIMEOUT_SECONDS,
   PLATFORM_SHELL_NAME,
 } from "./core/tools/bash.ts";
+export {
+  createPowerShellTool,
+  POWERSHELL_DEFAULT_TIMEOUT_SECONDS,
+  POWERSHELL_MAX_TIMEOUT_SECONDS,
+} from "./core/tools/powershell.ts";
+export { createPythonTool, PYTHON_DEFAULT_TIMEOUT_SECONDS } from "./core/tools/python.ts";
+export { ShellSession, platformDefaultShell, platformSessionShell, powershellSessionShell } from "./core/tools/shell-session.ts";
+export type { ShellCommand, ShellSessionKind } from "./core/tools/shell-session.ts";
 export type { CoreTool } from "./core/tools/index.ts";
 export type { ReadFileToolOptions } from "./core/tools/read.ts";
 export type { GlobToolOptions } from "./core/tools/glob.ts";
 export type { GrepToolOptions } from "./core/tools/grep.ts";
 export type { BashToolOptions } from "./core/tools/bash.ts";
+export type { PowerShellToolOptions } from "./core/tools/powershell.ts";
+export type { PythonToolOptions } from "./core/tools/python.ts";
 export {
   BoundedByteBuffer,
   OutputBuffer,
