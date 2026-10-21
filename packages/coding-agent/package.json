@@ -11,10 +11,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli/main.d.ts",
+      "import": "./dist/cli/main.js"
     }
   },
   "bin": {
-    "di": "./dist/cli/index.js"
+    "di-ts": "./dist/cli/main.js"
   },
   "files": [
     "dist"

@@ -14,7 +14,7 @@
 //
 // The PRODUCTION of the session is this fixture's job (host-style, like P5). The
 // RESTART in the parent test MUST go through the real CLI production chain
-// (`node dist/cli/index.js --mode rpc --resume <file>`), never through this
+// (`node dist/cli/main.js --mode rpc --resume <file>`), never through this
 // fixture or a test host — the "no side-effect replay" proof is the
 // side-effects.log line count staying at exactly 1 across production + restart.
 //

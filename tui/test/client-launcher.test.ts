@@ -1,6 +1,6 @@
 /**
  * launcher 注入接缝 + 协议场景测试：通过注入的 TS 后端 launcher
- * （`process.execPath` + 编译后 TS 入口参数，等价于开发期 `node packages/.../index.js --mode rpc`）
+ * （`process.execPath` + 编译后 TS 入口参数，等价于开发期 `node packages/.../main.js --mode rpc`）
  * spawn 场景化假后端（test/fixtures/scenario-backend.mjs），验证：
  * - 注入的 launcher 被实际使用（优先于 bin/args；暴露 client.launcher）。
  * - 流式消费开始 / 排空（跨 chunk 行拆分完整解析；result 后垃圾行不打断下一回合）。

@@ -53,7 +53,7 @@ export type SpawnFn = (bin: string, args: string[]) => ChildProcess;
  * TS 后端启动器：完整描述如何 spawn 后端进程（bin + args 的启动单元）。
  * Windows 上 npm `.cmd`/`.bat` shim 不能直接当原生可执行文件 spawn，
  * 开发期 launcher 可为 `process.execPath` + 编译后 TS 入口参数
- * （例如 `node packages/coding-agent/dist/cli/index.js --mode rpc`）。
+ * （例如 `node packages/coding-agent/dist/cli/main.js --mode rpc`）。
  */
 export interface Launcher {
   /** 可执行文件路径（须为原生可执行）。 */

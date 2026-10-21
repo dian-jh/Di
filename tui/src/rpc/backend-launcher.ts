@@ -32,12 +32,13 @@ const RPC_ARGS = ["--mode", "rpc"];
 
 /**
  * 编译后 TS CLI 入口默认路径：相对 monorepo 布局（tui/src/rpc → 仓库根 →
- * packages/coding-agent/dist/cli/index.js）。源码（src/rpc）与编译产物
- * （dist/rpc）两种布局下同一公式都成立。
+ * packages/coding-agent/dist/cli/main.js）。源码（src/rpc）与编译产物
+ * （dist/rpc）两种布局下同一公式都成立。入口名与 package.json
+ * `bin["di-ts"]` 一致（architecture.md §7 / §141-147，P9）。
  */
 export function resolveTsEntryPath(): string {
   const here = path.dirname(fileURLToPath(import.meta.url)); // <repo>/tui/{src|dist}/rpc
-  return path.resolve(here, "..", "..", "..", "packages", "coding-agent", "dist", "cli", "index.js");
+  return path.resolve(here, "..", "..", "..", "packages", "coding-agent", "dist", "cli", "main.js");
 }
 
 /**

@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 /**
- * CLI bin entry (P7a): the executable main the `"bin"` field points at — the
- * precondition for the TS TUI spawning `process.execPath <this entry> --mode rpc`
- * (P7-tui-launcher-seam). Parses argv, wraps the real stdio into the injected
- * `TextReader` / `TextWriter` seams, and dispatches `CliApp.runAsync`.
+ * CLI bin entry (P7a/P9): the production executable main the `"bin"` field
+ * points at — `di-ts` → `packages/coding-agent/dist/cli/main.js` (architecture.md
+ * §7 / §141-147). The TS command never occupies the plain `di` name, so the
+ * installed C# `di` stays the system default until migration completion. Also the
+ * entry the TS TUI spawns as `process.execPath <this entry> --mode rpc`
+ * (P7-tui-launcher-seam / P7b RPC launcher). Parses argv, wraps the real stdio
+ * into the injected `TextReader` / `TextWriter` seams, and dispatches
+ * `CliApp.runAsync`.
  *
  * The dispatch shell never touches the console itself (C# `Program.cs`
  * counterpart): TTY detection comes from the live stdio streams, data → stdout,
