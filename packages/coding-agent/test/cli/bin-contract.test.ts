@@ -10,9 +10,9 @@ import { fileURLToPath } from "node:url";
  * overwrites the installed system `di` (C# stays the default until migration
  * completion; validation-and-release.md §120-128).
  *
- * The current `"di": "./dist/cli/index.js"` mapping is the known P7a divergence
- * this card fixes. Red: package.json still maps `di`, and dist/cli/main.js does
- * not exist.
+ * The pre-fix state was the known P7a divergence: package.json mapped
+ * `"di": "./dist/cli/index.js"` and dist/cli/main.js did not exist. The fix
+ * (cb15387) renames the entry to di-ts -> dist/cli/main.js.
  */
 
 const packageJsonPath = fileURLToPath(new URL("../../package.json", import.meta.url));
