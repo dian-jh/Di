@@ -402,12 +402,12 @@
 
 | 阶段 | 真实状态 | 依据（当前版本核实） |
 |---|---|---|
-| P0–P3, P5–P7 | 阶段验收完成 | 七项 gate 当前全绿：coding-agent build/typecheck(0)、test(0, 724 = 723 pass + 1 win-symlink skip，含 P8b 49 例与并行 P4-regex 18 例)、根 typecheck/test(0)、tui build(0)、tui test(0, 133/133) |
-| P4 | 单元实现完成（阶段未验收，范围收窄） | P4.1–P4.5 各卡绿 + P4-regex-unicode-conformance 已过（`\w\d\b` Unicode 桥接完成，conformance 门关闭）；`core/tools/` 下仍无 powershell/python/shell-session 文件（下一卡） |
+| P0–P3, P5–P7 | 阶段验收完成 | 七项 gate 当前全绿：coding-agent build/typecheck(0)、test(0, 812 = 811 pass + 1 win-symlink skip，含 P8b 49 例、P4-regex 18 例与 P4-shell-session 62 例)、根 typecheck/test(0)、tui build(0)、tui test(0, 133/133) |
+| P4 | 单元实现完成（阶段未验收） | P4.1–P4.5 各卡绿 + P4-regex-unicode-conformance 已过（`\w\d\b` Unicode 桥接完成，conformance 门关闭）+ P4-shell-session-powershell-python 已过（68812ed/b1d1ac3：持久 ShellSession + PowerShell + Python 工具 + 组合根接线，Windows 进程树 kill 实测记录）；八工具契约齐备 |
 | P8 | 单元实现完成（host 运行时存储按契约失败关闭） | P8a provider 绿（@di/ai 173/173，含并行 cost-wiring 2 例）；P8b host OAuth/凭据存储完成（`auth-command.ts` 经 `defaultChatGptStore`/`FAIL_CLOSED_LOCK_PROVIDER` 失败关闭接缝接线）；运行时 ChatGPT 存储保持失败关闭直到真实 OS advisory lock 适配器批准 |
 | P9 | in_progress | 本地 Runner 已完成（346dccc，同进程 CoreRunner，协议与子进程 RPC 等价）；`install.ps1` 仍 `dotnet publish` C# di.exe、TS TUI 仅可选步骤（P9-release-install-rollback 待做） |
 
-**未实现（真实缺口）**：P8b 真实 OS advisory lock 适配器（宿主运行时 ChatGPT 存储保持失败关闭，凭据不被伪造/篡改；锁接缝与事务已就绪，待批准后启用）；P9 TS 安装/回退/跨平台/长任务验收；持久 ShellSession/powershell/python（下一卡）。P4 `\w\d\b` 桥接、P3.4 cost 接线与 P9 本地 Runner **已完成**（见 P4-regex / P3.4-cost / P9-local-runner 交接）。
+**未实现（真实缺口）**：P8b 真实 OS advisory lock 适配器（宿主运行时 ChatGPT 存储保持失败关闭，凭据不被伪造/篡改；锁接缝与事务已就绪，待批准后启用）；P9 TS 安装/回退/跨平台/长任务验收。P4 `\w\d\b` 桥接、P3.4 cost 接线、P9 本地 Runner 与 P4-shell-session（持久 ShellSession/powershell/python）**已完成**（见 P4-regex / P3.4-cost / P9-local-runner / P4-shell-session-powershell-python 交接）。
 
 **未运行**：真实 API 集成测试（`Category=Integration`，P0 起未跑）；十小时墙钟长任务；非 Windows 平台验收。
 
@@ -415,13 +415,13 @@
 
 **任务卡清单（按依赖排序，卡 5 独立可并行；P8b 已完成 7d9faea/f8114df）**：
 1. ~~**P4-regex-unicode-conformance**~~ **已完成**（26b853d、1e69e2f）——`\w\d\b` Unicode 桥接，conformance 门已过；仅剩 i 折叠（`k` vs `K`）为已记录差异。
-2. **P4-shell-session-powershell-python**（依赖 P4.4、P4.5、P4-win-process-probe、P4-win-encoding-probe）——持久 ShellSession + PowerShell + Python 工具 + 组合根接线；Windows 进程树 kill 必须实测记录。（**下一卡**）
+2. ~~**P4-shell-session-powershell-python**~~ **已完成**（68812ed、b1d1ac3）——持久 ShellSession + PowerShell + Python 工具 + 组合根接线；Windows 进程树 kill 已实测记录（probes/P4-shell-session-process-tree-kill-probe.md）。
 3. **P9-local-runner-inprocess**（依赖 P7）——TUI 同进程 Runner，与子进程 RPC 字节级等价；TUI 组件零改动；保留外部 RPC 路径。
 4. **P9-release-install-rollback**（依赖卡 3+2）——`install.ps1` 改发 TS CLI 入口、回退演练、跨平台、十小时墙钟验收；禁门槛未过删 C# reference/覆盖本机安装版。
 5. ~~**P3.4-cost-wiring**~~ **已完成**（ad9f96d、d08409f）——DeepSeek adapter cost resolver 已接，生产 `ModelResponse.cost` 出现；未知 model 保持 undefined。
 
-依赖图要点：卡 5 已完成；卡 1 已完成；下一卡为卡 2（ShellSession/powershell/python），卡 4 依赖卡 3+2；全部完成且七项 gate 绿才可宣布迁移完成（operator-guide 完成判据）。
+依赖图要点：卡 5 已完成；卡 1 已完成；卡 2 已完成（68812ed/b1d1ac3）；下一卡为卡 4（P9-release-install-rollback，依赖卡 3+2 均已满足）；全部完成且七项 gate 绿才可宣布迁移完成（operator-guide 完成判据）。
 
-## 下一张任务卡（P4-shell-session-powershell-python）
+## 下一张任务卡（P9-release-install-rollback）
 
-> **推荐下一卡：P4-shell-session-powershell-python。** P4-regex-unicode-conformance（`\w\d\b` Unicode 桥接）与 P3.4-cost-wiring 已完成，P8b 已完成（运行时存储按契约失败关闭，真实 OS advisory lock 适配器为后续可选增强）。组合根工具集目前只有一次性 shell（P4.5），缺 C# 基线的**持久 ShellSession（cwd/env 跨调用、会话风味提示词）与 PowerShell/Python 工具**——这是 P4 阶段未验收完成的唯一剩余项。任务：按 `tools-and-platform.md` 八工具契约与持久 shell 会话协议实现（随机 nonce marker、stdin 编码、stdout/stderr drain、会话 mutex、kill/recreate），Windows 进程树 kill 必须实测；随后 P9 本地 Runner / TS 安装回退 / 跨平台 / 长任务验收。
+> **推荐下一卡：P9-release-install-rollback（审计卡 4）。** 卡 3（P9-local-runner-inprocess）与卡 2（P4-shell-session-powershell-python）均已落地（68812ed/b1d1ac3），审计依赖「卡 4 依赖 3+2」已满足；卡 1/2/3/5 全部完成，这是发布关键路径的最后一张卡。任务：按 `architecture.md` bin 表修正生产入口为 **`di-ts` → `packages/coding-agent/dist/cli/main.js`**（当前 `di → dist/cli/index.js` 是 P7a 偏差，不得覆盖已安装的系统 `di`）；`install.ps1` 改发 TS CLI 入口、与 C# di 并存可回退；按 `validation-and-release.md` §120-128 做安装/回退/用户数据保护演练（不得移动/删除/重写 `~/.di/config.json` 与旧 session/skills/commands/凭据）；十小时墙钟 soak 先冻结阈值（30 分钟 warm-up 定基线）再作 RC 后台 gate 跑真实墙钟，不以轮数折算。
