@@ -1,6 +1,7 @@
 import type { ChatModel, ModelRequest } from "../../types/model.ts";
 import type { ModelEvent } from "../../types/stream.ts";
 import { sseToModelEvents } from "../../sse.ts";
+import { costForModel } from "../../usage.ts";
 import {
   createDeepSeekTranslator,
   deepSeekDefaults,
@@ -101,6 +102,7 @@ export class DeepSeekAdapter implements ChatModel {
       translateEvent: createDeepSeekTranslator(),
       idleTimeoutMs: this.idleTimeoutMs,
       signal,
+      cost: (usage) => costForModel("deepseek", this.model, usage),
     });
   }
 
