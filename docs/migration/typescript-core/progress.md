@@ -1,6 +1,6 @@
 # TypeScript Core 迁移：进度表
 
-> **状态：P0–P2.7 各单元（P2 阶段全部完成）、P3.1–P3.5 与 P8a（@di/ai 全部完成）、P4.1–P4.5（P4 阶段全部完成，含一次性 shell 工具接入组合根）、P5 检查点/恢复与统计、P6.1、P6.2a、P6.2b、P6.3a、P6.3b-cli-args-modes、P6.3c-modes-resume-output、P6.4-run-logging、P7-tui-launcher-seam、P7a-ts-cli-entry-composition、P7b-tui-wiring-integration（TUI 接线 + 真实宿主 RPC 集成 + 真实 CLI crash/resume 重跑）与四项预研均已完成；P6 与 P7 阶段全部完成，下一卡 P4-regex-unicode-conformance（`\w\d\b` Unicode 缺口，conformance 门；或持久 ShellSession）（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
+> **状态：P0–P2.7 各单元（P2 阶段全部完成）、P3.1–P3.5 与 P8a（@di/ai 包内全部完成；ChatGPT 生产接线被 P8b 阻塞）、P4.1–P4.5 各卡（含一次性 shell 工具接入组合根）已完成但 P4 阶段 conformance 门未过（`\w\d\b` Unicode 仅 ASCII）且持久 ShellSession/powershell/python 未做、P5 检查点/恢复与统计、P6.1、P6.2a、P6.2b、P6.3a、P6.3b-cli-args-modes、P6.3c-modes-resume-output、P6.4-run-logging、P7-tui-launcher-seam、P7a-ts-cli-entry-composition、P7b-tui-wiring-integration（TUI 接线 + 真实宿主 RPC 集成 + 真实 CLI crash/resume 重跑）与四项预研均已完成；P6 与 P7 阶段全部完成，下一卡 P4-regex-unicode-conformance（`\w\d\b` Unicode 缺口，conformance 门；或持久 ShellSession）（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
 > 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
 
@@ -46,7 +46,7 @@
 | P3.3 DeepSeek 请求/响应翻译 | P3.2 | **verified** | 5c36ca2 | 红：`npm test -w @di/ai`(1, 缺 DeepSeek 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 90/90 = 31 新增 + 59 回归)、根 `npm run typecheck`(0) | 无；后续卡：usage/cost（P3.4） |
 | P3.4 usage 聚合与成本计算 | P3.1+P3.2+P3.3 | **verified** | 269ff93 | 红：`npm test -w @di/ai`(1, 缺 billableInputTokens 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck -w @di/ai`(0)、`npm test -w @di/ai`(0, 123/123 = 90 回归 + 33 新增)、根 `npm run typecheck`(0)、`npm test -w @di/agent`(0, 45/45) | 无；后续卡：retry/timeout（P3.5） |
 | P3.5 retry/timeout 与超时 | P3.1..P3.4 | **verified** | bf48fdb、0394c41 | 红：`npm test -w @di/ai`(1, 缺 retry 导出 + 缺 header TIMEOUT rejection + 连接映射 false)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck -w @di/ai`(0)、`npm test -w @di/ai`(0, 150/150=123 回归+27 新)、根 `npm run typecheck`(0)、`npm test -w @di/agent`(0, 50/50) | retry/timeout 完成；P3 阶段全部完成；后续卡：P4.4 输出收集 |
-| P4 八个工具与平台执行 | P1 | **verified** | P4.1–P4.5（见子行） | 见 P4.1 / P4.2 / P4.3 / P4.4 / P4.5 子行 | 无；P4 阶段全部完成；持久 ShellSession / powershell / python 为后续卡 |
+| P4 八个工具与平台执行 | P1 | **verified**（各卡） | P4.1–P4.5（见子行） | 见 P4.1 / P4.2 / P4.3 / P4.4 / P4.5 子行 | 无（各卡范围）；**P4 阶段未验收完成**：`\w\d\b` Unicode conformance 门未过（下一卡 P4-regex-unicode-conformance）；持久 ShellSession / powershell / python 未做 |
 | P4.1 文件工具 read/write/edit | P6.1, P1.2 | **verified** | 867e936 | 红：`npm test -w @di/coding-agent`(1, 缺 createEditFileTool 导出)；业务红（临时禁 OEM fallback）`node --test test/read-file.test.ts`(1, 35 中 2 失败=GBK 用例)。绿：`npm run build -w @di/coding-agent`(0)、`npm run typecheck`(0)、`npm test -w @di/coding-agent`(0, 114/114=88 工具+26 配置回归)、根 `npm run build`(0)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无；FileShare.None 独占锁纯 Node 不可复刻；原子 rename 未做（保持基线原位写）；无解码器页（如 OEM 437）走显式解码错误（未加 iconv-lite）；后续卡：glob 枚举（P4.2） |
 | P4.2 glob 文件枚举 | P4.1 | **verified** | 1c08756 | 红：`npm test -w @di/coding-agent`(1, 缺 globIsMatch/createGlobTool/GLOB_DEFAULT_LIMIT 导出)。绿：`npm run build -w @di/coding-agent`(0)、`npm run typecheck -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 162 = 114 回归 + 48 新增, 161 pass + 1 win-symlink 平台跳过)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无；Windows 文件符号链接创建需管理员/开发者模式（EPERM）→ symlink-file 用例本机跳过、POSIX CI 运行；后续卡：grep/regex（P4.3） |
 | P4.3 grep/regex 搜索 | P4.2 | **verified** | 37fd82f、6e32deb | 红：`npm test -w @di/coding-agent`(1, SyntaxError 缺 GREP_DEFAULT_LIMIT 导出)。绿：`npm run build -w @di/coding-agent`(0)、`npm run typecheck -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 207 = 162 回归 + 45 新增, 206 pass + 1 win-symlink 平台跳过)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | worker_threads 每调用一个 worker，超时/中止 worker.terminate()（灾难回溯 `(x+x+)+y` 30 x 560ms 内返回）；u flag + \A\z\Z 桥接；.NET 独有语法显式 error 非静默空；GBK/OEM 936 解码匹配；JS \w\d\b 仅 ASCII 未补译（记录已知差异，conformance 门未过）；空标记用 C#「（未找到匹配）」；后续卡：P4.4 输出收集 |
@@ -69,6 +69,7 @@
 | P7b-tui-flaky-test-fix（RPC client 排空用例确定性同步） | P7b | **verified** | 2f0e56c | 红：`node --test test/client-launcher.test.ts` 单独重跑偶发失败（16 次 6 败 ~37.5%，失败恒在 client-launcher.test.ts:97）且失败时进程挂起不退出。绿（独立复跑）：单测 3 连跑(0, 每次 11/11, 无挂起)、`npm test`(0, 133/133)、`npm run build`(0) | 无（本卡范围）；测试时序/清理缺陷，非 RpcClient 产品缺陷；详见 P7b 修复交接 |
 | P8 ChatGPT 认证 | P3, 凭据存储接口 | in_progress | P8a-chatgpt-provider（见子行）；P8b 待派 | 见子行；@di/ai 侧 provider 完成，host 侧认证未开始 | P8b host 认证/凭据存储依赖 Windows-ACL/锁平台门（未决） |
 | P8a-chatgpt-provider | P3 | **verified** | b1035a9（test 红）、abd80c4（feat 绿） | 红：`npm test -w @di/ai`(1, 2 新套件失败 SyntaxError "does not provide an export named 'ChatGptError'"，150 回归 pass)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck -w @di/ai`(0)、`npm test -w @di/ai`(0, 171 = 150 回归 + 21 新)、根 `npm run typecheck`(0) | 无（本卡范围）；ChatGPT Responses provider（wire/translator/adapter）；store:false/stream:true/无 previous_response_id/system→developer/Di namespace tools/UNSUPPORTED_OPTION 前置/终态不伪造/raw-output 回放/sessionId→64-hex prompt_cache_key；仅合成端点；后续卡：P8b host OAuth/凭据存储 |
+| P3.4-cost-wiring（cost resolver 接入 DeepSeek adapter） | P3.4, P7a | **todo** | – | 未执行（第二步审计发现：`usage.ts` `costForModel` 已导出，但 `deepseek/adapter.ts:99-104` 的 `sseToModelEvents` 调用不传 `cost` → 生产 `ModelResponse.cost` 恒 undefined，event-renderer/rpc-mode/di-log/session 统计的 cost 分支全空） | 无；可与其他卡并行 |
 | P9 本地 Runner、切换与完成 | P7, P8 | todo | – | 未执行 | 无 |
 | P4-regex-probe（预研） | P4 | **verified** | 27e3e60 | `git show 27e3e60`(0)；发现见 probes/P4-regex-probe.md | 无 |
 | P4-win-process-probe（预研） | P4 | **verified** | 27e3e60 | `git show 27e3e60`(0)；发现见 probes/P4-win-process-probe.md | 无 |
@@ -366,6 +367,33 @@
 - **修复（仅 `tui/test/client-launcher.test.ts`，+3/−1）：** ① 该 it 签名 `async ()` → `async (t)`；② 创建 client 后注册 `t.after(() => client.stop())`——无论断言成败都必清理子进程/管道句柄，消除挂起；③ 第 97 行断言前加 `await waitFor(() => malformed.some(...))`（文件既有条件同步 helper，非 sleep/放大超时），原 `assert.ok` 保留不删。
 - **红→绿：** 红为修复前单独重跑偶发失败+挂起（证据见上）。绿（调度独立复跑，非采信作者报告）：`node --test test/client-launcher.test.ts` 3 连跑 (0, 每次 11/11、进程正常退出)、`npm test` (0, 133/133)、`npm run build` (0)。未触碰产品代码 / fixture / 其它用例。
 - **未完成门槛：** 无（本卡范围）。下一卡不变：P4-regex-unicode-conformance（见下）。
+
+## 迁移完成度与剩余缺口（第二步审计 2026-10-21）
+
+状态类别约定：**单元实现完成** = 该阶段内各任务卡已绿；**阶段验收完成** = 各卡绿 + 七项 gate 当前全绿；**迁移完成** = 原定功能全部 + 全部验收门槛满足。历史 verified ≠ 当前版本仍通过（本段已对七项 gate 与真实源码复核，证据见下）。
+
+| 阶段 | 真实状态 | 依据（当前版本核实） |
+|---|---|---|
+| P0–P3, P5–P7 | 阶段验收完成 | 七项 gate 当前全绿：coding-agent build/typecheck(0)、test(0, 657 = 656 pass + 1 win-symlink skip)、根 typecheck/test(0)、tui build(0)、tui test(0, 133/133) |
+| P4 | 单元实现完成（阶段未验收） | P4.1–P4.5 各卡绿；但 `\w\d\b` Unicode 仅 ASCII（`grep.ts:69-71` 注释在案），conformance 门未过；`core/tools/` 下无 powershell/python/shell-session 文件 |
+| P8 | in_progress | P8a provider 绿（@di/ai 171/171）；P8b host OAuth/凭据存储未实现（`auth-command.ts` 失败关闭、组合根 `checkAuth` 恒 false、`defaultModelForLabel` 对 chatgpt throw） |
+| P9 | todo | 本地 Runner 未实现（TUI 仍经子进程 RPC）；`install.ps1` 仍 `dotnet publish` C# di.exe、TS TUI 仅可选步骤 |
+
+**未实现（真实缺口）**：P8b 凭据存储；P9 本地 Runner；P9 TS 安装/回退/跨平台/长任务验收；P4 `\w\d\b` Unicode 桥接；持久 ShellSession/powershell/python；**P3.4 cost resolver 未接入 DeepSeek adapter**（`usage.ts` `costForModel` 已导出，`deepseek/adapter.ts:99-104` 不传 cost → 生产 `ModelResponse.cost` 恒 undefined）。
+
+**未运行**：真实 API 集成测试（`Category=Integration`，P0 起未跑）；十小时墙钟长任务；非 Windows 平台验收。
+
+**跳过/兼容差异（在案未伪造）**：win-symlink 用例本机跳过（Windows EPERM，1 skip，POSIX CI 跑）；FileShare.None 独占锁纯 Node 不可复刻；原子 rename 未做（保持基线原位写）；无解码页（如 OEM 437）显式解码错误；`\p{IsScript}` 显式 error 非桥接；NUL 消息/亚秒超时格式化等 MINOR 文本差异（P4.5 独立审阅记录）。
+
+**任务卡清单（按依赖排序，卡 6 独立可并行）**：
+1. **P4-regex-unicode-conformance**（依赖 P4.3、P4-regex-probe）——grep 桥接 `\w\d\b` 为 Unicode 语义或给出显式兼容决定；红测固定 Unicode fixture（中文/全角/组合字符）；禁静默降级/删 `\p{…}` error 测试。
+2. **P4-shell-session-powershell-python**（依赖 P4.4、P4.5、P4-win-process-probe、P4-win-encoding-probe）——持久 ShellSession + PowerShell + Python 工具 + 组合根接线；Windows 进程树 kill 必须实测记录。
+3. **P8b-chatgpt-host-auth**（依赖 P8a、P8-auth-storage-probe）——先决策记录（Windows-ACL/锁选型）再实现 OAuth/凭据存储；禁明文存凭据/伪造 OAuth/平台预研未决即实现。
+4. **P9-local-runner-inprocess**（依赖 P7）——TUI 同进程 Runner，与子进程 RPC 字节级等价；TUI 组件零改动；保留外部 RPC 路径。
+5. **P9-release-install-rollback**（依赖卡 4+3+1）——`install.ps1` 改发 TS CLI 入口、回退演练、跨平台、十小时墙钟验收；禁门槛未过删 C# reference/覆盖本机安装版。
+6. **P3.4-cost-wiring**（依赖 P3.4、P7a，可并行）——DeepSeek adapter 传 cost resolver 使 `ModelResponse.cost` 出现；禁伪造费率/改 catalog。
+
+依赖图要点：卡 6 独立；卡 5 依赖 1+3+4；全部完成且七项 gate 绿才可宣布迁移完成（operator-guide 完成判据）。
 
 ## 下一张任务卡（P4-regex-unicode-conformance）
 
