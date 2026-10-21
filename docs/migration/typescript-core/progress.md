@@ -1,6 +1,6 @@
 # TypeScript Core 迁移：进度表
 
-> **状态：P0–P2.7 各单元（P2 阶段全部完成）、P3.1–P3.5 与 P8a/P8b（@di/ai ChatGPT provider + 宿主 OAuth PKCE 与原子凭据存储完成；宿主运行时 ChatGPT 存储按契约失败关闭——真实 OS advisory lock 适配器待批准后启用，不伪造凭据）、P4.1–P4.5 各卡（含一次性 shell 工具接入组合根）已完成；P4-regex-unicode-conformance（`\w\d\b` Unicode 桥接，P4 conformance 门已过）与 P3.4-cost-wiring 已完成，持久 ShellSession/powershell/python 未做、P5 检查点/恢复与统计、P6.1、P6.2a、P6.2b、P6.3a、P6.3b-cli-args-modes、P6.3c-modes-resume-output、P6.4-run-logging、P7-tui-launcher-seam、P7a-ts-cli-entry-composition、P7b-tui-wiring-integration（TUI 接线 + 真实宿主 RPC 集成 + 真实 CLI crash/resume 重跑）与四项预研均已完成；P6、P7、P8 与 P9-local-runner-inprocess（本地同进程 TUI Runner，与子进程 RPC 协议形状等价，tui 组件零改动）阶段全部完成；下一卡 持久 ShellSession/powershell/python（或 P9-release-install-rollback 发布/回退验收）（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
+> **状态：P0–P2.7 各单元（P2 阶段全部完成）、P3.1–P3.5 与 P8a/P8b（@di/ai ChatGPT provider + 宿主 OAuth PKCE 与原子凭据存储完成；宿主运行时 ChatGPT 存储按契约失败关闭——真实 OS advisory lock 适配器待批准后启用，不伪造凭据）、P4.1–P4.5 各卡（含一次性 shell 工具接入组合根）已完成；P4-regex-unicode-conformance（`\w\d\b` Unicode 桥接，P4 conformance 门已过）与 P3.4-cost-wiring 已完成，持久 ShellSession/powershell/python 组件已完成（组合根持久接线 MAJOR 未交付，下一卡）、P5 检查点/恢复与统计、P6.1、P6.2a、P6.2b、P6.3a、P6.3b-cli-args-modes、P6.3c-modes-resume-output、P6.4-run-logging、P7-tui-launcher-seam、P7a-ts-cli-entry-composition、P7b-tui-wiring-integration（TUI 接线 + 真实宿主 RPC 集成 + 真实 CLI crash/resume 重跑）与四项预研均已完成；P6、P7、P8 与 P9 阶段（P9-local-runner-inprocess + P9-release-install-rollback）全部完成并独立验收；下一卡：P4-shell-session-composition-root-wiring（关闭组合根持久接线 MAJOR）（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
 > 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
 
@@ -380,7 +380,7 @@
 - **OAuth 行为（C# 移植）：** PKCE S256 + 127.0.0.1 随机端口限时回调；callback 校验 path/state/error/client_id/code（client_id 变化保旧连接）；授权码消费一次失败用已签发 client 重试（不重复注册）；token 契约校验 access/refresh/scope/id_token/expires_in（正整数）+ `chatgpt.tokens.use.direct` 必需；ID token 仅存为不透明提示（绝不解码为身份）；`NeedsRefresh` = expiresAt ≤ now+3min 且（earliestRefreshAt 未设 或 ≤now 或已过期）；刷新在 store 事务内，终态错误（invalid_grant/refresh_token_reused 等）清 token 保注册，瞬时（server_error）保留 + 抛可恢复错误；错误刷新响应绝不覆盖旧凭据（fromToken 校验失败先于任何状态变更）；logout 尽力撤销 refresh token + 清 token 保注册；`status`/`check` 本地读不刷新。
 - **C#→TS 分歧（有意，已记录）：** ① `authorize` 回调循环与浏览器导航并发——浏览器 open 不 await（对齐 C# `Task.Run` 打开浏览器），否则阻塞型浏览器与其重定向互相等待（实测死锁，已修复）；② scope 缺失时刷新沿用旧 scopes 的 C# 回退保留（故"坏刷新不覆盖"用非回退字段 `access_token` 验证）；③ `accessToken` 返回 `string | null`（C# `string?`）；④ Windows icacls 输出 GBK 解码（ASCII ACE 行两编皆净）；⑤ 无原生 fs-ext/lockfile 依赖，锁为契约强制失败关闭默认 + DI 注入 mock 验证事务逻辑。
 - **红→绿：** 红为测试先写、`@di/coding-agent` 无 P8b 导出（SyntaxError 脚手架首红，符合 operator-guide；657 回归 pass）。绿（七项 gate 全绿）：build -w(0)、typecheck -w(0)、test -w(0, 706 = 657 回归 + 49 新, 705 pass + 1 win-symlink 平台跳过)、根 typecheck(0)、根 test(0, @di/agent 50/50 + @di/ai 173/173 + coding-agent 723 pass + 1 skip)、tui test(0, 133 pass)、tui build(0)。（全树实测 724 = 706 + 并行 P4-regex-unicode-conformance 卡 18 例 grep-unicode；本卡未触碰 tui/、packages/ai/、packages/agent/。）
-- **未完成门槛：** 无（本卡范围）。宿主运行时 ChatGPT 存储按契约失败关闭——真实 OS advisory lock 适配器为后续可选增强（批准后启用；不伪造凭据/OAuth）。P8 阶段（P8a+P8b）全部完成；下一卡：P4-regex-unicode-conformance（已并行开卡）。
+- **未完成门槛：** 无（本卡范围）。宿主运行时 ChatGPT 存储按契约失败关闭——真实 OS advisory lock 适配器为后续可选增强（批准后启用；不伪造凭据/OAuth）。P8 阶段（P8a+P8b）全部完成；下一卡：P4-shell-session-composition-root-wiring（关闭卡 2 MAJOR）。
 
 ## P4-regex-unicode-conformance 交接（26b853d、1e69e2f）
 
@@ -402,12 +402,12 @@
 
 | 阶段 | 真实状态 | 依据（当前版本核实） |
 |---|---|---|
-| P0–P3, P5–P7 | 阶段验收完成 | 七项 gate 当前全绿：coding-agent build/typecheck(0)、test(0, 812 = 811 pass + 1 win-symlink skip，含 P8b 49 例、P4-regex 18 例与 P4-shell-session 62 例)、根 typecheck/test(0)、tui build(0)、tui test(0, 133/133) |
-| P4 | 单元实现完成（阶段未验收） | P4.1–P4.5 各卡绿 + P4-regex-unicode-conformance 已过（`\w\d\b` Unicode 桥接完成，conformance 门关闭）+ P4-shell-session-powershell-python 已过（68812ed/b1d1ac3：持久 ShellSession + PowerShell + Python 工具 + 组合根接线，Windows 进程树 kill 实测记录）；八工具契约齐备 |
+| P0–P3, P5–P7 | 阶段验收完成 | 七项 gate 当前全绿（独立复验 2026-10-21）：coding-agent build/typecheck(0)、test(0, 816 = 815 pass + 1 win-symlink skip，含 P8b、P4-regex 18 例、P4-shell-session 62 例与 tui-runner 26 例)、根 typecheck/test(0，重跑 ×2 均 0)、tui build(0)、tui test(0, 143/143)；G5 首跑 1 次 flake（失败详情因捕获脚本复用临时文件被覆盖而不可考，捕获缺陷），重跑 ×2 exit 0 |
+| P4 | 单元实现完成（组合根持久接线未验收） | P4.1–P4.5 各卡绿 + P4-regex-unicode-conformance 已过（`\w\d\b` Unicode 桥接完成，conformance 门关闭）+ P4-shell-session 组件已过（68812ed/b1d1ac3：ShellSession + PowerShell + Python 工具 + 树杀实测，62 例）；**MAJOR 缺口：组合根仍 one-shot 注册 cmd/powershell（cli-host-compose.ts:155-169 注释明示持久接线为后续）——卡 2 交接声称"组合根接线"完成系过报，已修正**；八工具契约齐备 |
 | P8 | 单元实现完成（host 运行时存储按契约失败关闭） | P8a provider 绿（@di/ai 173/173，含并行 cost-wiring 2 例）；P8b host OAuth/凭据存储完成（`auth-command.ts` 经 `defaultChatGptStore`/`FAIL_CLOSED_LOCK_PROVIDER` 失败关闭接缝接线）；运行时 ChatGPT 存储保持失败关闭直到真实 OS advisory lock 适配器批准 |
-| P9 | in_progress | 本地 Runner 已完成（346dccc，同进程 CoreRunner，协议与子进程 RPC 等价）；`install.ps1` 仍 `dotnet publish` C# di.exe、TS TUI 仅可选步骤（P9-release-install-rollback 待做） |
+| P9 | 单元实现完成（发布验收部分 PENDING） | 本地 Runner 已过（346dccc，同进程 CoreRunner，协议与子进程 RPC 字节等价，独立审查 ACCEPTABLE 无发现）；release/install/rollback 已过（cb15387/0c3ab6d/faf7091/a517fd0，独立验收：隔离 install drill exit 0 + di-ts --info smoke exit 0 + 无 Key model_error 信封复现 + drill probe 四阶段快照一致 + C# di 逐字节保留；独立审查 ACCEPTABLE-WITH-MINORS）；剩余：真实 10h 墙钟 soak、非 Windows 平台验收、默认入口切换（PENDING） |
 
-**未实现（真实缺口）**：P8b 真实 OS advisory lock 适配器（宿主运行时 ChatGPT 存储保持失败关闭，凭据不被伪造/篡改；锁接缝与事务已就绪，待批准后启用）；P9 TS 安装/回退/跨平台/长任务验收。P4 `\w\d\b` 桥接、P3.4 cost 接线、P9 本地 Runner 与 P4-shell-session（持久 ShellSession/powershell/python）**已完成**（见 P4-regex / P3.4-cost / P9-local-runner / P4-shell-session-powershell-python 交接）。
+**未实现（真实缺口）**：P4-shell-session 组合根持久接线（cli-host-compose.ts 仍 one-shot 注册 cmd/powershell，MAJOR，下一卡关闭）；P8b 真实 OS advisory lock 适配器（宿主运行时 ChatGPT 存储保持失败关闭，凭据不被伪造/篡改；锁接缝与事务已就绪，待批准后启用）；P9 真实 10h 墙钟 soak / 非 Windows 平台验收 / 默认入口切换（PENDING）。P4 `\w\d\b` 桥接、P3.4 cost 接线、P9 本地 Runner、P9 安装/回退与 P4-shell-session 组件**已完成并独立验收**（见 P4-regex / P3.4-cost / P9-local-runner / P9-release-install-rollback / P4-shell-session-powershell-python 交接）。
 
 **未运行**：真实 API 集成测试（`Category=Integration`，P0 起未跑）；十小时墙钟长任务；非 Windows 平台验收。
 
@@ -415,13 +415,13 @@
 
 **任务卡清单（按依赖排序，卡 5 独立可并行；P8b 已完成 7d9faea/f8114df）**：
 1. ~~**P4-regex-unicode-conformance**~~ **已完成**（26b853d、1e69e2f）——`\w\d\b` Unicode 桥接，conformance 门已过；仅剩 i 折叠（`k` vs `K`）为已记录差异。
-2. ~~**P4-shell-session-powershell-python**~~ **已完成**（68812ed、b1d1ac3）——持久 ShellSession + PowerShell + Python 工具 + 组合根接线；Windows 进程树 kill 已实测记录（probes/P4-shell-session-process-tree-kill-probe.md）。
-3. **P9-local-runner-inprocess**（依赖 P7）——TUI 同进程 Runner，与子进程 RPC 字节级等价；TUI 组件零改动；保留外部 RPC 路径。
-4. **P9-release-install-rollback**（依赖卡 3+2）——`install.ps1` 改发 TS CLI 入口、回退演练、跨平台、十小时墙钟验收；禁门槛未过删 C# reference/覆盖本机安装版。
+2. ~~**P4-shell-session-powershell-python**~~ **组件已完成，组合根接线未交付**（68812ed、b1d1ac3）——ShellSession + PowerShell + Python 工具 + 树杀实测（probes/P4-shell-session-process-tree-kill-probe.md）；**MAJOR：生产组合根仍 one-shot 注册，持久会话接线为后续卡（见下一张任务卡）**。
+3. ~~**P9-local-runner-inprocess**~~ **已完成**（7c63ccb、346dccc）——TUI 同进程 Runner，与子进程 RPC 字节等价；TUI 组件零改动；保留外部 RPC 路径；独立审查 ACCEPTABLE 无发现。
+4. ~~**P9-release-install-rollback**~~ **实现已完成**（9a95eb6、cb15387、0c3ab6d、faf7091、a517fd0）——`di-ts` → `dist/cli/main.js`、`install.ps1` 改发 TS CLI 入口（不覆盖 C# di）、隔离 drill 证据 probe；独立验收通过（install drill exit 0 + 四阶段快照一致）；真实 10h 墙钟 soak 与跨平台验收仍 PENDING（不伪造）。
 5. ~~**P3.4-cost-wiring**~~ **已完成**（ad9f96d、d08409f）——DeepSeek adapter cost resolver 已接，生产 `ModelResponse.cost` 出现；未知 model 保持 undefined。
 
-依赖图要点：卡 5 已完成；卡 1 已完成；卡 2 已完成（68812ed/b1d1ac3）；下一卡为卡 4（P9-release-install-rollback，依赖卡 3+2 均已满足）；全部完成且七项 gate 绿才可宣布迁移完成（operator-guide 完成判据）。
+依赖图要点：卡 1/3/4/5 已完成并独立验收；卡 2 组件完成、组合根持久接线未交付（MAJOR）；下一卡为 P4-shell-session-composition-root-wiring（依赖卡 2 组件 + P7 组合根）；全部完成且七项 gate 绿才可宣布迁移完成（operator-guide 完成判据）。
 
-## 下一张任务卡（P9-release-install-rollback）
+## 下一张任务卡（P4-shell-session-composition-root-wiring）
 
-> **推荐下一卡：P9-release-install-rollback（审计卡 4）。** 卡 3（P9-local-runner-inprocess）与卡 2（P4-shell-session-powershell-python）均已落地（68812ed/b1d1ac3），审计依赖「卡 4 依赖 3+2」已满足；卡 1/2/3/5 全部完成，这是发布关键路径的最后一张卡。任务：按 `architecture.md` bin 表修正生产入口为 **`di-ts` → `packages/coding-agent/dist/cli/main.js`**（当前 `di → dist/cli/index.js` 是 P7a 偏差，不得覆盖已安装的系统 `di`）；`install.ps1` 改发 TS CLI 入口、与 C# di 并存可回退；按 `validation-and-release.md` §120-128 做安装/回退/用户数据保护演练（不得移动/删除/重写 `~/.di/config.json` 与旧 session/skills/commands/凭据）；十小时墙钟 soak 先冻结阈值（30 分钟 warm-up 定基线）再作 RC 后台 gate 跑真实墙钟，不以轮数折算。
+> **推荐下一卡：P4-shell-session-composition-root-wiring（关闭卡 2 的 MAJOR 缺口）。** 卡 1/3/4/5 已完成并独立验收；卡 2 的 ShellSession/powershell/python 组件已实现实测（62 例 + 树杀 probe），但生产组合根（`cli-host-compose.ts:155-169`）仍以 **one-shot** 注册 cmd/powershell（与 P4.5 相同），持久会话接线在代码注释中明示为 follow-up——这是卡 2 交接"组合根接线"声称未满足的部分（独立验收已修正该过报）。任务：给 `BashToolOptions`/`PowerShellToolOptions` 增加 `session` 接缝（one-shot 保持为测试/自定义 shell 回退）；`createCliHost` 持有惰性 ShellSession（cmd 与 PowerShell 各自独立会话，随 `host.dispose()` 清理生命周期）；工具 `execute` 经会话路由，提示词风味切到持久会话契约（tools-and-platform.md §44/45/162-178）；新增组合根级测试：cwd/env 跨调用保持、会话超时/取消后自动重建、`host.dispose` 清理无泄漏、cmd echo 剥离与 marker 语义在生产路径一致。完成后重跑七项 gate 并更新 P4 阶段状态（目标：阶段验收完成）。
