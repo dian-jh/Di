@@ -16,6 +16,7 @@ import { messageOf } from "./errors.ts";
 import { resolvePath } from "./paths.ts";
 import { enumerateFiles } from "./enumerate.ts";
 import { globToRegex } from "./glob-matcher.ts";
+import { translateDotNetRegex } from "./unicode-regex.ts";
 import { formatScanSeconds } from "./glob.ts";
 import { decodeSmart, type LegacyDecoder } from "./encoding.ts";
 import { resolveOemDecoder, splitLines } from "./read.ts";
@@ -66,9 +67,12 @@ export interface GrepToolOptions {
  * literals; `\A`/`\z`/`\Z` are translated to `^`/`$` (equivalent per line, since
  * a line has no newlines); `.NET`-only syntax that JS rejects (single-quote
  * named groups, balanced/conditional groups, `\p{IsScript}`…) becomes an
- * explicit `error:` observation, never a silent empty result. Known difference
- * kept: JS `\w`/`\d`/`\b` are ASCII-only even under `u`, unlike .NET's Unicode
- * versions (recorded, not silently patched in this card).
+ * explicit `error:` observation, never a silent empty result. The Unicode
+ * shorthand classes are bridged to .NET CultureInvariant semantics (this card):
+ * `\w`/`\d`/`\b` and their negations (`\W`/`\D`/`\B`, incl. inside character
+ * classes) are rewritten to Unicode-aware JS equivalents by `translateDotNetRegex`
+ * (P4-regex-probe §对照表 A), so grep matches like the C# baseline instead of
+ * JS's ASCII-only `\w`/`\d`/`\b`.
  */
 export function createGrepTool(baseDirectory: string, options?: GrepToolOptions): CoreTool {
   const defaultLimit = options?.defaultLimit ?? GREP_DEFAULT_LIMIT;
@@ -290,17 +294,19 @@ export function createGrepTool(baseDirectory: string, options?: GrepToolOptions)
 
 /**
  * Compile the effective pattern for matching. `literal` escapes the pattern
- * (C# Regex.Escape); otherwise .NET start/end anchors are bridged. The `u` flag
- * is always set (P4-regex-probe): `\p{…}` works and .NET identity escapes never
- * silently match as literals. A compile failure (invalid regex, or .NET-only
- * syntax JS rejects) is returned as the tool's `error:` observation.
+ * (C# Regex.Escape); otherwise .NET anchors and Unicode shorthand classes are
+ * bridged via `translateDotNetRegex` (this card: `\w`/`\d`/`\b` + negations to
+ * Unicode semantics). The `u` flag is always set (P4-regex-probe): `\p{…}` works
+ * and .NET identity escapes never silently match as literals. A compile failure
+ * (invalid regex, or .NET-only syntax JS rejects) is returned as the tool's
+ * `error:` observation.
  */
 function compileGrepRegex(
   pattern: string,
   literal: boolean,
   ignoreCase: boolean,
 ): { readonly ok: true; readonly source: string; readonly flags: string } | { readonly ok: false; readonly error: string } {
-  const source = literal ? escapeRegExpLiteral(pattern) : translateAnchors(pattern);
+  const source = literal ? escapeRegExpLiteral(pattern) : translateDotNetRegex(pattern);
   const flags = `u${ignoreCase ? "i" : ""}`;
   try {
     new RegExp(source, flags);
@@ -308,37 +314,6 @@ function compileGrepRegex(
     return { ok: false, error: `error: 无效正则表达式: ${messageOf(error)}` };
   }
   return { ok: true, source, flags };
-}
-
-/**
- * Bridge the .NET start/end anchors to their per-line JS equivalents: `\A`→`^`,
- * `\z`→`$`, `\Z`→`$`. Since a grep line never contains a newline, these are
- * semantically identical on a line (P4-regex-probe §推荐结论 2). Handles
- * backslash runs so `\\A` (escaped backslash + A) is not translated.
- */
-function translateAnchors(pattern: string): string {
-  let out = "";
-  let i = 0;
-  while (i < pattern.length) {
-    const c = pattern[i]!;
-    if (c !== "\\") {
-      out += c;
-      i += 1;
-      continue;
-    }
-    let j = i;
-    while (j < pattern.length && pattern[j] === "\\") j += 1;
-    const backslashCount = j - i;
-    const next = pattern[j];
-    if (backslashCount % 2 === 1 && (next === "A" || next === "z" || next === "Z")) {
-      out += "\\".repeat(backslashCount - 1) + (next === "A" ? "^" : "$");
-      i = j + 1;
-    } else {
-      out += "\\".repeat(backslashCount);
-      i = j;
-    }
-  }
-  return out;
 }
 
 /** Escape regex metacharacters for literal mode (JS equivalent of C# Regex.Escape). */
