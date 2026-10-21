@@ -52,8 +52,8 @@ describe("buildBackendLauncher：回退顺序", () => {
     assert.ok(path.isAbsolute(TS_ENTRY), `entry 应为绝对路径: ${TS_ENTRY}`);
     const normalized = TS_ENTRY.replaceAll("\\", "/");
     assert.ok(
-      normalized.endsWith("packages/coding-agent/dist/cli/index.js"),
-      `entry 应指向 packages/coding-agent/dist/cli/index.js，实际: ${TS_ENTRY}`,
+      normalized.endsWith("packages/coding-agent/dist/cli/main.js"),
+      `entry 应指向 packages/coding-agent/dist/cli/main.js，实际: ${TS_ENTRY}`,
     );
   });
 

@@ -36,7 +36,7 @@ import { fileURLToPath } from "node:url";
 
 const node = process.execPath;
 const cwd = process.cwd();
-const entry = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
+const entry = fileURLToPath(new URL("../../dist/cli/main.js", import.meta.url));
 const unknownFixture = fileURLToPath(
   new URL("../fixtures/sessions/started-no-completion/started-no-completion.jsonl", import.meta.url),
 );

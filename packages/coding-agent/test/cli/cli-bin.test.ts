@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 
 const node = process.execPath;
 const cwd = process.cwd();
-const entry = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
+const entry = fileURLToPath(new URL("../../dist/cli/main.js", import.meta.url));
 
 /** A line reader over a stdout/stderr stream with a per-line budget. */
 interface LineReader {
