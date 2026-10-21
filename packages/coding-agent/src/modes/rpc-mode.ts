@@ -1,5 +1,4 @@
-import type { AgentEvent, AgentResult, StopReason } from "@di/agent";
-import type { LlmFailure, TokenUsage, ToolCall } from "@di/ai";
+import type { AgentResult } from "@di/agent";
 import { LexicalSkillMatcher } from "../core/skills/skill-matcher.ts";
 import { computeSkillActivation } from "../core/skills/skill-activation.ts";
 import type { Skill } from "../core/skills/skill.ts";
@@ -12,7 +11,13 @@ import type { CliHost } from "../cli/cli-host.ts";
 import type { TextReader, TextWriter } from "../cli/io.ts";
 import { EventConsumer } from "../core/events/event-bus.ts";
 import { appendFailure, appendTurn, errorMessage } from "./common.ts";
-import { usageCostTotal } from "./event-renderer.ts";
+import {
+  SeqCounter,
+  eventPayload,
+  isAbortError,
+  resultPayload,
+  zeroUsage,
+} from "./wire.ts";
 
 /**
  * RPC mode (--mode rpc): an NDJSON over stdin/stdout session driver
@@ -34,16 +39,6 @@ import { usageCostTotal } from "./event-renderer.ts";
 interface RpcRequest {
   readonly method: string;
   readonly params: Record<string, unknown>;
-}
-
-/** Per-turn monotonic event/result sequence (starts at 1 each turn). */
-class SeqCounter {
-  private value = 0;
-
-  next(): number {
-    this.value += 1;
-    return this.value;
-  }
 }
 
 export async function runRpcMode(
@@ -411,98 +406,7 @@ function paramsStringArray(params: Record<string, unknown>, key: string): readon
   return value.filter((v) => typeof v === "string") as string[];
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /** One result / event line; stdout writes are synchronous, so line order == publish order. */
 function emit(stdout: TextWriter, message: unknown): void {
   stdout.writeLine(JSON.stringify(message));
-}
-
-function zeroUsage(): Record<string, number> {
-  return { input_tokens: 0, output_tokens: 0 };
-}
-
-/** StopReason → protocol wire value (all six StopReason values map to themselves). */
-function stopReasonWire(reason: StopReason): string {
-  switch (reason) {
-    case "answer":
-    case "final_output_tool":
-    case "max_iterations":
-    case "error":
-    case "interrupted":
-    case "context_limit":
-      return reason;
-    default:
-      return "error";
-  }
-}
-
-/** TokenUsage → protocol payload (snake_case, null keys omitted; no computed fields). */
-function usagePayload(usage: TokenUsage): Record<string, number> {
-  return {
-    input_tokens: usage.inputTokens,
-    output_tokens: usage.outputTokens,
-    ...(usage.totalTokens !== undefined ? { total_tokens: usage.totalTokens } : {}),
-    ...(usage.cacheReadTokens !== undefined ? { cache_read_tokens: usage.cacheReadTokens } : {}),
-    ...(usage.cacheWriteTokens !== undefined ? { cache_write_tokens: usage.cacheWriteTokens } : {}),
-    ...(usage.reasoningTokens !== undefined ? { reasoning_tokens: usage.reasoningTokens } : {}),
-  };
-}
-
-function resultPayload(result: AgentResult): Record<string, unknown> {
-  return {
-    answer: result.answer,
-    stop_reason: stopReasonWire(result.stopReason),
-    iterations: result.iterations,
-    usage: usagePayload(result.usage),
-    ...(result.cost !== undefined ? { cost: usageCostTotal(result.cost) } : {}),
-    ...(result.failure !== undefined ? { failure: { code: result.failure.code, message: result.failure.message } } : {}),
-  };
-}
-
-function callPayload(call: ToolCall): Record<string, string> {
-  return { id: call.id, name: call.name, arguments: call.arguments };
-}
-
-/** LlmFailure → protocol payload (code/message required; status / retry-after optional). */
-function failurePayload(failure: LlmFailure): Record<string, unknown> {
-  return {
-    code: failure.code,
-    message: failure.message,
-    ...(failure.status !== undefined ? { status: failure.status } : {}),
-    ...(failure.providerRetryAfterMs !== undefined ? { provider_retry_after: failure.providerRetryAfterMs / 1000 } : {}),
-  };
-}
-
-/** AgentLoopEvent → protocol event payload. `interrupted` returns undefined (omitted on the wire). */
-function eventPayload(event: AgentEvent): Record<string, unknown> | undefined {
-  switch (event.type) {
-    case "textDelta":
-      return { kind: "text_delta", delta: event.delta };
-    case "reasoningDelta":
-      return { kind: "reasoning_delta", delta: event.delta };
-    case "toolCallDelta":
-      return { kind: "tool_call_delta", id: event.id, name: event.name, arguments: event.arguments };
-    case "toolStarted":
-      return { kind: "tool_started", call: callPayload(event.call) };
-    case "toolCompleted":
-      return { kind: "tool_completed", call: callPayload(event.call), observation: event.observation, is_error: event.isError };
-    case "turnCompleted":
-      return {
-        kind: "turn_completed",
-        iteration: event.iteration,
-        usage: usagePayload(event.usage),
-        ...(event.cost !== undefined ? { cost: usageCostTotal(event.cost) } : {}),
-        finish_reason: event.finishReason.type,
-      };
-    case "runFailed":
-      return { kind: "run_failed", failure: failurePayload(event.failure) };
-    case "interrupted":
-      // docs/tui-rpc.md lists this kind, but the TUI codec (tui/src/rpc/codec.ts) does not
-      // accept it — emitting it would produce a malformed line. The soft-stop is still
-      // reported via result.stop_reason "interrupted". Divergence from C# (which emits it).
-      return undefined;
-  }
 }

@@ -3,14 +3,28 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Di terminal UI (TypeScript frontend for `di --mode rpc`)",
+  "description": "Di terminal UI (TypeScript frontend for `di --mode rpc`; exports the RunnerPort seam and runInteractive)",
   "engines": {
     "node": ">=22.19"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./protocol": {
+      "types": "./dist/rpc/protocol.d.ts",
+      "import": "./dist/rpc/protocol.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/main.js",
-    "test": "node --test test/*.test.ts"
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@earendil-works/pi-tui": "^1.2.0"

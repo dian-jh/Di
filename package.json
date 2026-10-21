@@ -8,10 +8,11 @@
     "node": ">=22.19"
   },
   "workspaces": [
+    "tui",
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @di/ai && npm run build -w @di/agent && npm run build -w @di/coding-agent",
+    "build": "npm run build -w @di/ai && npm run build -w @di/agent && npm run build -w di-tui && npm run build -w @di/coding-agent",
     "test": "npm run build --workspaces --if-present && npm test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

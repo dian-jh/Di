@@ -27,6 +27,7 @@
   "dependencies": {
     "@di/agent": "*",
     "@di/ai": "*",
+    "di-tui": "*",
     "jsonc-parser": "3.3.1"
   },
   "devDependencies": {

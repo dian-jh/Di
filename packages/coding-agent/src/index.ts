@@ -189,8 +189,15 @@ export { errorMessage, resolvePrompt } from "./modes/common.ts";
 export { runPrintMode } from "./modes/print-mode.ts";
 export { runJsonMode } from "./modes/json-mode.ts";
 export { runRpcMode } from "./modes/rpc-mode.ts";
-export { DEFAULT_REPL_OPTIONS, Repl, runInteractive } from "./modes/repl.ts";
+export { DEFAULT_REPL_OPTIONS, Repl, runInteractive, runInteractiveLocal, tryLaunchLocalTui } from "./modes/repl.ts";
 export type { ReplOptions } from "./modes/repl.ts";
+
+// P9 in-process TUI runner: the LocalAgentRunnerAdapter converts Core
+// AgentEvent/AgentResult → protocol wire RpcAgentEvent/RpcAgentResult (the ONLY
+// conversion point; shared with --mode rpc via modes/wire.ts). The adapter
+// implements di-tui's RunnerPort; the CLI interactive mode hands it to
+// di-tui.runInteractive (DI direction coding-agent → di-tui).
+export { LocalAgentRunnerAdapter } from "./adapters/tui-runner.ts";
 export { TUI_DEFAULT_RELATIVE_ENTRY, tryLaunchTui } from "./modes/tui-launcher.ts";
 export type { TuiDecision, TuiLauncherContext } from "./modes/tui-launcher.ts";
 

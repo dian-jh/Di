@@ -1,4 +1,6 @@
 import type { AgentResult } from "@di/agent";
+import { runInteractive as runInteractiveTui } from "di-tui";
+import { LocalAgentRunnerAdapter } from "../adapters/tui-runner.ts";
 import type { Skill } from "../core/skills/skill.ts";
 import { LexicalSkillMatcher } from "../core/skills/skill-matcher.ts";
 import { computeSkillActivation } from "../core/skills/skill-activation.ts";
@@ -8,7 +10,7 @@ import type { CliHost } from "../cli/cli-host.ts";
 import type { TextReader, TextWriter } from "../cli/io.ts";
 import { errorMessage } from "./common.ts";
 import { drainEvents, EventRenderer, renderAll } from "./event-renderer.ts";
-import { tryLaunchTui, type TuiLauncherContext } from "./tui-launcher.ts";
+import { tryLaunchTui, type TuiDecision, type TuiLauncherContext } from "./tui-launcher.ts";
 
 /**
  * Outer REPL loop (the C# `Di.Cli/Repl.cs` counterpart at baseline 09f4e08):
@@ -168,11 +170,15 @@ export class Repl {
 }
 
 /**
- * Interactive orchestration (C# `CliApp.InteractiveAsync`): default hands the
- * console to the TS TUI (both TTY + entry resolvable + node available + spawn
- * exits 0); otherwise falls back to the REPL. `--resume` forces the REPL
- * (`skipTui`) so a resumed session enters simple interaction and does NOT
- * auto-request a model (the REPL waits for user input).
+ * Interactive orchestration (C# `CliApp.InteractiveAsync` evolution): default
+ * hands the console to the TS TUI **in-process** — build the
+ * {@link LocalAgentRunnerAdapter} and call di-tui's `runInteractive(adapter)`
+ * (architecture.md §生产入口; DI direction coding-agent → di-tui). When the local
+ * runner is unavailable (terminal not interactive / init failure) it falls back
+ * to the legacy spawn TUI (external `--mode rpc` child) then the C# REPL.
+ * `--resume` forces the REPL (`skipTui`) so a resumed session enters simple
+ * interaction and does NOT auto-request a model (the REPL waits for user input);
+ * `DI_UI=repl` (exact) forces the REPL.
  */
 export async function runInteractive(
   host: CliHost,
@@ -186,12 +192,56 @@ export async function runInteractive(
   signal?: AbortSignal,
 ): Promise<number> {
   if (stdinTty && stdoutTty && !skipTui) {
-    const decision = tryLaunchTui(tui);
-    if (decision.managed) return decision.exitCode;
-    if (decision.fallbackReason !== undefined) stderr.writeLine(decision.fallbackReason);
+    const getEnv = tui?.getEnv ?? ((name: string) => process.env[name]);
+    if (getEnv("DI_UI") === "repl") {
+      stderr.writeLine("DI_UI=repl，使用 REPL");
+    } else {
+      // 生产交互默认：同进程 local runner（零子进程、零 RPC 编解码）。
+      const local = await tryLaunchLocalTui(host);
+      if (local.managed) return local.exitCode;
+      if (local.fallbackReason !== undefined) stderr.writeLine(local.fallbackReason);
+      // 回退：旧 spawn TUI（外部 RPC 子进程；tui/src/main.ts 保持独立 RPC launcher）。
+      const decision = tryLaunchTui(tui);
+      if (decision.managed) return decision.exitCode;
+      if (decision.fallbackReason !== undefined) stderr.writeLine(decision.fallbackReason);
+    }
   }
 
   const repl = new Repl(host, stdin, stdout, signal);
   await repl.run();
   return 0;
+}
+
+/**
+ * Build the {@link LocalAgentRunnerAdapter} and hand it to di-tui's
+ * `runInteractive(port)` (the P9 in-process runner wiring; DI direction
+ * coding-agent → di-tui). Returns 0 when the TUI exits normally.
+ */
+export async function runInteractiveLocal(host: CliHost, options?: { readonly title?: string }): Promise<number> {
+  if (host == null) throw new TypeError("runInteractiveLocal: host is required");
+  const adapter = new LocalAgentRunnerAdapter(host);
+  await runInteractiveTui(adapter, { ...(options?.title !== undefined ? { title: options.title } : {}) });
+  return 0;
+}
+
+/**
+ * Local-runner decision (the in-process analogue of `tryLaunchTui`): only when the
+ * real process stdin/stdout are TTYs (the local TUI drives the terminal directly,
+ * bypassing the injected TextReader/TextWriter seams); any failure is a managed=false
+ * fallback reason, never a crash — the caller falls through to the legacy spawn TUI.
+ */
+export async function tryLaunchLocalTui(host: CliHost): Promise<TuiDecision> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    return { managed: false, exitCode: 0, fallbackReason: "终端非交互（stdin/stdout 非 TTY），回退旧 spawn TUI / REPL" };
+  }
+  try {
+    await runInteractiveLocal(host);
+    return { managed: true, exitCode: 0 };
+  } catch (error) {
+    return {
+      managed: false,
+      exitCode: 0,
+      fallbackReason: `启动同进程 TUI 失败（${errorMessage(error)}），回退旧 spawn TUI / REPL`,
+    };
+  }
 }
