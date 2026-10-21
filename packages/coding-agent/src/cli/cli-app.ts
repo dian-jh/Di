@@ -63,7 +63,7 @@ export class CliApp {
     stdoutTty: boolean,
     signal?: AbortSignal,
   ): Promise<number> {
-    if (args[0] === "auth") return runAuthCommand(args, stdout, stderr);
+    if (args[0] === "auth") return await runAuthCommand(args, stdout, stderr);
 
     const { args: cliArgs, diagnostics } = CliArgsParser.parse(args);
     if (diagnostics.some((d) => d.isError)) {

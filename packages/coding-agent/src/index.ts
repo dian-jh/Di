@@ -140,7 +140,32 @@ export { defaultCliHostFactory } from "./cli/cli-host.ts";
 export { createCliHost } from "./cli/cli-host-compose.ts";
 export type { ComposeCliHostOptions } from "./cli/cli-host-compose.ts";
 export { CliApp } from "./cli/cli-app.ts";
-export { AUTH_CHATGPT_NOT_AVAILABLE, AUTH_USAGE, runAuthCommand } from "./cli/auth-command.ts";
+export { AUTH_CHATGPT_NOT_AVAILABLE, AUTH_USAGE, defaultChatGptStore, runAuthCommand } from "./cli/auth-command.ts";
+
+// P8b host ChatGPT auth: OAuth PKCE, the credential store with its fail-closed
+// lock seam, the ACL adapter and the LockProvider interface. The default lock
+// provider fails closed (no approved real OS-advisory-lock adapter yet); the
+// transaction logic (lock → re-read → refresh → validate → atomic replace) is
+// verified with a DI-injected mock lock. Do NOT claim runtime storage is enabled.
+export { ChatGptAuth } from "./core/auth/chatgpt-auth.ts";
+export { ChatGptAuthError } from "./core/auth/errors.ts";
+export type { ChatGptAuthOptions, ChatGptStatus, FetchLike } from "./core/auth/chatgpt-auth.ts";
+export { ChatGptCredential, CredentialDataError, CredentialStore, needsRefresh } from "./core/auth/credential-store.ts";
+export type { ChatGptCredentialInit, ChatGptCredentials, CredentialStoreOptions } from "./core/auth/credential-store.ts";
+export { AclError, createAclAdapter } from "./core/auth/acl.ts";
+export type { AclAdapter, AclAdapterOptions } from "./core/auth/acl.ts";
+export { FAIL_CLOSED_LOCK_PROVIDER, LockUnavailableError } from "./core/auth/lock-provider.ts";
+export type { LockAcquireOptions, LockHandle, LockProvider } from "./core/auth/lock-provider.ts";
+export {
+  CHATGPT_AGENT_NAME_HINT,
+  CHATGPT_AUTHORIZE_URL,
+  CHATGPT_DIRECT_SCOPE,
+  CHATGPT_DISCOVERY_URL,
+  CHATGPT_DYNAMIC_CLIENT_ID,
+  CHATGPT_RESOURCE,
+  CHATGPT_SCOPES,
+  CHATGPT_TOKEN_URL,
+} from "./core/auth/constants.ts";
 
 // P6.3c modes + output contracts: event bus / renderer, the interactive (REPL +
 // TUI launcher) / print / json / rpc mode bodies, the session-runner seam and the
