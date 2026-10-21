@@ -10,6 +10,7 @@
  *
  * Gates (each threshold frozen in the manifest after the >=30-min warm-up):
  *   rss_max_delta_bytes   max(rss_bytes) - baseline rss <= delta
+ *   rss_monotonic         max(rss over last 2h) - max(rss over first 2h) <= delta
  *   handle_max_delta      last handle_count - baseline handle_count <= delta
  *   child_process_max     max(active_children) per sample <= this
  *   child_sustained_max   no 2 consecutive samples above this sustained level
@@ -67,6 +68,13 @@ const resumeP95 =
   resumeMs.length > 0
     ? [...resumeMs].sort((a, b) => a - b)[Math.floor(resumeMs.length * 0.95)]
     : 0;
+// Monotonic-growth criterion (validation-and-release.md 53: "多个采样窗口单调增长").
+// Compare max RSS over the first vs last 2h of samples; drift beyond the frozen
+// rss delta is a gate failure even when the absolute max is still under budget.
+const first2hMax = Math.max(...samples.filter((s) => s.uptime_ms <= 2 * 3600_000).map((s) => s.rss_bytes));
+const last2hMax = Math.max(
+  ...samples.filter((s) => s.uptime_ms >= (samples[samples.length - 1].uptime_ms - 2 * 3600_000)).map((s) => s.rss_bytes),
+);
 const turnFail = status.turnFail ?? samples[samples.length - 1].turn_fail ?? 0;
 const resumeSpawns = status.resumeSpawns ?? samples[samples.length - 1]?.turns_done ?? 0;
 const resumeOk = status.resumeOk ?? 0;
@@ -108,6 +116,12 @@ const results = [
     threshold: manifest.thresholds.resume_p95_max_ms,
     observed: resumeP95,
     pass: resumeP95 <= manifest.thresholds.resume_p95_max_ms,
+  },
+  {
+    gate: "rss_monotonic",
+    threshold: manifest.thresholds.rss_max_delta_bytes,
+    observed: `first2hMax=${first2hMax} last2hMax=${last2hMax}`,
+    pass: last2hMax - first2hMax <= manifest.thresholds.rss_max_delta_bytes,
   },
   {
     gate: "turn_fail_max",
