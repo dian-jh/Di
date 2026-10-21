@@ -396,6 +396,21 @@
 - **测试：** `packages/ai/test/deepseek-adapter-cost.test.ts` 2 例——catalog 有费率模型（deepseek-flash）cost 等于 `costForModel` 结果且数值正确；未知 model `"deepseek-unknown"` cost 保持 undefined（不伪造 0）。红测：旧行为断言 cost undefined 先红。
 - **红→绿（调度独立复跑）：** build/typecheck/test -w @di/ai 全 0（173 = 171 回归 + 2 新）；coding-agent 回归 724/723+1skip(0)；根 typecheck(0)、根 test(0)；tui test(0, 133/133)、tui build(0)。未触碰 usage/catalog/sse/stream-assembler/coding-agent。
 
+## P9-local-runner 交接（7c63ccb、346dccc）
+
+- **交付：** `packages/coding-agent/src/adapters/tui-runner.ts` 新增 `LocalAgentRunnerAdapter`（同进程 CoreRunner 适配），`src/modes/wire.ts` 抽取共享 wire 转换——RPC 子进程与同进程后端发射**字节级等价** wire 载荷；`tui/src/runner/port.ts` 为 RunnerPort 契约、`tui/src/runner/rpc-port.ts` 复用旧 RpcClient；`tui/src/interactive.ts` 抽出 `runInteractive(port, options?)`（terminal/state/ChatView/键盘/stop 生命周期），`tui/src/main.ts` 保留外部 RPC launcher。依赖方向固定 coding-agent → di-tui（不反向）。
+- **测试：** 红测先写（协议形状与子进程 RPC 字节等价断言）；tui 143/143 零改动回归。interrupt → 宿主层合成 `cancelled`；`interrupted` 事件 kind **不发射**（TUI codec 拒绝该 kind——有意分歧，已记录）。
+- **红→绿：** 红 7c63ccb（首红泛型约束过宽致 tsc 失败，并入红提交修正）、绿 346dccc；coding-agent 750 = 749 pass + 1 win-symlink skip；tui 143/143。
+
+## P9-release-install-rollback 交接（9a95eb6、cb15387、0c3ab6d、faf7091、8dc2a83、60a9b1c、a517fd0）
+
+- **bin 契约：** 生产入口修正为 **`di-ts` → `packages/coding-agent/dist/cli/main.js`**（红 9a95eb6 / 绿 cb15387；`src/cli/index.ts`→`main.ts`、exports 同步；`tui/src/rpc/backend-launcher.ts` resolveTsEntryPath 同步）。隔离目录实测 `di-ts --info/--help/--version` exit 0；`--mode json "hi"` 无 Key → `{"error":{"code":"model_error",...}}` exit 1（真实组合根 + 无 provider）。
+- **install.ps1（0c3ab6d）：** 构建 TS workspace → 装到 `<diHome>/ts-cli/node_modules` → 生成 `di-ts.cmd`/`di-ts` shim 到 `<diHome>/bin` → **C# di.exe/di 逐字节保留** → 幂等 PATH → 隔离 smoke；ASCII-only；永不触碰 config.json/sessions/skills/commands/凭据。
+- **回退演练（a517fd0 probe）：** 四时点（安装前/后、卸载后、重装后）受保护 home SHA-256 快照 **IDENTICAL**（真实 `~/.di` 216 项 MD5 c094d24… 一致）；C# `di.exe --version` 全程 exit 0；卸载 leftover 为空。
+- **soak：** harness `test/soak/soak-runner.mjs` + `soak-check.mjs`（faf7091：确定性 FakeModel + soak_child 假工具真实 spawn/每 3 轮强杀 + 真实 createCliHost/CoreRunner + 隔离临时 DI_HOME，采样 RSS/handles/子进程/checkpoint/resume/clear → CSV/JSONL/status.json；8dc2a83 加单调 RSS gate）；**35 分钟 warm-up**（5444 轮 0 败、181 clears、18/18 resumes、RSS Δ3.78MB、resume p95 2080ms）；阈值**先冻结** `probes/P9-soak-manifest.json`（60a9b1c，9/9 gate 过）后启动 **10h 真实墙钟**：runId `soak-2026-10-21T06-22-45-958Z`、PID 118036、startUtc 06:22:45Z、deadlineUtc 16:22:45Z，产物 `%TEMP%\p9-soak\full`（仓库外）；**完成 PENDING**——到期命令：`node packages/coding-agent/test/soak/soak-check.mjs --manifest docs/migration/typescript-core/probes/P9-soak-manifest.json --samples <full>\samples.jsonl --status <full>\status.json`。
+- **分歧（已记录）：** ContextLimit 暂停经宿主 runner 接缝不可达（createCliHost 未接 tokenBudget → shouldPauseForContextLimit 恒 false；ContextLimit 语义由 agent-loop/agent-session 单测覆盖，soak 按 §51 用 /clear 代）；checkpoint 每轮写全量历史 → clear 窗口内二次方，clear-every-30 约束至近线性（~580MB @10h 为预期增长 §51）；卸载为手动移除 ts-cli/ + 2 launcher（演练已验证可逆）。
+- **默认入口切换 PENDING：** 依赖 10h soak 完成 + 跨平台验收；POSIX 未运行（未伪造）。
+
 ## 迁移完成度与剩余缺口（第二步审计 2026-10-21）
 
 状态类别约定：**单元实现完成** = 该阶段内各任务卡已绿；**阶段验收完成** = 各卡绿 + 七项 gate 当前全绿；**迁移完成** = 原定功能全部 + 全部验收门槛满足。历史 verified ≠ 当前版本仍通过（本段已对七项 gate 与真实源码复核，证据见下）。
@@ -405,9 +420,9 @@
 | P0–P3, P5–P7 | 阶段验收完成 | 七项 gate 当前全绿（独立复验 2026-10-21）：coding-agent build/typecheck(0)、test(0, 816 = 815 pass + 1 win-symlink skip，含 P8b、P4-regex 18 例、P4-shell-session 62 例与 tui-runner 26 例)、根 typecheck/test(0，重跑 ×2 均 0)、tui build(0)、tui test(0, 143/143)；G5 首跑 1 次 flake（失败详情因捕获脚本复用临时文件被覆盖而不可考，捕获缺陷），重跑 ×2 exit 0 |
 | P4 | 单元实现完成（组合根持久接线未验收） | P4.1–P4.5 各卡绿 + P4-regex-unicode-conformance 已过（`\w\d\b` Unicode 桥接完成，conformance 门关闭）+ P4-shell-session 组件已过（68812ed/b1d1ac3：ShellSession + PowerShell + Python 工具 + 树杀实测，62 例）；**MAJOR 缺口：组合根仍 one-shot 注册 cmd/powershell（cli-host-compose.ts:155-169 注释明示持久接线为后续）——卡 2 交接声称"组合根接线"完成系过报，已修正**；八工具契约齐备 |
 | P8 | 单元实现完成（host 运行时存储按契约失败关闭） | P8a provider 绿（@di/ai 173/173，含并行 cost-wiring 2 例）；P8b host OAuth/凭据存储完成（`auth-command.ts` 经 `defaultChatGptStore`/`FAIL_CLOSED_LOCK_PROVIDER` 失败关闭接缝接线）；运行时 ChatGPT 存储保持失败关闭直到真实 OS advisory lock 适配器批准 |
-| P9 | 单元实现完成（发布验收部分 PENDING） | 本地 Runner 已过（346dccc，同进程 CoreRunner，协议与子进程 RPC 字节等价，独立审查 ACCEPTABLE 无发现）；release/install/rollback 已过（cb15387/0c3ab6d/faf7091/a517fd0，独立验收：隔离 install drill exit 0 + di-ts --info smoke exit 0 + 无 Key model_error 信封复现 + drill probe 四阶段快照一致 + C# di 逐字节保留；独立审查 ACCEPTABLE-WITH-MINORS）；剩余：真实 10h 墙钟 soak、非 Windows 平台验收、默认入口切换（PENDING） |
+| P9 | 单元实现完成（发布验收部分 PENDING） | 本地 Runner 已过（346dccc，同进程 CoreRunner，协议与子进程 RPC 字节等价，独立审查 ACCEPTABLE 无发现）；release/install/rollback 已过（cb15387/0c3ab6d/faf7091/a517fd0，独立验收：隔离 install drill exit 0 + di-ts --info smoke exit 0 + 无 Key model_error 信封复现 + drill probe 四阶段快照一致 + C# di 逐字节保留；独立审查 ACCEPTABLE-WITH-MINORS）；剩余：真实 10h 墙钟 soak（**已启动** runId soak-2026-10-21T06-22-45-958Z，PID 118036，06:22:45Z 起、16:22:45Z 到期；35 分钟 warm-up 5444 轮 0 败、阈值先冻结 60a9b1c 且 9/9 gate 过、8dc2a83 单调 RSS gate；产物仓库外 %TEMP%\p9-soak\full；完成 PENDING）、非 Windows 平台验收、默认入口切换（PENDING） |
 
-**未实现（真实缺口）**：P4-shell-session 组合根持久接线（cli-host-compose.ts 仍 one-shot 注册 cmd/powershell，MAJOR，下一卡关闭）；P8b 真实 OS advisory lock 适配器（宿主运行时 ChatGPT 存储保持失败关闭，凭据不被伪造/篡改；锁接缝与事务已就绪，待批准后启用）；P9 真实 10h 墙钟 soak / 非 Windows 平台验收 / 默认入口切换（PENDING）。P4 `\w\d\b` 桥接、P3.4 cost 接线、P9 本地 Runner、P9 安装/回退与 P4-shell-session 组件**已完成并独立验收**（见 P4-regex / P3.4-cost / P9-local-runner / P9-release-install-rollback / P4-shell-session-powershell-python 交接）。
+**未实现（真实缺口）**：P4-shell-session 组合根持久接线（cli-host-compose.ts 仍 one-shot 注册 cmd/powershell，MAJOR，下一卡关闭）；P8b 真实 OS advisory lock 适配器（宿主运行时 ChatGPT 存储保持失败关闭，凭据不被伪造/篡改；锁接缝与事务已就绪，待批准后启用）；P9 真实 10h 墙钟 soak（已启动 soak-2026-10-21T06-22-45-958Z、16:22:45Z 到期，完成 PENDING）/ 非 Windows 平台验收 / 默认入口切换（PENDING）。P4 `\w\d\b` 桥接、P3.4 cost 接线、P9 本地 Runner、P9 安装/回退与 P4-shell-session 组件**已完成并独立验收**（见 P4-regex / P3.4-cost / P9-local-runner / P9-release-install-rollback / P4-shell-session-powershell-python 交接）。
 
 **未运行**：真实 API 集成测试（`Category=Integration`，P0 起未跑）；十小时墙钟长任务；非 Windows 平台验收。
 
@@ -417,7 +432,7 @@
 1. ~~**P4-regex-unicode-conformance**~~ **已完成**（26b853d、1e69e2f）——`\w\d\b` Unicode 桥接，conformance 门已过；仅剩 i 折叠（`k` vs `K`）为已记录差异。
 2. ~~**P4-shell-session-powershell-python**~~ **组件已完成，组合根接线未交付**（68812ed、b1d1ac3）——ShellSession + PowerShell + Python 工具 + 树杀实测（probes/P4-shell-session-process-tree-kill-probe.md）；**MAJOR：生产组合根仍 one-shot 注册，持久会话接线为后续卡（见下一张任务卡）**。
 3. ~~**P9-local-runner-inprocess**~~ **已完成**（7c63ccb、346dccc）——TUI 同进程 Runner，与子进程 RPC 字节等价；TUI 组件零改动；保留外部 RPC 路径；独立审查 ACCEPTABLE 无发现。
-4. ~~**P9-release-install-rollback**~~ **实现已完成**（9a95eb6、cb15387、0c3ab6d、faf7091、a517fd0）——`di-ts` → `dist/cli/main.js`、`install.ps1` 改发 TS CLI 入口（不覆盖 C# di）、隔离 drill 证据 probe；独立验收通过（install drill exit 0 + 四阶段快照一致）；真实 10h 墙钟 soak 与跨平台验收仍 PENDING（不伪造）。
+4. ~~**P9-release-install-rollback**~~ **实现已完成**（9a95eb6、cb15387、0c3ab6d、faf7091、a517fd0、8dc2a83、60a9b1c）——`di-ts` → `dist/cli/main.js`、`install.ps1` 改发 TS CLI 入口（不覆盖 C# di）、隔离 drill 证据 probe；独立验收通过（install drill exit 0 + 四阶段快照一致）；真实 10h 墙钟 soak **已启动**（soak-2026-10-21T06-22-45-958Z、16:22:45Z 到期）与跨平台验收仍 PENDING（不伪造）。
 5. ~~**P3.4-cost-wiring**~~ **已完成**（ad9f96d、d08409f）——DeepSeek adapter cost resolver 已接，生产 `ModelResponse.cost` 出现；未知 model 保持 undefined。
 
 依赖图要点：卡 1/3/4/5 已完成并独立验收；卡 2 组件完成、组合根持久接线未交付（MAJOR）；下一卡为 P4-shell-session-composition-root-wiring（依赖卡 2 组件 + P7 组合根）；全部完成且七项 gate 绿才可宣布迁移完成（operator-guide 完成判据）。
