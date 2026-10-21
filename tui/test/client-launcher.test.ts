@@ -77,7 +77,7 @@ describe("RpcClient：TS 后端 launcher 注入接缝", () => {
 });
 
 describe("RpcClient：流式消费与排空", () => {
-  it("跨 chunk 行拆分完整解析；result 后垃圾行触发 onMalformed 且下一回合正常（排空）", async () => {
+  it("跨 chunk 行拆分完整解析；result 后垃圾行触发 onMalformed 且下一回合正常（排空）", async (t) => {
     const events: AgentEvent[] = [];
     const malformed: string[] = [];
     const client = makeScenarioClient({
@@ -85,6 +85,7 @@ describe("RpcClient：流式消费与排空", () => {
       onEvent: (e) => events.push(e),
       onMalformed: (line) => malformed.push(line),
     });
+    t.after(() => client.stop());
     await client.connect();
 
     const r1 = await client.prompt("one");
@@ -94,6 +95,7 @@ describe("RpcClient：流式消费与排空", () => {
     assert.equal(events[0]!.kind, "text_delta");
     assert.equal(events[0]!.delta, "[one] ");
     assert.equal(events[1]!.kind, "turn_completed");
+    await waitFor(() => malformed.some((l) => l.includes("trailing non-protocol line")));
     assert.ok(malformed.some((l) => l.includes("trailing non-protocol line")), "垃圾行应触发 onMalformed");
 
     // 排空：上一回合的残余流不打断下一回合
