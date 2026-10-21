@@ -1,6 +1,6 @@
 # TypeScript Core 迁移执行手册
 
-> **状态：设计与执行计划，尚未实施。** 本目录供后续 AI 迁移 Core；目标源码、测试和脚本都是待创建产物，不代表仓库已经支持这些命令。当前功能文档继续描述 C# 实现。
+> **状态：实施中，尚未完成发布验收。** 当前已实现功能、测试证据与剩余门槛以 [进度表](progress.md) 为准；下列专题保存迁移契约，部分“未来”措辞来自初始设计，不代表当前源码仍未创建。原功能文档继续作为 C# 行为参考。
 
 ## 基线与范围
 
@@ -9,7 +9,7 @@
 | Di 行为基线 | `09f4e08`，原分支 `feature/loop` |
 | 本次文档分支 | `migration/typescript-core`，从上述提交创建；原分支保留 |
 | Pi 只读参考 | 本地 `E:\Agent\PI\pi`；提交 `7f9e1198f2f7a8cf5ea18d5010ba081d4d60c333` |
-| 本轮交付 | 给其他 AI 执行的迁移文档；不改运行代码、安装版和真实用户数据 |
+| 初始文档交付 | 给实施 AI 执行的迁移契约；当前实施进度与验证记录见 [进度表](progress.md) |
 | 后续实施 | C# Core / Common / 必要 CLI 宿主迁为 TS；保留现有 `tui/` 组件及交互 |
 | 完成定义 | 两个 provider、工具、Skills、预算、恢复、CLI 和安装契约经过验收，不能以“能聊天”代替 |
 
@@ -48,7 +48,15 @@ Pi 检出路径仅便于查阅，不能出现在产品导入、安装脚本或�
 
 既有 `tui/package-lock.json` 已核实锁定 TypeScript `5.9.3`、`@types/node` `22.20.5`、`@earendil-works/pi-tui` `1.2.0`。首期沿用这些版本并固定直接依赖；升级另行提交。最低 Node 沿用 `22.19`，本机为 `24.16.0`；最低版本支持仍需 CI 实测。
 
-当前可运行的基线命令（假设依赖已还原 / 安装）：
+当前根 `package.json` 已提供 workspace 的 `build`、`typecheck`、`test`（后者先构建再运行各包测试）；命令以实际 manifest 为准：
+
+```powershell
+npm.cmd run build
+npm.cmd run typecheck
+npm.cmd test
+```
+
+可单独运行的 C# 参考与原 TUI 命令（假设依赖已还原 / 安装）：
 
 ```powershell
 dotnet test Di.slnx --no-restore --filter "Category!=Integration" --verbosity minimal
@@ -56,7 +64,7 @@ npm.cmd --prefix tui test
 npm.cmd --prefix tui run build
 ```
 
-不要意外运行真实 API 集成测试。未来根 workspaces、`test:unit` / `test:compat` / `test:process` 等脚本须先按计划创建，不能把文档中的未来命令报告为已执行或通过。
+不要意外运行真实 API 集成测试。`test:unit` / `test:compat` / `test:process` 等专题中的规划脚本仍须先核对 manifest，不能把未创建或未执行的命令报告为通过。
 
 ## 判断歧义
 
@@ -65,4 +73,4 @@ npm.cmd --prefix tui run build
 - **旧缺陷**用明确输入、预期和回归测试记录；不能默默改协议、丢功能或降低安全边界。
 - **未决定细节**在对应最小任务内核实并记录，不以“待定”冒充已实现。
 
-接手 AI 从 [逐单元执行规则](operator-guide.md) 开始，再完成 [execution-plan.md 的 P0](execution-plan.md#p0-冻结参考与行为清单)。
+接手 AI 从 [逐单元执行规则](operator-guide.md) 和 [进度表](progress.md) 开始，核对当前源码与证据，再领取第一个依赖已满足的未完成任务；不要重新执行已完成的 P0。

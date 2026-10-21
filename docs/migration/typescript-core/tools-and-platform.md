@@ -1,10 +1,10 @@
 # TypeScript Core 迁移：工具与平台执行
 
-> 状态：迁移实施指南。文件工具（read/write/edit）、glob、grep、one-shot 进程 runner
-> （P4.4 `process-runner.ts`）与一次性 shell 工具（Windows cmd / 其他 bash，P4.5
-> `bash.ts`，经 `runProcess` 的 `shell` 模式复用同一生命周期）已按本契约实现并接入组合根；
-> 持久 ShellSession、powershell、python 工具仍为未来路径。契约表以 C# 基线为准，实现
-> 证据与 gate 见 [`progress.md`](progress.md)。
+> 状态：迁移实施指南。八工具组件已实现于 `packages/coding-agent/src/core/tools/`。
+> `packages/coding-agent/src/cli/cli-host-compose.ts` 的 `createCliHost` 为 cmd/POSIX 与
+> PowerShell 各持有独立的惰性 `ShellSession`，随 host 释放；`createBashTool` /
+> `createPowerShellTool` 接受 `session`，未注入时保留 one-shot 模式。Python 保持独立进程。
+> 契约表以 C# 基线为准，当前验证证据与未通过门槛见 [`progress.md`](progress.md)。
 > 基线 Di：`09f4e0816c1b2dc42461e79a968b46e811d3880c`；Pi 只读参考：
 > `7f9e1198f2f7a8cf5ea18d5010ba081d4d60c333`。共享包边界见
 > [`architecture.md`](architecture.md)。模型中的 `ToolSpec` / `ProviderChunk` / `ModelEvent` 和 loop 的
@@ -15,8 +15,8 @@
 
 ## 范围、路径与运行时约束
 
-当前权威实现：`Core/Tools/`（`CoreTools`, `ICoreTool`、8 个工具、shell/process/encoding helpers），
-测试 `Di.Tests/Tools/`。未来 Node 宿主实现放在 `packages/coding-agent/src/core/tools/`；纯
+行为参考：`Core/Tools/`（`CoreTools`, `ICoreTool`、8 个工具、shell/process/encoding helpers），
+测试 `Di.Tests/Tools/`。当前 Node 宿主实现位于 `packages/coding-agent/src/core/tools/`；纯
 `packages/agent/` 只依赖工具执行抽象，不引入 Node API。现有 TUI 保留在 `tui/` 与
 `tui/src/app/`，首期由兼容既有 `--mode rpc` 的 TS backend 承接，后续才可选本地 Runner
 接线。不得把路径写成 `E:\Agent\Di` 的机器绑定路径。
@@ -156,13 +156,22 @@ Node 替代必须按字节收集，不能直接让 `spawn({encoding:'utf8'})` �
 - PowerShell stdin 以无 BOM UTF-8 送入；Windows PowerShell 5.1 对开头 BOM 行为与现代 pwsh 不同。
   需分别运行实际平台验收，不能只 mock `process.platform`。
 
+cmd stdin 由 `packages/coding-agent/src/core/tools/encoding.ts` 的 `createLegacyEncoder` 按
+`discoverOemCodePage` 返回值编码；`packages/coding-agent/src/core/tools/shell-session.ts` 的
+`ShellSession.execute` 在代码页不可用时返回错误，不写入命令。PowerShell/POSIX 仍使用无 BOM
+UTF-8，不修改全局 console code page。编码器采用精确锁定的 `iconv-lite@0.7.3`（MIT，声明
+Node `>=0.10.0`；公开 API `encodingExists` / `encode`，见 [上游说明](https://github.com/pillarjs/iconv-lite/blob/master/README.md)），
+传递依赖 `safer-buffer@2.1.2` 锁在根 lockfile；`install.ps1` 同时分发二者。接入前隔离探针验证
+936→GBK、437→OEM 字节及未知页拒绝；实际 Windows 中文目录往返与 helper 测试见
+`packages/coding-agent/test/tools/shell-session-encoding.test.ts`。最低 Node 与其他平台仍需发布验收。
+
 验收样例必须同时有中文 `dir` 文件名、UTF-8 `dotnet`/Node 输出、Python UTF-8、混合 stdout/stderr、
 截断点正好落在中文字符中间的输出。
 
 ## 持久 shell 会话协议
 
 生产工具共享长驻 shell：cwd、环境变量、虚拟环境状态需跨调用保留。cmd/bash 与 PowerShell 是两个
-独立会话，不能混用。Node 实现建议为未来 `shell-session.ts`：
+独立会话，不能混用。Node 实现为 `packages/coding-agent/src/core/tools/shell-session.ts` 的 `ShellSession`：
 
 - lazy spawn，首次执行才创建进程；用 async iterator/line buffer 读取 stdout，stderr 另行后台 drain。
 - 每条命令后附加随机不可预测 marker 和退出码 marker，唯有完整匹配当前会话 nonce 的 marker 才结束

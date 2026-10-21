@@ -4,6 +4,7 @@ import type { Readable, Writable } from "node:stream";
 import { messageOf } from "./errors.ts";
 import {
   createLegacyDecoder,
+  createLegacyEncoder,
   discoverOemCodePage,
   smartDecode,
   type LegacyDecoder,
@@ -22,11 +23,9 @@ import { killProcessTree, PROCESS_KILL_BUDGET_MS, ProcessResult } from "./proces
  * timeout / user `exit` / cancel (the session is a tree — `killProcessTree`).
  *
  * Platform differences (recorded divergences vs C#):
- * - cmd stdin is written as UTF-8 (Node has no built-in GBK/OEM encoder; C# pins
- *   the OEM code page for cmd stdin). ASCII commands are byte-identical; only a
- *   non-ASCII command sent to a Windows cmd session would be misread by cmd's
- *   GBK console code page. A vetted iconv-lite (or native) GBK encoder is the
- *   planned follow-up; no unvetted dependency was added.
+ * - cmd stdin uses the discovered OEM code page via iconv-lite, matching C#;
+ *   an unavailable code page returns an error before a command is written.
+ *   PowerShell and POSIX stdin remain BOM-free UTF-8.
  * - the prompt tag (`prompt DI_<tag>$G`) is set for cmd only. C# sets it for sh
  *   too, but a pipe-fed sh never echoes input (nothing to strip) and `prompt` is
  *   not an sh builtin — it would only emit "command not found" noise on stderr.
@@ -183,6 +182,7 @@ export class ShellSession {
   private stderrHalted_ = false;
   private disposed_ = false;
   private oem_: Promise<LegacyDecoder | undefined> | undefined;
+  private inputEncoder_: ((text: string) => Uint8Array) | undefined;
   private mutex_: PromiseChainMutex;
 
   constructor(
@@ -209,6 +209,14 @@ export class ShellSession {
    */
   execute(command: string, timeoutMs: number, signal?: AbortSignal): Promise<ProcessResult> {
     return this.mutex_.runExclusive(async () => {
+      if (this.shell.sessionKind === "cmd" && this.inputEncoder_ === undefined) {
+        const codePage = await discoverOemCodePage();
+        const encoder = codePage === undefined ? undefined : createLegacyEncoder(codePage);
+        if (encoder === undefined) {
+          return new ProcessResult(-1, "", `无法编码终端输入：系统 OEM 代码页 ${codePage ?? "未知"} 不可用`);
+        }
+        this.inputEncoder_ = encoder;
+      }
       this.ensureAlive_();
       const process = this.process_;
       const spawnResult = this.spawnResult_;
@@ -418,7 +426,8 @@ export class ShellSession {
     let stderrDrain: Promise<void> | undefined;
 
     try {
-      await writeStdin(process.stdin, command + "\n" + this.markerLine_() + "\n");
+      const input = command + "\n" + this.markerLine_() + "\n";
+      await writeStdin(process.stdin, this.inputEncoder_?.(input) ?? input);
 
       stderrDrain = this.drainStderr_(stderr).catch(() => {});
       // Abort (timeout / external) destroys the pipes: the feeders end their
@@ -792,7 +801,7 @@ function startsWithAt(raw: Uint8Array, offset: number, len: number, prefix: Uint
 }
 
 /** Write one line to the child's stdin, honoring backpressure (errors benign). */
-async function writeStdin(stdin: Writable | null, text: string): Promise<void> {
+async function writeStdin(stdin: Writable | null, text: string | Uint8Array): Promise<void> {
   if (stdin === null) return;
   if (stdin.write(text)) return;
   await new Promise<void>((resolve) => {

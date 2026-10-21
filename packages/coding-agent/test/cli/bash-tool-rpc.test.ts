@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,7 +10,6 @@ import {
   DiHome,
   LineTextReader,
   StringTextWriter,
-  createBashTool,
   createCliHost,
   runRpcMode,
   type CliArgs,
@@ -103,6 +103,10 @@ class CatalogService implements ModelService {
 
 const IS_WINDOWS = process.platform === "win32";
 const PLATFORM_SHELL_NAME = IS_WINDOWS ? "cmd" : "bash";
+const SET_SESSION_STATE = IS_WINDOWS
+  ? "cd /d sub & set DI_SHELL_SESSION=alive"
+  : "cd sub && export DI_SHELL_SESSION=alive";
+const READ_SESSION_STATE = IS_WINDOWS ? "cd & echo %DI_SHELL_SESSION%" : "pwd; echo $DI_SHELL_SESSION";
 
 /** Drive `runRpcMode` in-process over the given host (same driver the P7b suite uses). */
 async function runRpc(host: CliHost, input: string) {
@@ -116,13 +120,22 @@ test("real composition root: a bash tool call emits the exact tool round and a r
   const diHome = mkdtempSync(join(tmpdir(), "di-bash-rpc-"));
   const workspace = mkdtempSync(join(tmpdir(), "di-bash-rpc-ws-"));
   try {
+    const unicodeDirectory = join(workspace, "中文目录");
+    const unicodeCd = IS_WINDOWS ? `cd /d "${unicodeDirectory}"` : `cd "${unicodeDirectory}"`;
     const model = new ScriptedModel([
       {
         text: "",
-        toolCalls: [{ id: "c1", name: PLATFORM_SHELL_NAME, arguments: '{"command":"echo from-bash-tool"}' }],
+        toolCalls: [
+          { id: "c1", name: PLATFORM_SHELL_NAME, arguments: JSON.stringify({ command: SET_SESSION_STATE }) },
+          { id: "c2", name: PLATFORM_SHELL_NAME, arguments: JSON.stringify({ command: READ_SESSION_STATE }) },
+          { id: "c3", name: PLATFORM_SHELL_NAME, arguments: JSON.stringify({ command: unicodeCd }) },
+          { id: "c4", name: PLATFORM_SHELL_NAME, arguments: JSON.stringify({ command: IS_WINDOWS ? "cd" : "pwd" }) },
+        ],
       },
       { text: "done running" },
     ]);
+    mkdirSync(join(workspace, "sub"));
+    mkdirSync(join(workspace, "中文目录"));
     const host = await createCliHost(
       makeArgs({}),
       workspace,
@@ -132,7 +145,6 @@ test("real composition root: a bash tool call emits the exact tool round and a r
         diHome: DiHome.fromDirectory(diHome),
         modelFactory: () => model,
         modelService: new CatalogService(),
-        tools: [createBashTool(workspace)],
         skills: [] as readonly Skill[],
       },
     );
@@ -147,13 +159,16 @@ test("real composition root: a bash tool call emits the exact tool round and a r
 
       assert.equal(code, 0);
       assert.equal(model.callCount, 2, "one tool round + one answer call");
+      const shellSpec = model.requests[0]!.tools!.find((tool) => tool.name === PLATFORM_SHELL_NAME)!;
+      assert.ok(shellSpec.description.includes("持久化"), shellSpec.description);
+      assert.equal((shellSpec.parameters.properties as Record<string, unknown>).working_dir, undefined);
       assert.equal(stderr.text(), "");
       const lines = outputLines(stdout.text()).map((line) => JSON.parse(line));
 
       const events = lines.filter((d) => d.type === "event");
       assert.deepEqual(
         events.map((d) => d.event.kind),
-        ["turn_completed", "tool_started", "tool_completed", "text_delta", "turn_completed"],
+        ["turn_completed", "tool_started", "tool_completed", "tool_started", "tool_completed", "tool_started", "tool_completed", "tool_started", "tool_completed", "text_delta", "turn_completed"],
         "真实 loop 的 bash 工具回合线序：iteration1 完成 → started → completed → text_delta → iteration2 完成",
       );
 
@@ -161,14 +176,27 @@ test("real composition root: a bash tool call emits the exact tool round and a r
       assert.equal(started.event.kind, "tool_started");
       assert.equal(started.event.call.id, "c1");
       assert.equal(started.event.call.name, PLATFORM_SHELL_NAME);
-      assert.equal(started.event.call.arguments, '{"command":"echo from-bash-tool"}');
+      assert.equal(started.event.call.arguments, JSON.stringify({ command: SET_SESSION_STATE }));
 
       const completed = events[2]!;
       assert.equal(completed.event.kind, "tool_completed");
       assert.equal(completed.event.call.name, PLATFORM_SHELL_NAME);
       assert.equal(completed.event.is_error, false);
       assert.ok(completed.event.observation.includes("exit: 0"), completed.event.observation);
-      assert.ok(completed.event.observation.includes("from-bash-tool"), completed.event.observation);
+      const stateRead = events[4]!;
+      assert.equal(stateRead.event.kind, "tool_completed");
+      assert.equal(stateRead.event.call.id, "c2");
+      assert.ok(stateRead.event.observation.includes("alive"), stateRead.event.observation);
+      assert.ok(stateRead.event.observation.includes("sub"), stateRead.event.observation);
+      const unicodeRead = events[6]!;
+      assert.equal(unicodeRead.event.kind, "tool_completed");
+      assert.equal(unicodeRead.event.call.id, "c3");
+      assert.equal(unicodeRead.event.is_error, false);
+      assert.ok(unicodeRead.event.observation.includes("exit: 0"), unicodeRead.event.observation);
+      const unicodeCwd = events[8]!;
+      assert.equal(unicodeCwd.event.kind, "tool_completed");
+      assert.equal(unicodeCwd.event.call.id, "c4");
+      assert.ok(unicodeCwd.event.observation.includes("中文目录"), unicodeCwd.event.observation);
 
       const result = lines[lines.length - 1]!;
       assert.equal(result.type, "result");
@@ -179,7 +207,7 @@ test("real composition root: a bash tool call emits the exact tool round and a r
       host.dispose?.();
     }
   } finally {
-    rmSync(diHome, { recursive: true, force: true });
-    rmSync(workspace, { recursive: true, force: true });
+    await rm(diHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    await rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
   }
 });

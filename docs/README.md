@@ -21,7 +21,7 @@
 
 ## 分类入口
 
-- **TypeScript Core 迁移手册（设计，未实施）** → [docs/migration/typescript-core/README.md](migration/typescript-core/README.md)，供后续 AI 按阶段迁移与验收；现有功能文档仍描述当前实现。
+- **TypeScript Core 迁移手册（实施中）** → [docs/migration/typescript-core/README.md](migration/typescript-core/README.md)，按阶段实施与验收；当前进度和剩余门槛见手册中的进度表，原功能文档继续作为 C# 行为参考。
 - **核心模块文档** → `docs/modules/README.md`（模块 ↔ 文档 / 源码目录 / 测试目录映射的**唯一权威**，
   默认每个真实命名空间一篇；模块长大时一拆多，见 `docs/standards/documentation.md` §叶子文档的拆分）。
 

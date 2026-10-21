@@ -1,4 +1,12 @@
 import { spawn } from "node:child_process";
+import iconv from "iconv-lite";
+
+/** OEM stdin encoder for cmd; no global console-code-page changes. */
+export function createLegacyEncoder(codePage: number): ((text: string) => Uint8Array) | undefined {
+  const label = codePage === 65001 ? "utf8" : `cp${codePage}`;
+  if (!iconv.encodingExists(label)) return undefined;
+  return (text) => iconv.encode(text, label);
+}
 
 /**
  * Output/file decoding per P4-win-encoding-probe.md.

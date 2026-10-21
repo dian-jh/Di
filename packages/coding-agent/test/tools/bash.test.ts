@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,7 +23,9 @@ import { createBashTool, createToolExecutor, OUTPUT_MAX_BYTES } from "@di/coding
  */
 
 const base = mkdtempSync(join(tmpdir(), "di-bash-"));
-test.after(() => rmSync(base, { recursive: true, force: true }));
+test.after(async () => {
+  await rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+});
 
 const IS_WINDOWS = process.platform === "win32";
 const PLATFORM_SHELL_NAME = IS_WINDOWS ? "cmd" : "bash";
@@ -245,6 +248,22 @@ test("㉔ working_dir containing NUL returns an error, never throws", async () =
 });
 
 // ---- executor 别名 ----
+
+test("session mode omits working_dir and describes persistent cwd/env", async () => {
+  const { ShellSession, platformSessionShell } = await import("@di/coding-agent");
+  const session = new ShellSession(base, platformSessionShell);
+  try {
+    const tool = createBashTool(base, { session });
+    const properties = tool.spec.parameters.properties as Record<string, { type?: string }>;
+    assert.equal(properties.working_dir, undefined);
+    assert.ok(tool.spec.description.includes("持久化"), tool.spec.description);
+    assert.ok(tool.promptGuidelines.some((line) => line.includes("跨调用保持")), tool.promptGuidelines.join("\n"));
+    const obs = await tool.execute(args("echo session-marker"));
+    assert.ok(obs.text.includes("session-marker"), obs.text);
+  } finally {
+    session.dispose();
+  }
+});
 
 test("executor: platform shell routes under the old 'bash' name on Windows", async (t) => {
   if (!IS_WINDOWS) {

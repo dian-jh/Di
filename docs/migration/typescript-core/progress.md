@@ -1,8 +1,19 @@
 # TypeScript Core 迁移：进度表
 
-> **状态：P0–P2.7 各单元（P2 阶段全部完成）、P3.1–P3.5 与 P8a/P8b（@di/ai ChatGPT provider + 宿主 OAuth PKCE 与原子凭据存储完成；宿主运行时 ChatGPT 存储按契约失败关闭——真实 OS advisory lock 适配器待批准后启用，不伪造凭据）、P4.1–P4.5 各卡（含一次性 shell 工具接入组合根）已完成；P4-regex-unicode-conformance（`\w\d\b` Unicode 桥接，P4 conformance 门已过）与 P3.4-cost-wiring 已完成，持久 ShellSession/powershell/python 组件已完成（组合根持久接线 MAJOR 未交付，下一卡）、P5 检查点/恢复与统计、P6.1、P6.2a、P6.2b、P6.3a、P6.3b-cli-args-modes、P6.3c-modes-resume-output、P6.4-run-logging、P7-tui-launcher-seam、P7a-ts-cli-entry-composition、P7b-tui-wiring-integration（TUI 接线 + 真实宿主 RPC 集成 + 真实 CLI crash/resume 重跑）与四项预研均已完成；P6、P7、P8 与 P9 阶段（P9-local-runner-inprocess + P9-release-install-rollback）全部完成并独立验收；下一卡：P4-shell-session-composition-root-wiring（关闭组合根持久接线 MAJOR）（本文件由 P0 提交创建，各迁移单元更新）。** 只保存简短状态表与证据位置，不复制专题契约；
+> **状态：迁移实施中，尚未达到完整功能与发布验收的完成定义。** 当前核实摘要见下表；历史任务卡的 verified 仅表示该卡范围通过，不代表生产能力已经全部接线。阶段契约见 execution-plan.md 及各专题。
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
 > 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
+
+## 当前接手摘要（2026-10-21，本轮复核）
+
+| 范围 | 当前事实 / 下一动作 |
+|---|---|
+| 已有实现 | 三个 TS 包、原 TUI、核心循环、DeepSeek、ChatGPT 协议/OAuth组件、八工具组件、Skills、会话恢复、CLI/RPC、本地 Runner、隔离安装/回退；历史测试证据见各卡，不能据此宣布全迁移完成 |
+| 本轮任务 | `P4-shell-session-composition-root-wiring`：verified；默认 host 持久接线、OEM 输入、隔离安装与回归已完成，证据见末尾交接 |
+| 生产 ChatGPT | `packages/coding-agent/src/cli/cli-host-compose.ts` 的 `defaultModelForLabel` 仍拒绝 ChatGPT，`CatalogModelService.checkAuth` 返回 false；`packages/coding-agent/src/core/auth/lock-provider.ts` 的 `FAIL_CLOSED_LOCK_PROVIDER` 没有真实 OS 锁适配器，不能把组件完成记为生产可用 |
+| 生产预算 | 同一组合根构造 `AgentSession` 时未传 `tokenBudget` / `budgetTracker`，ContextLimit guard 未接通；后续按模型已知窗口/配置接线，并补组合根业务测试（对应 `loop-and-state.md` 预算契约） |
+| 长时间验收 | 既有 PID 118036 仍运行；2026-10-21 14:33:46Z 采样为 85,376 轮、0 失败、子进程创建/退出相等，未满 10h，尚无终态 `status.json`；到期后须按冻结 manifest 检查，不能提前记 verified |
+| 其他发布门槛 | 非 Windows 平台、最低 Node 22.19、真实 provider smoke 与默认入口切换仍需实际证据；不覆盖现有安装和用户数据 |
 
 ## 基线快照（P0 建立时）
 
@@ -28,6 +39,7 @@
 
 | 任务 ID | 依赖 | 状态 | 实现提交 | 验证命令 / 退出码 | 阻塞点 |
 |---|---|---|---|---|---|
+| P4-shell-session-composition-root-wiring | P4 ShellSession 组件、P7 组合根 | **verified** | 本轮提交（`git log -1`） | 业务红→绿、focused 35 pass；根 build/typecheck/test 均 0；详见末尾交接 | 无（本卡）；整体迁移剩余项见顶部摘要 |
 | P0 冻结参考与行为清单 | 无 | **verified** | 本提交（创建本文件与 behavior-ledger.md；hash 见交接报告 / `git log -1`） | 见上表三行，退出码均 0 | 无 |
 | P1 最小工作区、词汇和夹具 | P0 | **verified** | P1.1（见子行）+ P1.2（a8144ea、731f8b5） | 见 P1.1 / P1.2 子行 | 无 |
 | P1.1 根 workspace、@di/ai 词汇与假模型无工具答案红→绿 | P0 | **verified** | 见本单元交接（`git log -1`） | `npm install`(0)；红测 `npm test -w @di/ai`(1, ERR_MODULE_NOT_FOUND)；绿测 `npm test -w @di/ai`(0, 1 pass)；`npm run build`(0)；`npm run typecheck`(0)；`npm.cmd --prefix tui test`(0, 116 pass)；`npm.cmd --prefix tui run build`(0) | 无 |
@@ -46,7 +58,7 @@
 | P3.3 DeepSeek 请求/响应翻译 | P3.2 | **verified** | 5c36ca2 | 红：`npm test -w @di/ai`(1, 缺 DeepSeek 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck`(0)、`npm test -w @di/ai`(0, 90/90 = 31 新增 + 59 回归)、根 `npm run typecheck`(0) | 无；后续卡：usage/cost（P3.4） |
 | P3.4 usage 聚合与成本计算 | P3.1+P3.2+P3.3 | **verified** | 269ff93 | 红：`npm test -w @di/ai`(1, 缺 billableInputTokens 导出)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck -w @di/ai`(0)、`npm test -w @di/ai`(0, 123/123 = 90 回归 + 33 新增)、根 `npm run typecheck`(0)、`npm test -w @di/agent`(0, 45/45) | 无；后续卡：retry/timeout（P3.5） |
 | P3.5 retry/timeout 与超时 | P3.1..P3.4 | **verified** | bf48fdb、0394c41 | 红：`npm test -w @di/ai`(1, 缺 retry 导出 + 缺 header TIMEOUT rejection + 连接映射 false)。绿：`npm run build -w @di/ai`(0)、`npm run typecheck -w @di/ai`(0)、`npm test -w @di/ai`(0, 150/150=123 回归+27 新)、根 `npm run typecheck`(0)、`npm test -w @di/agent`(0, 50/50) | retry/timeout 完成；P3 阶段全部完成；后续卡：P4.4 输出收集 |
-| P4 八个工具与平台执行 | P1 | **verified**（各卡） | P4.1–P4.5（见子行） | 见 P4.1 / P4.2 / P4.3 / P4.4 / P4.5 子行 | 无（各卡范围）；P4 conformance 门已过（P4-regex-unicode-conformance，见子行）；持久 ShellSession / powershell / python 未做（下一卡） |
+| P4 八个工具与平台执行 | P1 | **verified**（已记录单元） | P4.1–P4.5、regex conformance、ShellSession 组件与本轮组合接线（见末尾交接） | 本轮根 build/typecheck/test 均 0；coding-agent 824 pass + 1 既有 win-symlink skip | 持久组合接线 MAJOR 已关闭；平台和完整发布门槛见顶部摘要，不代表迁移整体完成 |
 | P4.1 文件工具 read/write/edit | P6.1, P1.2 | **verified** | 867e936 | 红：`npm test -w @di/coding-agent`(1, 缺 createEditFileTool 导出)；业务红（临时禁 OEM fallback）`node --test test/read-file.test.ts`(1, 35 中 2 失败=GBK 用例)。绿：`npm run build -w @di/coding-agent`(0)、`npm run typecheck`(0)、`npm test -w @di/coding-agent`(0, 114/114=88 工具+26 配置回归)、根 `npm run build`(0)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无；FileShare.None 独占锁纯 Node 不可复刻；原子 rename 未做（保持基线原位写）；无解码器页（如 OEM 437）走显式解码错误（未加 iconv-lite）；后续卡：glob 枚举（P4.2） |
 | P4.2 glob 文件枚举 | P4.1 | **verified** | 1c08756 | 红：`npm test -w @di/coding-agent`(1, 缺 globIsMatch/createGlobTool/GLOB_DEFAULT_LIMIT 导出)。绿：`npm run build -w @di/coding-agent`(0)、`npm run typecheck -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 162 = 114 回归 + 48 新增, 161 pass + 1 win-symlink 平台跳过)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | 无；Windows 文件符号链接创建需管理员/开发者模式（EPERM）→ symlink-file 用例本机跳过、POSIX CI 运行；后续卡：grep/regex（P4.3） |
 | P4.3 grep/regex 搜索 | P4.2 | **verified** | 37fd82f、6e32deb | 红：`npm test -w @di/coding-agent`(1, SyntaxError 缺 GREP_DEFAULT_LIMIT 导出)。绿：`npm run build -w @di/coding-agent`(0)、`npm run typecheck -w @di/coding-agent`(0)、`npm test -w @di/coding-agent`(0, 207 = 162 回归 + 45 新增, 206 pass + 1 win-symlink 平台跳过)、根 `npm run typecheck`(0)、`npm.cmd --prefix tui test`(0, 116 pass)、`npm.cmd --prefix tui run build`(0) | worker_threads 每调用一个 worker，超时/中止 worker.terminate()（灾难回溯 `(x+x+)+y` 30 x 560ms 内返回）；u flag + \A\z\Z 桥接；.NET 独有语法显式 error 非静默空；GBK/OEM 936 解码匹配；JS \w\d\b 仅 ASCII 未补译（记录已知差异，conformance 门未过）；空标记用 C#「（未找到匹配）」；后续卡：P4.4 输出收集 |
@@ -411,7 +423,9 @@
 - **分歧（已记录）：** ContextLimit 暂停经宿主 runner 接缝不可达（createCliHost 未接 tokenBudget → shouldPauseForContextLimit 恒 false；ContextLimit 语义由 agent-loop/agent-session 单测覆盖，soak 按 §51 用 /clear 代）；checkpoint 每轮写全量历史 → clear 窗口内二次方，clear-every-30 约束至近线性（~580MB @10h 为预期增长 §51）；卸载为手动移除 ts-cli/ + 2 launcher（演练已验证可逆）。
 - **默认入口切换 PENDING：** 依赖 10h soak 完成 + 跨平台验收；POSIX 未运行（未伪造）。
 
-## 迁移完成度与剩余缺口（第二步审计 2026-10-21）
+## 历史审计快照（第二步审计 2026-10-21，本轮实施前）
+
+本节保留当时发现与任务排序；本轮关闭的缺口以顶部摘要和末尾交接为准。
 
 状态类别约定：**单元实现完成** = 该阶段内各任务卡已绿；**阶段验收完成** = 各卡绿 + 七项 gate 当前全绿；**迁移完成** = 原定功能全部 + 全部验收门槛满足。历史 verified ≠ 当前版本仍通过（本段已对七项 gate 与真实源码复核，证据见下）。
 
@@ -437,6 +451,18 @@
 
 依赖图要点：卡 1/3/4/5 已完成并独立验收；卡 2 组件完成、组合根持久接线未交付（MAJOR）；下一卡为 P4-shell-session-composition-root-wiring（依赖卡 2 组件 + P7 组合根）；全部完成且七项 gate 绿才可宣布迁移完成（operator-guide 完成判据）。
 
-## 下一张任务卡（P4-shell-session-composition-root-wiring）
+## P4-shell-session-composition-root-wiring 交接（本轮提交）
 
-> **推荐下一卡：P4-shell-session-composition-root-wiring（关闭卡 2 的 MAJOR 缺口）。** 卡 1/3/4/5 已完成并独立验收；卡 2 的 ShellSession/powershell/python 组件已实现实测（62 例 + 树杀 probe），但生产组合根（`cli-host-compose.ts:155-169`）仍以 **one-shot** 注册 cmd/powershell（与 P4.5 相同），持久会话接线在代码注释中明示为 follow-up——这是卡 2 交接"组合根接线"声称未满足的部分（独立验收已修正该过报）。任务：给 `BashToolOptions`/`PowerShellToolOptions` 增加 `session` 接缝（one-shot 保持为测试/自定义 shell 回退）；`createCliHost` 持有惰性 ShellSession（cmd 与 PowerShell 各自独立会话，随 `host.dispose()` 清理生命周期）；工具 `execute` 经会话路由，提示词风味切到持久会话契约（tools-and-platform.md §44/45/162-178）；新增组合根级测试：cwd/env 跨调用保持、会话超时/取消后自动重建、`host.dispose` 清理无泄漏、cmd echo 剥离与 marker 语义在生产路径一致。完成后重跑七项 gate 并更新 P4 阶段状态（目标：阶段验收完成）。
+- **行为与范围：** `packages/coding-agent/src/core/tools/bash.ts` 的 `BashToolOptions.session` / `createBashTool` 支持共享会话，隐藏 `working_dir` 并说明使用 cd；one-shot/custom shell 路径保留。`packages/coding-agent/src/cli/cli-host-compose.ts` 的 `createCliHost` 给平台 shell 与 PowerShell 分别持有惰性 `ShellSession`，随 host.dispose 清理，显式注入的自定义工具仍由调用者管理生命周期。
+- **编码回归：** 独立探针在代码页 936 下确认持久 cmd 无法 cd 中文目录，one-shot 成功；业务红测 `node --test packages/coding-agent/test/tools/shell-session-encoding.test.ts` 退出 1（exitCode 实际 1、期望 0，观察为“系统找不到指定的路径”）。`packages/coding-agent/src/core/tools/encoding.ts` 的 `createLegacyEncoder` 与 `shell-session.ts` 的 `ShellSession.execute` 改为发现 OEM 代码页后编码 cmd 输入；未知编码返回错误，不写入命令，不修改控制台代码页。PowerShell/POSIX 保持无 BOM UTF-8。
+- **依赖决策：** 接入前在仓库外临时目录安装并验证 `iconv-lite@0.7.3` 的 `encodingExists` / `encode`：936 的“中文”为 d6d0cec4，437 的 é 为 82，未知页拒绝；MIT、声明 Node >=0.10.0，传递依赖 safer-buffer@2.1.2（MIT），两者已锁入根 package-lock.json。实际运行 Node v24.16.0 / Windows；最低 Node 和其他平台不冒称已验收。`install.ps1` 分发两包。
+- **持久接线 TDD：** 红测 `npm.cmd test -w @di/coding-agent -- --test-name-pattern="session mode omits working_dir"` 退出 1（schema 仍暴露 working_dir）；实现前真实 host RPC 测试退出 1（one-shot 描述/schema）。绿测 coding-agent build/typecheck 均 0；`node --test test/tools/bash.test.ts test/cli/bash-tool-rpc.test.ts test/cli/persistent-shell.test.ts`（cwd packages/coding-agent）退出 0，35 pass。真实默认 host 验证 cwd/env/中文目录跨调用、cmd 与 PowerShell 状态隔离、shell 自报 PID 不同且 dispose 后均退出；另测 timeout/cancel 后重建。
+- **安装 TDD：** `node --test packages/coding-agent/test/cli/install-runtime.test.ts` 红 1（私有 runtime 缺 iconv-lite），补拷贝 iconv-lite/safer-buffer 后绿 0。真实隔离安装使用 -SkipBuild -SkipPathUpdate，私有依赖存在、安装入口 --info 和编码模块 import 成功，合成旧 di.exe/config.json 字节不变；不改真实用户安装或 PATH。本机用户级 node_modules 会掩盖漏包，故不能仅以 import 成功验收，必须同时检查私有依赖存在。
+- **全量验证与失败修复：** 根 `npm.cmd run build`(0)、`npm.cmd run typecheck`(0)；首次根 `npm.cmd test`(1)：新增生命周期测试 CIM 查询在并行负载下超时，以及 bash 测试同步删除目录时句柄未释放。测试改为 shell 自报 PID + `process.kill(pid, 0)` 查询，以及异步 rm 重试让事件循环处理进程清理；未放宽产品超时、未跳过失败断言。修复后 coding-agent typecheck(0)、focused 35/35(0)，最终根 `npm.cmd test`(0)：TUI 143/143、agent 50/50、ai 173/173、coding-agent 825 项中 824 pass + 1 既有 Windows symlink skip，合计 **1190 pass / 0 fail / 1 skip**。首次与最终日志分别存于仓库外 `%TEMP%/di-p4-migration-gates-20261021/root-test.log`、`root-test-final.log`，没有覆盖失败证据。
+- **审查与边界：** 两个轻量子代理分别承担接线/测试和只读审计/隔离安装，主代理完成编码修复、测试审查与全量集成；独立只读复核未发现严重问题。C#、真实账号、既有用户安装和真实会话数据未改。旧 10h soak 仍是启动版本的运行证据，不能替代本轮新代码的长时间发布验收。
+
+## 下一张任务卡
+
+`P7-context-budget-composition-root-wiring`：从已知模型窗口与有效配置得出预算，将预算与 tracker 接入 `createCliHost` → `AgentSession`，不得为未知窗口猜测上限。先写真实组合根测试：已知预算触发 context_limit 且不发起越界模型请求、保留轨迹、未知窗口不凭空设限、模型切换后的预算更新；再按 `loop-and-state.md` 契约实现。
+
+生产 ChatGPT 仍需真实 OS 锁适配器与模型路由接线；真实 provider smoke、10h soak、非 Windows/最低 Node、默认入口切换仍是独立验收门槛。另需单独核对持久协议中“逐命令 nonce”要求与当前 `ShellSession.spawn_` 按会话生成 marker 的差异，不能因本卡接线通过而把全部协议/平台门槛标绿。

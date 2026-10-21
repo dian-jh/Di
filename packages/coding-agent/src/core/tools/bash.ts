@@ -3,18 +3,19 @@ import { getOptionalInt, getRequiredString, parseArguments, toolSchema } from ".
 import { messageOf } from "./errors.ts";
 import { resolvePath } from "./paths.ts";
 import { runProcess } from "./process-runner.ts";
+import { ShellSession } from "./shell-session.ts";
 import { errorObservation, okObservation, type CoreTool } from "./types.ts";
 
 /**
- * The one-shot platform-default-shell tool (port of `Core/Tools/BashTool.cs` at
- * 09f4e08, ONE-SHOT subset): executes one command in the platform default shell
- * (Windows `cmd.exe` / other platforms `sh`) with an optional `working_dir`, a
- * per-call `timeout` override and a merged bounded output.
+ * Platform-default-shell tool (port of `Core/Tools/BashTool.cs` at 09f4e08).
+ * Without a session it executes one command in the platform shell with optional
+ * `working_dir`; with a session it shares a persistent terminal whose cwd and
+ * environment survive across calls. Both modes support per-call timeout and
+ * merged bounded output.
  *
- * This card implements ONLY the one-shot mode. The persistent `ShellSession`
- * mode of C# BashTool (shared terminal, cwd/env survive across calls) and the
- * PowerShell / Python tools are explicitly OUT OF SCOPE for P4.5 and belong to
- * later cards — do not claim them.
+ * Persistent mode uses the shared `ShellSession` implementation; the host owns
+ * and disposes its lifetime. One-shot mode remains available for custom tools
+ * and tests.
  *
  * C# contract mapping:
  * - platform default shell -> `runProcess(..., { shell: true })`: Node itself
@@ -29,9 +30,7 @@ import { errorObservation, okObservation, type CoreTool } from "./types.ts";
  *   { command }`).
  *
  * Documented migration differences from C#:
- * - PromptSnippet/PromptGuidelines are ONE-SHOT flavored here (C# uses the
- *   session flavor "共享持久化 cmd.exe 会话" even in one-shot mode; the
- *   one-shot MVP deliberately describes the actual one-shot behavior).
+ * - PromptSnippet/PromptGuidelines reflect the selected execution mode.
  * - `runProcess` diagnostics report `name=<basename(command)>` — i.e. the whole
  *   command line — for shell-mode calls (the underlying process is the shell
  *   wrapping the command). Accepted and noted in the card report.
@@ -53,6 +52,8 @@ export interface BashToolOptions {
   readonly shell?: string;
   /** Default per-call timeout in seconds (C# `timeout` ctor; default 30). */
   readonly timeoutSeconds?: number;
+  /** Shared persistent platform shell; cwd and environment survive across calls. */
+  readonly session?: ShellSession;
 }
 
 /** Optional string; blank/whitespace is treated as absent (C# `TryGetOptionalString` returns null for it). */
@@ -72,13 +73,13 @@ function hasIllegalPathChars(p: string): boolean {
 }
 
 /**
- * One-shot shell tool: `createBashTool(baseDirectory, opts?)` returns a
- * `CoreTool` whose display name is the platform shell name ("cmd" on Windows,
- * "bash" otherwise).
+ * `createBashTool(baseDirectory, opts?)` returns the platform shell tool
+ * (`cmd` on Windows, `bash` otherwise), in one-shot or shared-session mode.
  */
 export function createBashTool(baseDirectory: string, options?: BashToolOptions): CoreTool {
   const defaultTimeoutSeconds = options?.timeoutSeconds ?? BASH_DEFAULT_TIMEOUT_SECONDS;
   const customShell = options?.shell;
+  const session = options?.session;
   const windows = PLATFORM_SHELL_NAME === "cmd";
 
   const description = windows
@@ -103,20 +104,28 @@ export function createBashTool(baseDirectory: string, options?: BashToolOptions)
         "超时（默认 30 秒，可 timeout 覆盖）会终止命令并返回 error；长输出自动截断头尾",
       ];
 
+  const sessionDescription = windows
+    ? "在共享的持久化 cmd.exe 会话中执行一条命令（stdout + stderr 合并）。cd、环境变量和激活的虚拟环境等状态在多次调用之间保持；切换目录请用 cd，而不是 working_dir。"
+    : "在共享的持久化终端会话中执行一条命令（stdout + stderr 合并）。cd、环境变量和激活的虚拟环境等状态在多次调用之间保持；切换目录请用 cd，而不是 working_dir。";
+  const sessionSnippet = windows ? "在共享持久化 cmd.exe 会话中执行命令" : "在共享持久化终端会话中执行命令";
+  const sessionGuidelines = windows
+    ? ["cmd 是共享持久化会话：cd、环境变量、激活的虚拟环境等状态跨调用保持，切换目录用 cd 而不是 working_dir", "Windows cmd.exe 没有 ls/tail/head/pwd/grep：列目录用 dir、看文件用 type、搜文本用 findstr、看当前目录用 echo %CD%", "超时会终止会话并在下次调用自动重建"]
+    : ["bash 是共享持久化会话：cd、环境变量、激活的虚拟环境等状态跨调用保持，切换目录用 cd 而不是 working_dir", "超时会终止会话并在下次调用自动重建"];
+
   return {
     spec: {
       name: PLATFORM_SHELL_NAME,
-      description,
+      description: session === undefined ? description : sessionDescription,
       parameters: toolSchema(
         [["command", "string", "要执行的命令"]],
         [
           ["timeout", "integer", `可选：超时秒数（默认 ${BASH_DEFAULT_TIMEOUT_SECONDS}，最大 ${BASH_MAX_TIMEOUT_SECONDS}）`],
-          ["working_dir", "string", "可选：工作目录（默认工作区根目录）"],
+          ...(session === undefined ? [["working_dir", "string", "可选：工作目录（默认工作区根目录）"] as [string, string, string]] : []),
         ],
       ),
     },
-    promptSnippet,
-    promptGuidelines,
+    promptSnippet: session === undefined ? promptSnippet : sessionSnippet,
+    promptGuidelines: session === undefined ? promptGuidelines : sessionGuidelines,
     async execute(argumentsJson, signal) {
       const parsed = parseArguments(argumentsJson);
       if (!parsed.ok) return errorObservation(parsed.error);
@@ -131,6 +140,11 @@ export function createBashTool(baseDirectory: string, options?: BashToolOptions)
         return errorObservation(`error: timeout 必须是 1 到 ${BASH_MAX_TIMEOUT_SECONDS} 之间的整数秒`);
       }
       const timeoutMs = (timeoutArg ?? defaultTimeoutSeconds) * 1000;
+
+      if (session !== undefined) {
+        const result = await session.execute(commandResult.value, timeoutMs, signal);
+        return result.error === null ? okObservation(result.toObservation()) : errorObservation(result.toObservation());
+      }
 
       const workingDirArg = optionalString(parsed.value, "working_dir");
       let workingDir: string;

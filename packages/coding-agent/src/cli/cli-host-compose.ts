@@ -24,6 +24,7 @@ import { createSkillAwareExecutor, LOAD_SKILL_TOOL } from "../core/skills/skill-
 import type { Skill } from "../core/skills/skill.ts";
 import { createBashTool, createFileTools, createPowerShellTool, createPythonTool, createToolExecutor } from "../core/tools/index.ts";
 import { createGlobTool } from "../core/tools/glob.ts";
+import { ShellSession, platformSessionShell, powershellSessionShell } from "../core/tools/shell-session.ts";
 import { createGrepTool } from "../core/tools/grep.ts";
 import type { CoreTool } from "../core/tools/types.ts";
 import { DEFAULT_REPL_OPTIONS } from "../modes/repl.ts";
@@ -152,21 +153,23 @@ export async function createCliHost(
   const effectiveProvider = !isBlank(args.provider) ? args.provider! : configuredProvider;
   const defaultModel = args.model ?? configuredDefaultModel;
 
-  // Tools: the P4.x set in canonical order read/write/edit/glob/grep/bash/
-  // powershell/python over the workspace (C# `CoreTools` canonical order). The
-  // shell tools are registered in ONE-SHOT mode here, consistent with the P4.5
-  // decision for the platform shell; persistent-session mode (a shared
-  // ShellSession injected into createPowerShellTool / createBashTool) is fully
-  // implemented and tested, and wiring a host-managed persistent session (with
-  // dispose lifecycle) is a follow-up.
-  const tools = options.tools ?? [
-    ...createFileTools(workspace),
-    createGlobTool(workspace),
-    createGrepTool(workspace),
-    createBashTool(workspace),
-    createPowerShellTool(workspace),
-    createPythonTool(workspace),
-  ];
+  // Tools: independent persistent cmd/POSIX and PowerShell sessions belong to
+  // this host. ShellSession spawns lazily on first tool use and is disposed with
+  // the host; explicit test/custom tools retain their own lifecycle.
+  const shellSessions: ShellSession[] = [];
+  const tools = options.tools ?? (() => {
+    const platformSession = new ShellSession(workspace, platformSessionShell);
+    const powershellSession = new ShellSession(workspace, powershellSessionShell);
+    shellSessions.push(platformSession, powershellSession);
+    return [
+      ...createFileTools(workspace),
+      createGlobTool(workspace),
+      createGrepTool(workspace),
+      createBashTool(workspace, { session: platformSession }),
+      createPowerShellTool(workspace, { session: powershellSession }),
+      createPythonTool(workspace),
+    ];
+  })();
   const toolSpecs = tools.map((tool) => tool.spec);
 
   // Skills: standard locations in priority order (C# `CliHost.Create`): user
@@ -303,6 +306,7 @@ export async function createCliHost(
     if (disposed) return;
     disposed = true;
     diLog.dispose();
+    for (const shellSession of shellSessions) shellSession.dispose();
     if (ProcessDiagnostics.log !== null) ProcessDiagnostics.log = null;
   };
 

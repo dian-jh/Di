@@ -32,6 +32,7 @@
     "@di/agent": "*",
     "@di/ai": "*",
     "di-tui": "*",
+    "iconv-lite": "0.7.3",
     "jsonc-parser": "3.3.1"
   },
   "devDependencies": {

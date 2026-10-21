@@ -1,6 +1,6 @@
 # 执行 AI 的逐单元操作规则
 
-> 状态：供未来迁移使用的操作规程，不代表迁移已实施。阶段定义以 [execution-plan.md](execution-plan.md) 为准；接口只在 [architecture.md](architecture.md) 定义；验收以 [validation-and-release.md](validation-and-release.md) 为准。本文件只规定如何领取、执行和交接任务。
+> 状态：迁移实施操作规程；当前实现与验收状态见 [progress.md](progress.md)。阶段定义以 [execution-plan.md](execution-plan.md) 为准；接口契约在 [architecture.md](architecture.md) 定义并与源码核对；验收以 [validation-and-release.md](validation-and-release.md) 为准。本文件只规定如何领取、执行和交接任务。
 
 ## 开始时使用的指令
 
@@ -22,7 +22,7 @@
 
 1. 从仓库根运行 `git status --short`、`git branch --show-current`、`git log -3 --oneline`。应在 `migration/typescript-core` 或从该分支创建的实施分支；不要在 `feature/loop` 写迁移。
 2. 检查已完成提交与实际文件。没有测试记录的任务只能标为“待验证”，不能因为存在同名文件就认定完成。
-3. P0 后由实施者创建 `docs/migration/typescript-core/progress.md`（目前不存在），只保存简短状态表与证据位置，不复制专题契约。每行包含任务 ID、依赖、状态、实现提交、验证命令和退出码、阻塞点。详细输出存于实施任务的测试产物，不把 token 或个人日志提交进仓库。
+3. 更新已有 `docs/migration/typescript-core/progress.md`，只保存简短状态表与证据位置，不复制专题契约。每行包含任务 ID、依赖、状态、实现提交、验证命令和退出码、阻塞点。详细输出存于实施任务的测试产物，不把 token 或个人日志提交进仓库。
 4. 选择一个依赖已完成的任务，先写任务卡。遇到文档冲突先检查固定基线和对应契约；不能自行挑较容易通过的一条。
 
 状态只用 `todo`、`in_progress`、`blocked`、`verified`。`blocked` 不等于完成；没有在当前版本验证过的 `verified` 项，在相关代码改变后必须重新检查。
