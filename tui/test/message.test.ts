@@ -5,10 +5,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { stripTerminalSequences, Text, visibleWidth } from "@earendil-works/pi-tui";
+import { getCapabilities, setCapabilities } from "@earendil-works/pi-tui";
 
 import { AssistantMessage, SystemMessage, TurnGroup, UserMessage } from "../src/app/message.ts";
 import { ToolCallView } from "../src/app/tool-call.ts";
 import { SpacedBlock } from "../src/app/spacing.ts";
+
+// Color mode follows the actual terminal/CI environment. The library reduces
+// #373737 to xterm color 237 when truecolor is unavailable.
+const grayBackground = /\x1b\[48;(?:2;55;55;55|5;237)m/;
+const lightForeground = /\x1b\[38;(?:2;242;242;242|5;255)m/;
 
 describe("UserMessage：整行灰底", () => {
 	it("使用 > 前缀、可读前景和填满宽度的灰底", () => {
@@ -16,14 +22,33 @@ describe("UserMessage：整行灰底", () => {
 		assert.equal(lines.length, 1);
 		assert.ok(stripTerminalSequences(lines[0]!).includes("> 你好"));
 		assert.equal(visibleWidth(lines[0]!), 20);
-		assert.match(lines[0]!, /\x1b\[48;2;55;55;55m/, "整行应使用 #373737 背景色");
-		assert.match(lines[0]!, /\x1b\[38;2;242;242;242m/, "用户文字应使用高对比浅色");
+		assert.match(lines[0]!, grayBackground, "整行应使用 #373737 背景色（或终端调色板近似色）");
+		assert.match(lines[0]!, lightForeground, "用户文字应使用高对比浅色");
   });
+
+	it("256 色与真彩终端都保留浅色前景和灰色背景", async () => {
+		const previous = getCapabilities();
+		try {
+			setCapabilities({ images: null, trueColor: false, hyperlinks: false });
+			const palette = await import("../src/app/message.ts?colorMode=256");
+			const paletteLine = new palette.UserMessage("你好").render(20)[0]!;
+			assert.match(paletteLine, lightForeground, "浅色前景应适配 256 色模式");
+			assert.match(paletteLine, /\x1b\[48;5;237m/);
+
+			setCapabilities({ images: null, trueColor: true, hyperlinks: false });
+			const rgb = await import("../src/app/message.ts?colorMode=truecolor");
+			const rgbLine = new rgb.UserMessage("你好").render(20)[0]!;
+			assert.match(rgbLine, lightForeground);
+			assert.match(rgbLine, /\x1b\[48;2;55;55;55m/);
+		} finally {
+			setCapabilities(previous);
+		}
+	});
 	it("换行与 CJK 按终端列宽填底色", () => {
 		const lines = new UserMessage("你好\nabcdefghijk").render(8);
 		assert.ok(lines.length >= 3);
 		assert.ok(lines.every((line) => visibleWidth(line) === 8));
-		assert.ok(lines.every((line) => /\x1b\[48;2;55;55;55m/.test(line)));
+		assert.ok(lines.every((line) => grayBackground.test(line)));
 	});
 });
 
