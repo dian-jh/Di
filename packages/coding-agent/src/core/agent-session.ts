@@ -135,6 +135,8 @@ export interface AgentSessionConfig {
    * `undefined` = no known model window → no invented token limit.
    */
   readonly tokenBudget?: number;
+  /** Turn-boundary dynamic budget (for model switches); undefined means unknown window. */
+  readonly tokenBudgetProvider?: () => number | undefined;
   /** Explicit whole-turn fallback used ONLY when tokenBudget is undefined; 0 (default) = no cap. */
   readonly maxHistoryTurns?: number;
   /** When set, a stable environment snapshot is appended as a history system message only on change. */
@@ -340,13 +342,18 @@ export class AgentSession {
     }
     this.running_ = true;
     try {
-      const tokenBudget = this.config_.tokenBudget;
       const maxHistoryTurns = this.config_.maxHistoryTurns ?? 0;
       // Turn-boundary model resolution: setModel takes effect only here, never
       // mid-stream. The resolved model is captured for the whole turn, so a
       // mid-turn setModel (e.g. while blocked on a GatedModel) can never replace
       // a running loop's dependency.
       const model = await this.resolveModel_();
+      const tokenBudget = this.config_.tokenBudgetProvider !== undefined
+        ? this.config_.tokenBudgetProvider()
+        : this.config_.tokenBudget;
+      if (tokenBudget !== undefined && (!Number.isInteger(tokenBudget) || tokenBudget < 0)) {
+        throw new RangeError(`AgentSession: token budget must be an integer >= 0, got ${tokenBudget}`);
+      }
 
       // Start-of-turn trim when the budget shrank (or this is the first turn) and
       // history is not being preserved (C# `_lastHistoryBudget is null ||

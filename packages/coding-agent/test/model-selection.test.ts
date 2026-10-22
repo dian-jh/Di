@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  CatalogModelService,
   ModelReference,
   ModelSelection,
   ModelSelectionError,
+  type ChatGptAuth,
+  type DiConfig,
   type ModelSelectionErrorCode,
 } from "@di/coding-agent";
 import { FakeAdapter, FakeModelService, RecordingHost } from "./commands/test-doubles.ts";
@@ -48,6 +51,31 @@ function setup() {
 
 const rejectsWith = (code: ModelSelectionErrorCode) => (error: unknown) =>
   error instanceof ModelSelectionError && error.code === code;
+
+test("production catalog returns baseline reasoning metadata and checks ChatGPT direct-scope auth", async () => {
+  const config = {
+    get(key: string) { return key.toLowerCase() === "deepseek:defaultreasoningeffort" ? "max" : undefined; },
+    has(key: string) { return key.toLowerCase() === "deepseek:defaultreasoningeffort"; },
+  } as unknown as DiConfig;
+  let checkCalls = 0;
+  const auth = {
+    check: async () => { checkCalls++; return false; },
+    status: async () => ({ signedIn: true }),
+  } as unknown as ChatGptAuth;
+  const service = new CatalogModelService(config, auth);
+  const deepseek = await service.resolveModel("deepseek", "deepseek-flash");
+  const chatgpt = await service.resolveModel("chatgpt", "gpt-6.1-sol");
+  assert.deepEqual(deepseek.reasoning?.efforts.map((effort) => effort.id), ["off", "low", "high", "max"]);
+  assert.equal(deepseek.reasoning?.defaultEffort, "max");
+  assert.deepEqual(chatgpt.reasoning?.efforts.map((effort) => effort.id), ["low", "medium", "high", "xhigh", "max"]);
+  assert.equal(chatgpt.reasoning?.defaultEffort, "medium");
+
+  const host = new RecordingHost();
+  const selection = new ModelSelection(service, host);
+  await assert.rejects(() => selection.select("chatgpt/gpt-6.1-sol"), rejectsWith("missing-credential"));
+  assert.equal(checkCalls, 1, "catalog delegates entitlement and expiry validation to ChatGptAuth.check");
+  assert.equal(host.currentModel, "deepseek-flash", "failed ChatGPT auth leaves the active model unchanged");
+});
 
 test("select resolves provider and unique names", async () => {
   const { host, selection } = setup();

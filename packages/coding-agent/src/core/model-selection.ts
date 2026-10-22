@@ -63,6 +63,9 @@ export interface ModelInfo {
   readonly id: string;
   readonly name: string;
   readonly description?: string;
+  /** Advertised context window; absent means unknown and must stay unbounded. */
+  readonly contextWindow?: number;
+  readonly reasoning?: ModelReasoningInfo;
 }
 
 /** Exact model metadata (C# `LlmResolvedModelInfo`). */
@@ -70,6 +73,7 @@ export interface ResolvedModelInfo {
   readonly provider: string;
   readonly id: string;
   readonly name: string;
+  readonly contextWindow?: number;
   readonly reasoning?: ModelReasoningInfo;
 }
 
@@ -270,7 +274,10 @@ export class ModelSelection {
     }
 
     // Keep default-provider labels short while qualified references carry cross-provider routing.
-    this.host_.setCurrentModel(selected.provider === this.defaultProvider_ ? selected.id : selected.qualifiedId);
+    const nextLabel = selected.provider === this.defaultProvider_ ? selected.id : selected.qualifiedId;
+    // Resolve the target before committing the label: a throwing host resolver
+    // must leave the active model selection unchanged.
+    this.host_.setCurrentModel(nextLabel);
     if (providerChanged || incompatibleEffort) this.changeReasoning_(null);
     return selected;
   }

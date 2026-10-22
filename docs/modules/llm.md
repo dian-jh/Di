@@ -54,7 +54,22 @@
 - `Core/Llm/CostAccounting.cs`：`UsageCost`（input / output / cache_read / cache_write + Total）+ `CostCalculator`
   按每百万 token 费率折算；目录无费率时成本为 null。
 
-## 代码入口
+## 当前 TypeScript 代码入口
+
+| 文件（仓库根相对路径） | 职责 |
+|---|---|
+| `packages/ai/src/types/` | provider-neutral messages / model / stream / tool schema types |
+| `packages/ai/src/stream-assembler.ts` / `sse.ts` | stream block assembly and SSE framing |
+| `packages/ai/src/retry/` | `RetryingChatModel` and retry policy |
+| `packages/ai/src/catalog.ts` / `usage.ts` | model context/cost catalog and usage/cost accounting |
+| `packages/ai/src/providers/deepseek/` / `providers/chatgpt/` | provider adapters and wire translation |
+| `packages/coding-agent/src/cli/provider-runtime.ts` | default provider routing and retry wrappers |
+| `packages/coding-agent/src/cli/cli-host-compose.ts` (`CatalogModelService`) | production model window/reasoning metadata and local auth checks |
+| `packages/coding-agent/src/core/model-selection.ts` | advisory catalog selection, routing labels and reasoning effort |
+| `packages/coding-agent/src/cli/cli-host-compose.ts` | production model service/factory seam and request-time provider configuration |
+| `packages/ai/test/` | adapter, stream, retry, catalog and accounting tests |
+
+## C# 基线代码入口（行为参考）
 
 | 文件（相对仓库根） | 职责 |
 |---|---|

@@ -58,7 +58,18 @@ jcode 写法——每行 `[yyyy-MM-dd HH:mm:ss.fff] [LEVEL] message`（本地时
   绝不影响主流程（与 `EventBus` 的异常隔离叠加生效）。
 - **折叠与截断**：多行 / 连续空白折成单行；单字段超 300 字符截断加 `…`（完整文本在会话 JSONL）。
 
-## 代码入口
+## 当前 TypeScript 代码入口
+
+| 文件（仓库根相对路径） | 职责 |
+|---|---|
+| `packages/coding-agent/src/core/logging/di-log.ts` | daily lifecycle log, event subscription and redaction |
+| `packages/coding-agent/src/core/logging/process-diagnostics.ts` | process diagnostic sink |
+| `packages/coding-agent/src/cli/cli-host-compose.ts` | host startup/shutdown wiring and process hook ownership |
+| `packages/coding-agent/test/logging/di-log.test.ts` / `packages/coding-agent/test/proc-diagnostics.test.ts` | log format, subscription and diagnostic tests |
+
+下表是固定 C# 迁移基线位置，供日志格式与行为差异核对。
+
+## C# 基线代码入口（行为参考）
 
 | 文件（相对仓库根） | 职责 |
 |---|---|

@@ -3,10 +3,16 @@ import { join, resolve as resolvePath } from "node:path";
 
 import type { AgentResult, ToolExecutor } from "@di/agent";
 import type { ChatModel, ModelRequest } from "@di/ai";
-import { DeepSeekAdapter, MODEL_CATALOG } from "@di/ai";
+import { MODEL_CATALOG } from "@di/ai";
 import { AgentSession } from "../core/agent-session.ts";
 import { estimateMemoryTokens } from "../core/budget.ts";
+import { InputBudgetTracker } from "../core/budget.ts";
+import { BudgetPolicy, CompactingExecutor, FileArtifactStore } from "../core/context-management.ts";
 import { createBuiltinRegistry } from "../core/commands/builtin-commands.ts";
+import { ChatGptAuth } from "../core/auth/chatgpt-auth.ts";
+import { createAclAdapter } from "../core/auth/acl.ts";
+import { CredentialStore } from "../core/auth/credential-store.ts";
+import { NativeOsLockProvider } from "../core/auth/lock-provider.ts";
 import { loadCommandsInto } from "../core/commands/command-loader.ts";
 import { DEFAULT_CONFIG, DiConfig, defaultReadFile } from "../core/config/di-config.ts";
 import { DiHome } from "../core/config/di-home.ts";
@@ -14,6 +20,8 @@ import { EventBus } from "../core/events/event-bus.ts";
 import { ModelCallProbe } from "../core/events/model-call-probe.ts";
 import { DiLog, LogLevel } from "../core/logging/di-log.ts";
 import { ProcessDiagnostics } from "../core/logging/process-diagnostics.ts";
+import { createDefaultProviderRuntime } from "./provider-runtime.ts";
+import { createSystemProxyFetch } from "./windows-system-proxy.ts";
 import type { ModelInfo, ModelSelectionHost, ModelService, ProviderInfo, ResolvedModelInfo } from "../core/model-selection.ts";
 import { ModelReference, ModelSelection } from "../core/model-selection.ts";
 import { loadRecovery } from "../core/sessions/session-recovery.ts";
@@ -43,12 +51,11 @@ import type { TextWriter } from "./io.ts";
  * P7 wiring decisions:
  * - `--resume` loads the trajectory through {@link loadRecovery} FIRST (a
  *   recovery failure throws and becomes the documented host-failure envelope —
- *   never an empty session), then {@link AgentSession.restoreHistory};
  * - the current-model LABEL is resolved to the session's `ChatModel` at turn
  *   boundaries (`AgentSessionConfig.resolveModel`) and on `setCurrentModel`
- *   (`session.setModel`) — the provider router defaults to the DeepSeek adapter
- *   (API key resolved at request time, exactly like C#; ChatGPT stays fail-closed
- *   behind the P8b platform gate);
+ *   (`session.setModel`) — the provider runtime creates the configured adapter/retry chain
+ *   with native credential locking for ChatGPT.
+ *
  * - the P6.4 emission seams are closed here: `runStarted` is published before
  *   every `session.runTurn`, and every resolved model is wrapped in
  *   {@link ModelCallProbe} so `modelCallStarted` reaches the bus on each call;
@@ -67,7 +74,7 @@ export interface ComposeCliHostOptions {
   readonly diHome?: DiHome;
   /** Pre-loaded effective config (default: layered DiConfig.load from the standard sources). */
   readonly config?: DiConfig;
-  /** Label → ChatModel resolver (default: provider router over DeepSeek / fail-closed ChatGPT). */
+  /** Label → ChatModel resolver (default: provider runtime over the configured catalog). */
   readonly modelFactory?: (label: string) => ChatModel;
   /** Advisory model catalog service (default: MODEL_CATALOG-backed, auth checks are env/local only). */
   readonly modelService?: ModelService;
@@ -79,6 +86,8 @@ export interface ComposeCliHostOptions {
   readonly estimateRequestTokens?: (request: ModelRequest) => number;
   /** DiLog clock (tests inject a fake clock for deterministic line timestamps). */
   readonly clock?: () => Date;
+  readonly artifactClock?: () => Date;
+  readonly artifactPid?: () => number;
 }
 
 /** Global cross-tool operation rules contributed to the system prompt (C# `CoreTools.GlobalPromptGuidelines`). */
@@ -132,7 +141,6 @@ export async function createCliHost(
   // never fake an empty session (P6.3c).
   const resumeHistory =
     args.resume !== undefined ? loadRecovery(resolvePath(args.resume)) : undefined;
-
   const diHome = options.diHome ?? DiHome.fromEnvironment(process.env, homedir());
   const config =
     options.config ??
@@ -152,6 +160,13 @@ export async function createCliHost(
   const configuredDefaultModel = asString(config.get("model:defaultmodel"), "deepseek-flash");
   const effectiveProvider = !isBlank(args.provider) ? args.provider! : configuredProvider;
   const defaultModel = args.model ?? configuredDefaultModel;
+  const chatGptStore = new CredentialStore({
+    lock: new NativeOsLockProvider(),
+    acl: createAclAdapter(),
+    directory: join(diHome.rootDirectory, "auth", "chatgpt"),
+  });
+  const chatGptAuth = new ChatGptAuth(chatGptStore, { http: createSystemProxyFetch() });
+  const providerRuntime = createDefaultProviderRuntime({ config, chatGptAuth });
 
   // Tools: independent persistent cmd/POSIX and PowerShell sessions belong to
   // this host. ShellSession spawns lazily on first tool use and is disposed with
@@ -203,7 +218,7 @@ export async function createCliHost(
   // (resolveModel) makes its counter equal the loop's iteration counter.
   const wrapWithProbe = (inner: ChatModel): ChatModel => new ModelCallProbe(inner, bus);
   const resolveLabel = (modelLabel: string): ChatModel => {
-    const factory = options.modelFactory ?? ((l: string) => defaultModelForLabel(l, effectiveProvider, config));
+    const factory = options.modelFactory ?? ((l: string) => providerRuntime.createModel(l, effectiveProvider));
     return wrapWithProbe(factory(modelLabel));
   };
 
@@ -216,11 +231,40 @@ export async function createCliHost(
   // load_skill tool to the model and intercept its calls; otherwise the plain
   // executor over the core tool set.
   const baseExecutor = createToolExecutor(tools);
-  const toolExecutor: ToolExecutor =
+  const baseToolExecutor: ToolExecutor =
     skills.length > 0 ? createSkillAwareExecutor(baseExecutor, skills) : baseExecutor;
+  const tracker = new InputBudgetTracker();
+  const modelService = options.modelService ?? new CatalogModelService(config, chatGptAuth);
+  const contextEnabled = asBoolean(config.get("contextmanagement:enabled"), true);
+  const contextPolicyOptions = {
+    marginRatio: configuredOptionalNumber(config, "contextmanagement:marginratio"),
+    outputReserveTokens: configuredOptionalNumber(config, "contextmanagement:outputreservetokens"),
+    nextOutputReserveTokens: configuredOptionalNumber(config, "contextmanagement:nextoutputreservetokens"),
+    softRatio: configuredOptionalNumber(config, "contextmanagement:softratio"),
+    hardRatio: configuredOptionalNumber(config, "contextmanagement:hardratio"),
+    blockingRatio: configuredOptionalNumber(config, "contextmanagement:blockingratio"),
+  };
+  const contextWindowFor = (modelLabel: string): number | undefined => {
+    try {
+      const ref = ModelReference.parse(modelLabel, effectiveProvider, modelService.listProviders().map((p) => p.id));
+      return modelService.listModels(ref.provider).find((m) => m.id.toLowerCase() === ref.id.toLowerCase())?.contextWindow;
+    } catch { return undefined; }
+  };
+  let activePolicy: BudgetPolicy | undefined;
+  const makePolicy = (window: number | undefined): BudgetPolicy | undefined =>
+    contextEnabled && window !== undefined && window > 0 ? new BudgetPolicy(window, contextPolicyOptions) : undefined;
+  const policyFor = (modelLabel: string): BudgetPolicy | undefined => {
+    return makePolicy(contextWindowFor(modelLabel));
+  };
+  activePolicy = policyFor(label.currentModel);
+  const toolExecutor: ToolExecutor = contextEnabled
+    ? new CompactingExecutor(baseToolExecutor, new FileArtifactStore(diHome.rootDirectory, options.artifactClock, options.artifactPid), () => activePolicy, () => tracker.currentTokens)
+    : baseToolExecutor;
   const modelTools = skills.length > 0 ? [...toolSpecs, LOAD_SKILL_TOOL] : toolSpecs;
 
   let reasoningEffort = args.thinking ?? asOptionalString(config.get("agentloop:reasoningeffort"));
+  const maxIterations = configuredNonNegativeInteger(config, "agentloop:maxiterations", 0);
+  const maxTokens = configuredOptionalNonNegativeInteger(config, "agentloop:maxtokens");
   let busy = false;
 
   const session = new AgentSession(
@@ -228,9 +272,27 @@ export async function createCliHost(
       systemPrompt,
       tools: modelTools,
       workingDirectory: workspace,
+      budgetTracker: tracker,
+      tokenBudgetProvider: () => {
+        if (activePolicy !== undefined) return activePolicy.softThreshold;
+        const window = contextWindowFor(label.currentModel);
+        if (window === undefined || window <= 0) return undefined;
+        const ratio = configuredOptionalNumber(config, "agentloop:historybudgetratio") ?? 0.5;
+        return Math.max(1, Math.floor(window * ratio));
+      },
       ...(sessionStore !== undefined ? { sessionStore } : {}),
       events: (event) => bus.publish(event),
-      resolveModel: () => resolveLabel(label.currentModel),
+      resolveModel: async () => {
+        const model = resolveLabel(label.currentModel);
+        try {
+          const ref = ModelReference.parse(label.currentModel, effectiveProvider, modelService.listProviders().map((p) => p.id));
+          const metadata = await modelService.resolveModel(ref.provider, ref.id);
+          activePolicy = makePolicy(metadata.contextWindow ?? contextWindowFor(label.currentModel));
+        } catch {
+          activePolicy = makePolicy(contextWindowFor(label.currentModel));
+        }
+        return model;
+      },
     },
     {
       model: resolveLabel(label.currentModel),
@@ -241,10 +303,17 @@ export async function createCliHost(
   if (resumeHistory !== undefined) session.restoreHistory(resumeHistory);
 
   label.setCurrentModel = (modelLabel: string): void => {
-    session.setModel(resolveLabel(modelLabel));
+    const nextPolicy = policyFor(modelLabel);
+    const nextModel = resolveLabel(modelLabel);
+    session.setModel(nextModel);
+    activePolicy = nextPolicy;
   };
 
-  const sessionRunner = createSessionRunner(session, label);
+  const sessionRunner = createSessionRunner(session, label, () => ({
+    maxIterations,
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+  }));
 
   // The host's runner IS the ModelSelectionHost seam: it publishes runStarted
   // before every turn and tracks the busy flag that rejects mid-turn model
@@ -279,7 +348,7 @@ export async function createCliHost(
   };
 
   const models = new ModelSelection(
-    options.modelService ?? new CatalogModelService(),
+    modelService,
     runner,
     {
       defaultProvider: effectiveProvider,
@@ -332,10 +401,11 @@ export const defaultCliHostFactory: CliHostFactory = createCliHost;
  * Advisory model catalog (C# `ILlmService` subset): deepseek / chatgpt routes
  * from the shared `MODEL_CATALOG` (models-and-auth.md). Refresh is in-memory (the
  * catalog is advisory, never a network call); auth checks are local env/config
- * probes only — deepseek requires the API key present, ChatGPT stays fail-closed
- * behind the P8b platform gate.
+ * probes only — DeepSeek requires the API key present; ChatGPT uses the host auth store.
+
  */
-class CatalogModelService implements ModelService {
+export class CatalogModelService implements ModelService {
+  constructor(private readonly config?: DiConfig, private readonly chatGptAuth?: ChatGptAuth) {}
   listProviders(): readonly ProviderInfo[] {
     return Object.keys(MODEL_CATALOG).map((id) => ({ id, name: providerName(id) }));
   }
@@ -345,7 +415,7 @@ class CatalogModelService implements ModelService {
     for (const [providerId, specs] of Object.entries(MODEL_CATALOG)) {
       if (provider !== undefined && provider !== providerId) continue;
       for (const spec of specs) {
-        all.push({ provider: providerId, id: spec.id, name: spec.name });
+        all.push({ provider: providerId, id: spec.id, name: spec.name, ...(spec.contextWindow !== undefined ? { contextWindow: spec.contextWindow } : {}) });
       }
     }
     return all;
@@ -356,32 +426,28 @@ class CatalogModelService implements ModelService {
   }
 
   async checkAuth(provider: string): Promise<boolean> {
-    if (provider === "deepseek") return !isBlank(process.env.DEEPSEEK_API_KEY);
-    return false; // ChatGPT auth / credential storage: blocked by the P8b platform gate.
+    if (provider === "deepseek") return !isBlank(asString(this.config?.get("deepseek:apikey"), "") || process.env.DEEPSEEK_API_KEY);
+    if (provider === "chatgpt" && this.chatGptAuth !== undefined) {
+      try { return await this.chatGptAuth.check(); } catch { return false; }
+    }
+    return false;
   }
 
   async resolveModel(provider: string, id: string): Promise<ResolvedModelInfo> {
     const spec = MODEL_CATALOG[provider]?.find((m) => m.id === id);
-    return { provider, id, name: spec?.name ?? id };
+    const defaultEffort = provider === "deepseek"
+      ? asOptionalString(this.config?.get("deepseek:defaultreasoningeffort"))
+      : spec?.reasoning?.defaultEffort;
+    return {
+      provider,
+      id,
+      name: spec?.name ?? id,
+      ...(spec?.contextWindow !== undefined ? { contextWindow: spec.contextWindow } : {}),
+      ...(spec?.reasoning !== undefined
+        ? { reasoning: { efforts: spec.reasoning.efforts, ...(defaultEffort !== undefined ? { defaultEffort } : {}) } }
+        : {}),
+    };
   }
-}
-
-/**
- * Production label → ChatModel resolver (C# `modelFactory` / `LlmRuntime`):
- * DeepSeek reads the API key from config then env AT REQUEST TIME (the adapter
- * throws MISSING_CREDENTIAL when it is blank — the CLI starts fine without a
- * key, exactly like C#); ChatGPT remains fail-closed until P8b.
- */
-function defaultModelForLabel(modelLabel: string, effectiveProvider: string, config: DiConfig): ChatModel {
-  const ref = ModelReference.parse(modelLabel, effectiveProvider, Object.keys(MODEL_CATALOG));
-  if (ref.provider === "deepseek") {
-    const apiKey = asString(config.get("deepseek:apikey"), "") || process.env.DEEPSEEK_API_KEY || "";
-    return new DeepSeekAdapter({ model: ref.id, apiKey });
-  }
-  if (ref.provider === "chatgpt") {
-    throw new Error("ChatGPT 尚未在 TypeScript 后端可用：P8b 宿主凭据存储被 Windows-ACL/lock 平台门槛阻塞。");
-  }
-  throw new Error(`未知 provider: ${ref.provider}`);
 }
 
 function providerName(id: string): string {
@@ -401,4 +467,41 @@ function asOptionalString(value: unknown): string | undefined {
 function isBlank(value: string | undefined | null): value is undefined | null {
   if (value === undefined || value === null) return true;
   return value.trim().length === 0;
+}
+
+function asOptionalNumber(value: unknown): number | undefined {
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN;
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function asOptionalNonNegativeInteger(value: unknown): number | undefined {
+  const number = asOptionalNumber(value);
+  return number !== undefined && Number.isInteger(number) && number >= 0 ? number : undefined;
+}
+
+function configuredNonNegativeInteger(config: DiConfig, key: string, fallback: number): number {
+  if (!config.has(key)) return fallback;
+  const number = asOptionalNonNegativeInteger(config.get(key));
+  if (number === undefined) throw new RangeError(`${key} must be a non-negative integer`);
+  return number;
+}
+
+function configuredOptionalNonNegativeInteger(config: DiConfig, key: string): number | undefined {
+  return config.has(key) ? configuredNonNegativeInteger(config, key, 0) : undefined;
+}
+
+function configuredOptionalNumber(config: DiConfig, key: string): number | undefined {
+  if (!config.has(key)) return undefined;
+  const number = asOptionalNumber(config.get(key));
+  if (number === undefined) throw new RangeError(`${key} must be a finite number`);
+  return number;
+}
+
+function asBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (value.toLowerCase() === "true") return true;
+    if (value.toLowerCase() === "false") return false;
+  }
+  return fallback;
 }

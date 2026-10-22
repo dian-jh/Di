@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Di pure ReAct loop vocabulary (TypeScript Core migration; compilable stub until P2)",
+  "description": "Di provider-neutral ReAct agent loop and tool execution",
   "engines": {
     "node": ">=22.19"
   },

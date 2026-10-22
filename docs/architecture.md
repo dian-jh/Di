@@ -8,29 +8,34 @@
 
 ## 1. 一句话定位
 
-Di 是一个 **C# / .NET 10 的本地编程 agent harness**：终端 REPL 接收用户输入，
-驱动 **ReAct 循环** 调用大模型（当前为 DeepSeek），模型通过 **八个内置编码工具**
+Di 是一个本地编程 agent harness，当前同时保留 **C#/.NET 10 迁移基线**和正在验收的
+**TypeScript Core/CLI**：终端接收用户输入，驱动 **ReAct 循环** 调用大模型，模型通过 **八个内置编码工具**
 （读 / 写 / 编辑文件、glob、grep、shell [Windows 为 cmd、其他平台为 bash]、powershell、python）
 在工作区内完成任务，整个过程经 **事件总线** 流式渲染，回合落盘为 **JSONL 会话日志**，
-并支持 **skills**（按需加载的指令工作流，渐进式披露）。
+并支持 **skills**（按需加载的指令工作流，渐进式披露）。TypeScript 源码位于 `packages/`；默认安装入口、跨平台及长时间验收仍以 `docs/migration/typescript-core/progress.md` 为准。
 
 ```
 用户输入
-   │  Repl
+   │  CLI / TUI / headless
    ▼
-AgentRunner ──► ReAct 循环 ◄── IChatModel（ChatModelClient → RetryingChatModel → LlmRuntime）
+AgentSession ──► @di/agent ReAct 循环 ◄── @di/ai ChatModel（provider adapter → retry）
    │              │  ▲                │
-   │              │  └── 工具调用 ── CoreTools.Executor（8 个内置工具）
+   │              │  └── 工具调用 ── ToolExecutor（8 个内置工具）
    │              ▼
    │        AgentLoopEvent（事件总线）
    ▼
-EventRenderer（流式渲染） / SessionLog（JSONL 落盘） / DiLog（jcode 文本日志，旁路订阅）
+EventRenderer / di-tui（流式渲染） / SessionStore（JSONL） / DiLog（jcode 文本日志）
 ```
 
 ## 2. 项目结构与分层
 
 ```
 E:\Agent\Di\
+├── packages/          # TypeScript Core 迁移
+│   ├── ai/             # provider-neutral model protocol + provider adapters
+│   ├── agent/          # Node-independent ReAct loop
+│   └── coding-agent/   # AgentSession, tools, skills, sessions and CLI composition root
+├── tui/               # TypeScript terminal UI (local runner + RPC adapters)
 ├── Common/            # 与具体业务无关的基础设施
 │   └── Events/        # 进程内事件总线（push 订阅 + pull 消费，多态派发）
 ├── Core/              # harness 核心（无 UI，可被任意宿主复用）
@@ -43,16 +48,12 @@ E:\Agent\Di\
 │   ├── Sessions/      # 会话 JSONL 落盘（SessionLog）
 │   ├── Logging/       # 运行日志（DiLog，jcode 格式，~/.di/logs 按日一个文件，事件总线旁路订阅）
 │   └── Configuration/ # 家目录（~/.di）单一来源
-├── Di.Cli/            # 终端宿主：组合根、REPL、AgentRunner、事件渲染、--mode rpc 后端
-├── tui/               # TS 终端前端（Node）：spawn `di --mode rpc`，只依赖 RPC 协议（见 docs/tui.md）
+├── Di.Cli/            # C# 迁移参考宿主
 ├── Di.Tests/          # Core 层单元/集成测试
 └── Di.Cli.Tests/      # CLI 宿主测试
 ```
 
-依赖方向：`Di.Cli → Core → Common`，适配器只依赖 Core 抽象，宿主不认识任何具体厂商。
-`tui/` 是**进程级**前端（TypeScript），不参与 .NET 项目引用图——它作为子进程驱动
-`di --mode rpc`，依赖面是 `docs/tui-rpc.md` 的线协议契约（见 `docs/tui.md`），与既有 C# REPL
-界面并存。
+C# 迁移基线依赖方向为 `Di.Cli → Core → Common`。TypeScript 包的运行时依赖见 §3；TUI 可以使用同进程 Runner，也保留 `--mode rpc` 子进程通道，线协议唯一权威仍为 `docs/tui-rpc.md`。默认安装入口的状态见迁移进度表。
 
 ## 3. 依赖方向（唯一权威）
 
@@ -60,50 +61,41 @@ E:\Agent\Di\
 `docs/modules/README.md`（唯一权威表），本处不再复制该表。
 
 ```
-Di.Cli ──► Core ──► Common
+@di/coding-agent ──► @di/agent ──► @di/ai
+       ├────────────────────────► @di/ai
+       └────────────────────────► di-tui
 ```
 
 细化（命名空间 → 依赖的模块）：
 
 ```
-Di.Cli（docs/cli.md）
-  ├─ Core.AgentLoop（docs/modules/agent-loop.md）    ← 会话契约 IAgentRunner
-  │     ├─ Core.Llm（docs/modules/llm.md）           ← IChatModel / 重试 / 成本
-  │     │     └─ Core.Providers.DeepSeek（docs/modules/deepseek.md） ← 唯一已实现厂商
-  │     ├─ Core.Tools（docs/modules/tools.md）       ← IToolExecutor
-  │     ├─ Core.Skills（docs/modules/skills.md）     ← ActiveSkills / load_skill
-  │     ├─ Core.ContextManagement（docs/modules/context-management.md） ← L1 工具结果预算控制
-  │     │       （组合根把执行器包一层 CompactingExecutor；BudgetPolicy / ArtifactStore /
-  │     │         InputBudgetTracker，AgentRunner 预算化改造已接入）
-  │     └─ Common.Events（docs/modules/events.md）   ← AgentLoopEvent 事件流
-  └─ Core.Sessions（docs/modules/sessions.md）       ← SessionLog 落盘
-       · 中断信号 IInterruptSignal 的实现（docs/interrupt.md）← 依赖倒置：Core.AgentLoop 只读信号，
-         Di.Cli 提供实现（递进式软停止 / 硬取消 / 退出）
+@di/coding-agent（docs/cli.md）
+  ├─ @di/agent（docs/modules/agent-loop.md）         ← 单回合循环
+  ├─ @di/ai（docs/modules/llm.md）                   ← 模型协议、适配器、重试与计量
+  ├─ coding-agent tools / skills / context
+  └─ coding-agent sessions / events / logging
+       · 中断信号（docs/interrupt.md）← 循环只读停止意图，CLI 负责软停、硬取消与退出
 ```
 
-- 适配器只依赖 Core 抽象，宿主不认识任何具体厂商。
+- `@di/agent` 不依赖 Node 宿主；provider 线格式细节留在 `@di/ai` 适配器。
 - 中断同理：`Core.AgentLoop` 依赖 `IInterruptSignal` 抽象，具体实现（`InterruptCoordinator`）在前端。
-- 上下文压缩（阶段一已落地）：`Di.Cli → Core.ContextManagement → Core.Llm（TokenEstimator）/ Core.Tools
-  （CoreTools / OutputBuffer）`，持久化经 `Core.Configuration.DiHome` 解析 `~/.di` 根目录；
-  `Core.AgentLoop → Core.ContextManagement`：AgentRunner 注入 BudgetPolicy（soft 水位线预算制替代
-  纯"每轮丢最旧"）+ InputBudgetTracker（B_current 上报 L1 预测判定），见
-  `docs/modules/context-management.md`。
+- TypeScript 的上下文预算由 `AgentSession` 与 `cli-host-compose.ts` 按当前模型窗口和配置接线；未知窗口不猜上限，L1 artifacts 写入 DI_HOME。
 - 各模块的源码 / 测试目录见 `docs/modules/README.md`；一次回合的**运行时数据流时序**见下节 §4。
 
-## 4. 一次回合的数据流（时序）
+## 4. 一次回合的数据流（TypeScript 实现时序）
 
 ```
-Repl.RunTurnAsync
+CLI / TUI runTurn
   ├─ 创建 AgentLoopEvent 消费者，启动并发渲染任务
-  ├─ 词法匹配 skills → AgentRunner.ActiveSkills = 固定 + 自动匹配
-  ├─ AgentRunner.RunAsync(用户消息)
+  ├─ skill activation → AgentSession.setActiveSkills
+  ├─ AgentSession.runTurn(用户消息)
   │   ├─ 捕获环境快照（最小化：仅工作目录 + 自取提示，git 状态不注入）；有变化才追加为历史 system 消息
   │   ├─ 构建 SystemContext（skill 广告 + 激活 skill 指令）
-  │   └─ ReAct.RunStreamingAsync(AgentRequest)
+  │   └─ runAgentLoop(AgentRequest)
   │       └─ 循环：
   │           ├─ BuildContext = [systemPrompt] + [历史+用户消息] + [SystemContext]
-  │           ├─ IChatModel.StreamAsync
-  │           │   └─ RetryingChatModel → ChatModelClient → LlmRuntime → DeepSeekAdapter
+  │           ├─ ChatModel.stream
+  │           │   └─ RetryingChatModel → provider adapter（生产路由按迁移状态表验收）
   │           │       └─ SSE chunk → StreamChunk → ChatAssembler
   │           ├─ 每个流事件 → AgentLoopEvent（总线）→ 渲染任务实时输出；DiLog 旁路订阅写 ~/.di/logs
   │           │       （用户输入 run: started → llm: call_started → call_completed，见 docs/modules/logging.md）
@@ -111,8 +103,10 @@ Repl.RunTurnAsync
   │           ├─ 有工具调用 → IToolExecutor 执行 → 观察回填轨迹 → 下一轮
   │           └─ 无工具调用 → 返回 AgentResult（Answer/轨迹/用量/停止原因）
   ├─ 渲染最终结果（含用量脚注）
-  └─ SessionLog.AppendTurn(结果, 开始时间) → JSONL 落盘
+  └─ SessionStore checkpoint/audit → JSONL 落盘
 ```
+
+C# 对应实现 `Core/AgentLoop/AgentRunner.cs` / `Di.Cli/CliHost.cs` 保留为固定迁移参考；模块入口映射见 `docs/modules/README.md`。
 
 ## 5. 关键设计决策
 

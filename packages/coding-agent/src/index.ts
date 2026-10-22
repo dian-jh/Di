@@ -1,13 +1,9 @@
 /**
  * @di/coding-agent — Node host composition root.
  *
- * P1 status: compilable workspace stub. AgentSession, CoreRunner, builtin tools,
- * skills, session/config/auth storage, modes and the CLI bin are implemented in
- * later phases per execution-plan.md and architecture.md.
+ * Public TypeScript host package: AgentSession, tools, skills, session/config/auth
+ * storage, CLI modes, and the `di-ts` entry point form the parallel migration CLI.
  */
-
-/** Placeholder export so the package resolves in workspace dependency order. */
-export const packageStatus = "stub" as const;
 
 export { DiHome } from "./core/config/di-home.ts";
 export type { DiHomeEnvironment } from "./core/config/di-home.ts";
@@ -95,6 +91,8 @@ export { loadRecovery, RECOVERY_NOT_EXECUTED_NOTE } from "./core/sessions/sessio
 export { aggregateSessionStats } from "./core/sessions/session-stats.ts";
 export type { SessionStatsSummary } from "./core/sessions/session-stats.ts";
 export { InputBudgetTracker, estimateMemoryTokens, estimateTokenCount } from "./core/budget.ts";
+export { BudgetPolicy, CompactingExecutor, FileArtifactStore } from "./core/context-management.ts";
+export type { ArtifactStore, BudgetPolicyOptions } from "./core/context-management.ts";
 export {
   dropOldestTurns,
   sanitizeHistory,
@@ -150,6 +148,8 @@ export { defaultCliHostFactory } from "./cli/cli-host.ts";
 export { createCliHost } from "./cli/cli-host-compose.ts";
 export type { ComposeCliHostOptions } from "./cli/cli-host-compose.ts";
 export { CliApp } from "./cli/cli-app.ts";
+export { createDefaultProviderRuntime } from "./cli/provider-runtime.ts";
+export type { DefaultProviderRuntimeOptions } from "./cli/provider-runtime.ts";
 export { AUTH_CHATGPT_NOT_AVAILABLE, AUTH_USAGE, defaultChatGptStore, runAuthCommand } from "./cli/auth-command.ts";
 
 // P8b host ChatGPT auth: OAuth PKCE, the credential store with its fail-closed
@@ -164,7 +164,7 @@ export { ChatGptCredential, CredentialDataError, CredentialStore, needsRefresh }
 export type { ChatGptCredentialInit, ChatGptCredentials, CredentialStoreOptions } from "./core/auth/credential-store.ts";
 export { AclError, createAclAdapter } from "./core/auth/acl.ts";
 export type { AclAdapter, AclAdapterOptions } from "./core/auth/acl.ts";
-export { FAIL_CLOSED_LOCK_PROVIDER, LockUnavailableError } from "./core/auth/lock-provider.ts";
+export { FAIL_CLOSED_LOCK_PROVIDER, LockUnavailableError, NativeOsLockProvider } from "./core/auth/lock-provider.ts";
 export type { LockAcquireOptions, LockHandle, LockProvider } from "./core/auth/lock-provider.ts";
 export {
   CHATGPT_AGENT_NAME_HINT,
@@ -234,6 +234,7 @@ export type { CommandContext, CommandHost, CommandOutput } from "./core/commands
 export { StringCommandOutput } from "./core/commands/command-context.ts";
 export { createBuiltinCommands, createBuiltinRegistry } from "./core/commands/builtin-commands.ts";
 export { ModelReference, ModelSelection, ModelSelectionError } from "./core/model-selection.ts";
+export { CatalogModelService } from "./cli/cli-host-compose.ts";
 export type {
   ModelInfo,
   ModelReasoningInfo,

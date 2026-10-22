@@ -1,7 +1,7 @@
 # CLI 层契约：harness 与会话驱动的边界
 
 > 设计文档。回答"CLI 层为什么这么分层、哪部分可以换语言重写、重写时保留什么"。
-> 核心主张：**会话驱动 API 在 harness 层（`Core.AgentLoop`），CLI 只是"参数 + 模式 + 渲染"的薄壳**。
+> 核心主张：**会话驱动 API 在 harness 层，CLI 负责参数、模式、组合与渲染**。本文 C# 类型和路径是迁移基线参考，TS 当前源码入口在 §7 前列出。
 > 参考实现：Pi 的 `main.ts → resolveAppMode → 模式执行器` 结构
 > （外部参考：兄弟仓库 `https://github.com/earendil-works/pi/tree/main/packages/coding-agent`）。
 >
@@ -14,15 +14,13 @@
 
 | 层 | 位置 | 职责 | 换语言时 |
 |---|---|---|---|
-| **harness 契约**（稳定，复用） | `Core.AgentLoop`、`Core.Llm`、`Core.Tools`、`Common.Events` | 驱动一个回合、事件流、结果、工具、模型 | **保留**（用新语言绑定/调用） |
-| **CLI 薄壳**（可重写） | `Di.Cli` | 参数解析、模式选择、组合根、渲染、进程退出码 | **整体重写**，按本文档契约对齐 |
+| **harness 契约**（稳定，复用） | `packages/agent/`、`packages/ai/`、`packages/coding-agent/` | 驱动一个回合、事件流、结果、工具、模型 | TS 实现；C# 基线供差异核对 |
+| **CLI 宿主** | `packages/coding-agent/src/cli/` | 参数解析、模式选择、组合根、渲染、进程退出码 | TS 实现；默认安装入口仍受发布门槛约束 |
 
 任何语言的 CLI 都只做三件事：**解析参数 → 决定模式 → 用同一个会话 API 跑并渲染**。
 参数与模式的解析是纯函数（无 I/O），因此规则可以（也应该）在另一种语言里原样复刻。
 
-当前实现中，`Di.Cli/Repl.cs`、`Di.Cli/modes/PrintMode.cs` 与 `Di.Cli/modes/RpcMode.cs`
-仍各自管理回合的 skill 激活、事件消费与排空、取消及会话落盘；“薄壳”描述的是分层目标，
-这些宿主生命周期尚未抽成共享服务。
+当前 TS 宿主使用 `AgentSession`、共享命令注册表、`EventBus` 和 `SessionStore`；交互、headless 与 RPC 模式代码位于 `packages/coding-agent/src/modes/`。C# 旧宿主仍保留作迁移参考。
 
 ---
 
@@ -212,7 +210,20 @@ stdout 只输出**一个** JSON 文档（snake_case，可空键省略）：
 | TUI 启动与回退 | `Di.Cli.Tests/TuiLauncherTests.cs` | `DI_UI=repl` / 入口缺失 / 目录入口 / node 缺失不 spawn / spawn 退出码传播 / 异常与非零退出回退 |
 | 会话驱动（harness） | `Di.Tests/AgentLoop/AgentRunnerTests.cs` | 模型路由、历史裁剪、快照、skills |
 
-## 7. 实现现状（Di.Cli 落点）
+## 7. 当前 TypeScript 实现入口
+
+| 能力 | 代码（仓库根相对路径） | 说明 |
+|---|---|---|
+| 参数/模式/分派 | `packages/coding-agent/src/cli/args.ts`, `mode.ts`, `cli-app.ts` | 纯解析与应用分派 |
+| 组合根与模型选择 | `packages/coding-agent/src/cli/cli-host-compose.ts`, `cli-host.ts`, `core/model-selection.ts` | `createCliHost` 装配会话、工具、配置与 provider runtime |
+| 会话与回合配置 | `packages/coding-agent/src/core/agent-session.ts`, `modes/turn-runner.ts` | 动态 token budget、history、maxIterations/maxTokens/reasoning effort |
+| REPL / headless / RPC | `packages/coding-agent/src/modes/repl.ts`, `print-mode.ts`, `json-mode.ts`, `rpc-mode.ts` | 交互与无头模式；RPC 线协议见 `docs/tui-rpc.md` |
+| 命令、会话、日志 | `packages/coding-agent/src/core/commands/`, `packages/coding-agent/src/core/sessions/`, `packages/coding-agent/src/core/logging/` | 共享 slash commands、checkpoint JSONL 与运行日志 |
+| CLI 测试 | `packages/coding-agent/test/cli/`, `packages/coding-agent/test/modes/` | 组合根与模式行为覆盖 |
+
+这些路径描述 TS 当前实现；未通过的发行/平台 gate 不由文件存在性代替。下表是 C# 基线落点，供行为参考。
+
+## C# 基线实现现状（Di.Cli 参考落点）
 
 > 各能力的"能力 → 落点 → 测试"完整对应见模块文档 `docs/modules/agent-loop.md`（循环侧）与
 > `docs/modules/events.md`（事件侧）。下表是 Di.Cli 自身的实现落点（相对仓库根）。

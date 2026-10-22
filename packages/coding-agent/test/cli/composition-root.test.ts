@@ -14,6 +14,7 @@ import {
   SessionStore,
   StringTextWriter,
   createCliHost,
+  DiConfig,
   createFileTools,
   nullTextReader,
   type CliArgs,
@@ -92,14 +93,16 @@ class ScriptedModel implements ChatModel {
 
 /** Advisory catalog ModelService: refresh is in-memory, auth always "ok" (no network). */
 class CatalogService implements ModelService {
+  private readonly contextWindow: number | undefined;
+  constructor(contextWindow?: number) { this.contextWindow = contextWindow; }
   listProviders(): readonly ProviderInfo[] {
     return [{ id: "deepseek", name: "DeepSeek" }];
   }
 
   listModels(): readonly ModelInfo[] {
     return [
-      { provider: "deepseek", id: "deepseek-flash", name: "DeepSeek Flash" },
-      { provider: "deepseek", id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+      { provider: "deepseek", id: "deepseek-flash", name: "DeepSeek Flash", ...(this.contextWindow !== undefined ? { contextWindow: this.contextWindow } : {}) },
+      { provider: "deepseek", id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", ...(this.contextWindow !== undefined ? { contextWindow: this.contextWindow } : {}) },
     ];
   }
 
@@ -112,7 +115,7 @@ class CatalogService implements ModelService {
   }
 
   async resolveModel(provider: string, id: string): Promise<ResolvedModelInfo> {
-    return { provider, id, name: id };
+    return { provider, id, name: id, ...(this.contextWindow !== undefined ? { contextWindow: this.contextWindow } : {}) };
   }
 }
 
@@ -123,6 +126,9 @@ interface BuildHostOptions {
   modelFactory?: (label: string) => ChatModel;
   args?: Partial<CliArgs>;
   skills?: readonly Skill[];
+  config?: DiConfig;
+  contextWindow?: number;
+  modelService?: ModelService;
 }
 
 async function buildHost(opts: BuildHostOptions): Promise<CliHost> {
@@ -134,8 +140,9 @@ async function buildHost(opts: BuildHostOptions): Promise<CliHost> {
     true,
     {
       diHome: DiHome.fromDirectory(opts.diHome),
+      ...(opts.config !== undefined ? { config: opts.config } : {}),
       modelFactory: opts.modelFactory ?? (() => model),
-      modelService: new CatalogService(),
+      modelService: opts.modelService ?? new CatalogService(opts.contextWindow),
       tools: createFileTools(opts.workspace),
       skills: opts.skills ?? [],
     },
@@ -320,6 +327,106 @@ test("composition root: setCurrentModel resolves the label to the session's Chat
     host.runner.setCurrentModel("deepseek-v4-pro");
     await host.runner.runTurn("hi");
     assert.ok(labels.includes("deepseek-v4-pro"), "the new model label is resolved to a ChatModel");
+  } finally {
+    rmSync(diHome, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("composition root: known context window pauses before an over-budget model request and preserves the trajectory", async () => {
+  const diHome = mkdtempSync(join(tmpdir(), "di-compose-budget-"));
+  const workspace = mkdtempSync(join(tmpdir(), "di-ws-budget-"));
+  try {
+    const model = new ScriptedModel([{ text: "must not be requested" }]);
+    const config = DiConfig.merge({}, undefined, {
+      ContextManagement: { Enabled: true, MarginRatio: 0, OutputReserveTokens: 0 },
+    }, {});
+    const host = await buildHost({ diHome, workspace, model, contextWindow: 20, config });
+    const result = await host.runner.runTurn("a request larger than the tiny test window");
+    assert.equal(result.stopReason, "context_limit");
+    assert.equal(model.callCount, 0, "guard runs before any model call");
+    assert.equal(result.trajectory.at(-1)?.role, "user", "the paused request remains available for resume/review");
+  } finally {
+    rmSync(diHome, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("composition root: disabling context management keeps the known-window history-ratio guard", async () => {
+  const diHome = mkdtempSync(join(tmpdir(), "di-compose-disabled-budget-"));
+  const workspace = mkdtempSync(join(tmpdir(), "di-ws-disabled-budget-"));
+  try {
+    const model = new ScriptedModel([{ text: "must not be requested" }]);
+    const config = DiConfig.merge({}, undefined, {
+      ContextManagement: { Enabled: false },
+      AgentLoop: { HistoryBudgetRatio: 0.1 },
+    }, {});
+    const host = await buildHost({ diHome, workspace, model, contextWindow: 20, config });
+    const result = await host.runner.runTurn("a request larger than the tiny test window");
+    assert.equal(result.stopReason, "context_limit");
+    assert.equal(model.callCount, 0);
+  } finally {
+    rmSync(diHome, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("composition root: invalid negative iteration config is rejected instead of silently becoming unlimited", async () => {
+  const diHome = mkdtempSync(join(tmpdir(), "di-compose-invalid-budget-"));
+  const workspace = mkdtempSync(join(tmpdir(), "di-ws-invalid-budget-"));
+  try {
+    const config = DiConfig.merge({}, undefined, { AgentLoop: { MaxIterations: -1 } }, {});
+    await assert.rejects(buildHost({ diHome, workspace, config }), /agentloop:maxiterations must be a non-negative integer/);
+  } finally {
+    rmSync(diHome, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("composition root: unknown windows stay unbounded and turn configuration reaches the model request", async () => {
+  const diHome = mkdtempSync(join(tmpdir(), "di-compose-options-"));
+  const workspace = mkdtempSync(join(tmpdir(), "di-ws-options-"));
+  try {
+    const model = new ScriptedModel([{ text: "answer" }]);
+    const config = DiConfig.merge({}, undefined, {
+      AgentLoop: { MaxIterations: 1, MaxTokens: 77, ReasoningEffort: "high" },
+    }, {});
+    const host = await buildHost({ diHome, workspace, model, config });
+    const result = await host.runner.runTurn("hello");
+    assert.equal(result.answer, "answer");
+    assert.equal(model.callCount, 1, "unknown context windows do not fabricate a token cap");
+    assert.equal(model.requests[0]?.maxTokens, 77);
+    assert.equal(model.requests[0]?.reasoningEffort, "high");
+  } finally {
+    rmSync(diHome, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("composition root: model switch recalculates policy; unknown target removes the old limit", async () => {
+  const diHome = mkdtempSync(join(tmpdir(), "di-compose-switch-"));
+  const workspace = mkdtempSync(join(tmpdir(), "di-ws-switch-"));
+  try {
+    const model = new ScriptedModel([{ text: "answer" }]);
+    const service: ModelService = {
+      listProviders: () => [{ id: "deepseek", name: "DeepSeek" }],
+      listModels: () => [
+        { provider: "deepseek", id: "deepseek-flash", name: "tiny", contextWindow: 20 },
+        { provider: "deepseek", id: "deepseek-v4-pro", name: "unknown" },
+      ],
+      refreshModels: async () => [],
+      checkAuth: async () => true,
+      resolveModel: async (provider, id) => ({ provider, id, name: id }),
+    };
+    const config = DiConfig.merge({}, undefined, { ContextManagement: { Enabled: true, MarginRatio: 0, OutputReserveTokens: 0 } }, {});
+    const host = await buildHost({ diHome, workspace, model, config, modelService: service });
+    const paused = await host.runner.runTurn("a prompt beyond the tiny window");
+    assert.equal(paused.stopReason, "context_limit");
+    host.runner.resetHistory();
+    host.runner.setCurrentModel("deepseek-v4-pro");
+    const resumed = await host.runner.runTurn("hello");
+    assert.equal(resumed.answer, "answer");
+    assert.equal(model.callCount, 1, "the unknown target has no inherited limit");
   } finally {
     rmSync(diHome, { recursive: true, force: true });
     rmSync(workspace, { recursive: true, force: true });

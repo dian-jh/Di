@@ -11,7 +11,7 @@
 
 ## 1. 定位与原则
 
-- **单一来源**：`~/.di` 是 Di 唯一的用户级数据根目录，由 `Core.Configuration.DiHome` 统一解析，
+- **单一来源**：`~/.di` 是 Di 唯一的用户级数据根目录，由 `packages/coding-agent/src/core/config/di-home.ts` 的 `DiHome` 统一解析，
   各子系统不再各自拼路径。
 - **所有权分明**：程序只写 `sessions/`（会话记录）；配置文件（`config.json` 等）一律**用户所有**，
   程序只读、不创建、不覆盖。
@@ -28,7 +28,7 @@
 ├── sessions/              # 会话记录（SessionLog 写入，追加式 JSONL）
 │   └── YYYY/MM/DD/
 │       ├── session-*.jsonl
-│       └── artifacts/     # L1 大输出落盘（Core.ContextManagement 写入，阶段一按天落盘，会话目录随阶段二迁入）
+│       └── artifacts/     # L1 大输出落盘（TS FileArtifactStore 写入，阶段一按天落盘）
 ├── logs/                  # 运行日志（DiLog 写入，jcode 格式文本，按日一个文件）
 │   └── di-YYYY-MM-DD.log  # 每行 [yyyy-MM-dd HH:mm:ss.fff] [LEVEL] message
 ├── skills/                # 用户 skills（已实现；解析/匹配/披露见 docs/modules/skills.md）
@@ -57,25 +57,26 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 | 条目 | 谁写 | 谁读 | 状态 |
 |---|---|---|---|
 | `config.json` | 用户 | 程序（分层配置源 #2） | ✅ 已实现（用户级） |
-| `sessions/YYYY/MM/DD/*.jsonl` | 程序（SessionLog） | 用户/重放工具 | ✅ 已实现 |
-| `sessions/YYYY/MM/DD/artifacts/*.txt` | 程序（`Core.ContextManagement` ArtifactStore，L1 大输出落盘） | 用户/`read_file` | ✅ 阶段一（会话目录随阶段二迁入） |
-| `logs/di-YYYY-MM-DD.log` | 程序（DiLog） | 用户/排障 | ✅ 已实现 |
+| `sessions/YYYY/MM/DD/*.jsonl` | 程序（TS `SessionStore`） | 用户/重放工具 | ✅ 已实现 |
+| `sessions/YYYY/MM/DD/artifacts/*.txt` | 程序（TS `FileArtifactStore`，L1 大输出落盘） | 用户/`read_file` | ✅ 阶段一（会话目录随阶段二迁入） |
+| `logs/di-YYYY-MM-DD.log` | 程序（TS `DiLog`） | 用户/排障 | ✅ 已实现 |
 | `skills/<name>/SKILL.md` 或 `skills/<name>.md` | 用户 | SkillRepository（多源合并 + `/skill` 激活） | ✅ MVP |
-| `commands/<name>.md` | 用户 | `Di.Cli/Commands/CommandLoader.cs` 的 `CommandLoader`（内置 + 用户命令 → `SlashCommandRegistry`） | ✅ 已实现 |
+| `commands/<name>.md` | 用户 | TS `packages/coding-agent/src/core/commands/command-loader.ts`（内置 + 用户命令 → `SlashCommandRegistry`） | ✅ 已实现 |
 | `agents/<name>.md` | 用户 | 将来子代理加载器 | 🔜 格式已预留 |
 | `mcp.json` | 用户 | 将来 MCP 桥 | 🔜 格式已预留 |
 
 ## 3. 配置分层与优先级
 
-程序启动时由 `Di.Cli.DiConfig.Load(workspace, homeRoot)` 依次加载以下源，**后加载覆盖先加载**：
+TS CLI 启动时由 `packages/coding-agent/src/core/config/di-config.ts` 的 `DiConfig.load` 依次加载以下源，**后加载覆盖先加载**：
 
 | 优先级 | 源 | 位置 | 说明 |
 |---|---|---|---|
-| 1（最低） | 程序默认值 | 各 Options 类的属性默认值 | 兜底 |
-| 2 | 构建内默认 | `Di.Cli/appsettings.json`（随 exe 走） | 随发行版走的出厂默认 |
-| 3 | 用户全局 | `~/.di/config.json` | 个人偏好 |
-| 4 | 项目级 | `<workspace>/.di/config.json` | 团队共享，随仓库走 |
-| 5（最高） | 环境变量 | 进程环境 | 运行时覆盖（如 `Model__DefaultModel`） |
+| 1（最低） | 程序默认值 | `packages/coding-agent/src/core/config/di-config.ts` 的 `DEFAULT_CONFIG` | 兜底 |
+| 2 | 用户全局 | `~/.di/config.json` | 个人偏好 |
+| 3 | 项目级 | `<workspace>/.di/config.json` | 团队共享，随仓库走 |
+| 4（最高） | 环境变量 | 进程环境 | 运行时覆盖（如 `Model__DefaultModel`） |
+
+C# 基线另加载 `Di.Cli/appsettings.json`；TS 层目前没有单独的构建内配置文件。
 
 > **项目级 > 用户全局**：与 Claude Code 的 local > project > user 一致——仓库内的团队设置
 > 优先于个人偏好（例如团队统一默认模型，个人只覆盖 UI 偏好）。
@@ -84,9 +85,9 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 
 | 段 | 绑定到 | 主要键 |
 |---|---|---|
-| `AgentLoop` | `AgentLoopOptions` | `SystemPrompt`、`MaxIterations`（默认 0 = unlimited；正整数启用上限）、`HistoryBudgetRatio` |
-| `ContextManagement` | `ContextManagementOptions`（`Core.ContextManagement`） | `Enabled`、`MarginRatio`、`OutputReserveTokens`、`NextOutputReserveTokens`、`SoftRatio` / `HardRatio` / `BlockingRatio`（详见 `docs/modules/context-management.md`） |
-| `Model` | `ModelOptions` | `Provider`、`DefaultModel` |
+| `AgentLoop` | TS `createCliHost` / `AgentSession` | `SystemPrompt`、`MaxIterations`、`MaxTokens`、`ReasoningEffort`、`HistoryBudgetRatio` |
+| `ContextManagement` | TS `BudgetPolicy` / `createCliHost` | `Enabled`、`MarginRatio`、`OutputReserveTokens`、`NextOutputReserveTokens`、`SoftRatio` / `HardRatio` / `BlockingRatio`（详见 `docs/modules/context-management.md`） |
+| `Model` | TS `createCliHost` / `ModelSelection` | `Provider`、`DefaultModel` |
 | `Repl` | `ReplOptions` | `Prompt`、`WorkingStatusText`、`UseAnsi` |
 | `Retry` | `RetryPolicyOptions` | `MaxAttempts`、`InitialBackoff` 等 |
 | `DeepSeek` | `DeepSeekAdapterConfig` | `ApiKey`、`BaseUrl`、`DefaultReasoningEffort`、`StrictTools`、`UseSystemProxy` |
@@ -104,7 +105,7 @@ export DI_HOME=~/mydi    # 默认是 ~/.di
 
 ```json
 {
-  "AgentLoop": { "MaxIterations": 12, "HistoryBudgetRatio": 0.4 },
+  "AgentLoop": { "MaxIterations": 12, "MaxTokens": 4096, "ReasoningEffort": "high", "HistoryBudgetRatio": 0.4 },
   "DeepSeek": { "DefaultReasoningEffort": "max" }
 }
 ```
@@ -122,7 +123,18 @@ export Model__DefaultModel=deepseek-flash
 - **程序只读**：`config.json`、`skills/`、`commands/`、`agents/`、`mcp.json`。
 - 程序**绝不**覆盖已存在的配置文件；也不因「配置文件缺失」而报错——所有配置源都是可选的。
 
-## 5. 实现现状
+## 5. TypeScript 实现入口
+
+| 能力 | 仓库根相对源码路径 | 状态 |
+|---|---|---|
+| 家目录解析与目录计算 | `packages/coding-agent/src/core/config/di-home.ts` | ✅ |
+| 分层配置合并 | `packages/coding-agent/src/core/config/di-config.ts` | ✅ |
+| 命令/skill/session/log 所有权接线 | `packages/coding-agent/src/cli/cli-host-compose.ts` | ✅ |
+| artifacts 路径 | `packages/coding-agent/src/core/context-management.ts` | ✅ |
+
+下表为 C# 迁移基线实现入口，不代表 TS 当前源码位置。
+
+## C# 基线实现现状（行为参考）
 
 | 能力 | 落点 | 状态 |
 |---|---|---|

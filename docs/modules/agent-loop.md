@@ -54,7 +54,20 @@ harness 的核心执行引擎：
 - **Skills 注入**：有 skill 时追加 `load_skill` 工具、执行器包一层 `SkillAwareExecutor`；
   `ActiveSkills`（固定 `/skill` + 每回合自动匹配）逐回合构建 SystemContext（见 `docs/modules/skills.md`）。
 
-## 代码入口
+## 当前 TypeScript 代码入口
+
+| 文件（仓库根相对路径） | 职责 |
+|---|---|
+| `packages/agent/src/agent-loop.ts` | `runAgentLoop` 单回合 ReAct 循环 |
+| `packages/agent/src/types.ts` | `AgentRequest` / `AgentResult` / `AgentDependencies` / 事件契约 |
+| `packages/coding-agent/src/core/agent-session.ts` | `AgentSession.runTurn` 跨回合历史、暂停、恢复与动态预算 |
+| `packages/coding-agent/src/core/history.ts` / `budget.ts` / `environment-snapshot.ts` | 历史裁剪、token 估算与工作目录快照 |
+| `packages/coding-agent/src/modes/turn-runner.ts` | 把 `AgentSession` 和配置好的回合选项接到 CLI runner |
+| `packages/agent/test/agent-loop.test.ts`; `packages/coding-agent/test/agent-session.test.ts` | 循环与会话行为测试 |
+
+TS 生产入口是 `createCliHost`（`packages/coding-agent/src/cli/cli-host-compose.ts`）；C# 对应实现保留为固定迁移基线，详见下表。
+
+## C# 基线代码入口（行为参考）
 
 | 文件（相对仓库根） | 职责 |
 |---|---|

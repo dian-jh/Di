@@ -17,7 +17,10 @@
 - **`ContextManagementOptions`**：模块配置（`ContextManagement` 配置段，分层配置见 `docs/di-home.md`）。
 
 阶段一（本模块当前范围）已落地 **L1 + BudgetPolicy + AgentRunner 预算化改造**（跨回合记忆以 soft
-水位线为预算，B_current 经 holder 接入 L1）；L2 噪声删除 / L4 归档 + Task State / L5 全量压缩与
+水位线为预算，B_current 经 holder 接入 L1）。TypeScript 生产组合根也已接入该阶段：
+`packages/coding-agent/src/cli/cli-host-compose.ts` 按当前模型目录和有效配置创建动态预算，未知窗口不设 token 上限；
+`packages/coding-agent/src/core/context-management.ts` 提供预算策略、按日 artifacts 与 L1 executor。
+L2 噪声删除 / L4 归档 + Task State / L5 全量压缩与
 响应式恢复随阶段二 / 三上线（都定义在顶层设计，见 §9 分阶段落地）。
 
 ## 实现原理
@@ -95,7 +98,17 @@ L1 控制点正在"执行后、进轨迹前"：`B_next-tool-estimate` 用结果�
 同一毫秒多次落盘不互相覆盖。**阶段一尚无"每会话目录"**（`<session>/` 子目录随阶段二迁入，
 见顶层设计 §7.1 边界说明），artifacts 先按天落盘。
 
-## 代码入口
+## 当前 TypeScript 代码入口
+
+| 文件（仓库根相对路径） | 职责 |
+|---|---|
+| `packages/coding-agent/src/core/context-management.ts` | `BudgetPolicy`, `FileArtifactStore`, `CompactingExecutor` |
+| `packages/coding-agent/src/core/budget.ts` | `InputBudgetTracker` and approximate trajectory token estimation |
+| `packages/coding-agent/src/core/agent-session.ts` | dynamic budget guard, history trimming and `context_limit` trajectory preservation |
+| `packages/coding-agent/src/cli/cli-host-compose.ts` | effective config/model-window policy, L1 executor and tracker composition |
+| `packages/coding-agent/test/cli/context-budget.test.ts` / `composition-root.test.ts` | policy, artifact, configuration and production composition tests |
+
+## C# 基线代码入口（行为参考）
 
 | 文件（相对仓库根） | 职责 |
 |---|---|
@@ -158,6 +171,7 @@ Core.Tools(CoreTools / OutputBuffer)`；持久化经 `DiHome`（Core.Configurati
 | 接线级：真实执行路径"长会话 + 输出暴增 → 摘要 + 落盘"（M1 验收） | `AgentRunner` + `CompactingExecutor` + `InputBudgetTracker` | `Di.Tests/ContextManagement/CompactingWiringTests.cs` |
 | 同回合多工具：用户消息、assistant 与前一工具结果共同参与下一工具预算预测 | `AgentRequest.BeforeToolExecution` + `InputBudgetTracker` | `Di.Tests/ContextManagement/CompactingWiringTests.cs` |
 | AgentRunner 预算制裁剪（soft 水位线 / 未注入退回旧口径 / 至少保留 1 轮 / B_current 上报） | `AgentRunner` | `Di.Tests/ContextManagement/AgentRunnerBudgetTrimmingTests.cs` |
+| TS 策略/摘要落盘/失败安全/模型窗口与配置接线/未知窗口无上限 | `BudgetPolicy`, `CompactingExecutor`, `createCliHost`, `AgentSession` | `packages/coding-agent/test/cli/context-budget.test.ts`; `packages/coding-agent/test/cli/composition-root.test.ts` |
 
 ## 关联文档
 
@@ -170,7 +184,7 @@ Core.Tools(CoreTools / OutputBuffer)`；持久化经 `DiHome`（Core.Configurati
 ## 下一步（阶段一的自然延伸）
 
 1. **阶段四校准**：用水线触发实测校准 B_margin（当前 10% 窗口默认，含稳定前缀估算缺口）与
-   `NextOutputReserveTokens`（当前默认 0）；`/model` 切换后按新模型窗口重建 `BudgetPolicy`。
+   `NextOutputReserveTokens`（当前默认 0）。
 2. **L4 归档 + Task State**（阶段二）：事件序号、逐轮独立归档、执行事件落盘与引用回溯；
    对"已入上下文的大结果"的复核压缩走整组归档，不原地改写；artifacts 迁入 `<session>/` 子目录。
 3. **L2 噪声删除 / L5 全量压缩与响应式恢复 / L3 微压缩**（阶段二 / 三 / 四）。

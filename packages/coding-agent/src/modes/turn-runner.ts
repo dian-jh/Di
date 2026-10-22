@@ -1,4 +1,4 @@
-import type { AgentSession } from "../core/agent-session.ts";
+import type { AgentSession, SessionTurnOptions } from "../core/agent-session.ts";
 import type { Skill } from "../core/skills/skill.ts";
 import type { TurnRunner } from "../cli/cli-host.ts";
 
@@ -14,6 +14,7 @@ import type { TurnRunner } from "../cli/cli-host.ts";
 export function createSessionRunner(
   session: AgentSession,
   label: { currentModel: string; setCurrentModel?: (model: string) => void },
+  optionsProvider: (userMessage: string) => Partial<Omit<SessionTurnOptions, "userMessage" | "signal">> = () => ({}),
 ): TurnRunner {
   if (session == null) throw new TypeError("createSessionRunner: session is required");
   return {
@@ -21,8 +22,8 @@ export function createSessionRunner(
       return label.currentModel;
     },
     setCurrentModel(model: string): void {
-      label.currentModel = model;
       label.setCurrentModel?.(model);
+      label.currentModel = model;
     },
     resetHistory(): void {
       session.resetHistory();
@@ -33,6 +34,7 @@ export function createSessionRunner(
     runTurn(userMessage: string, signal?: AbortSignal) {
       return session.runTurn({
         userMessage,
+        ...optionsProvider(userMessage),
         ...(signal !== undefined ? { signal } : {}),
       });
     },

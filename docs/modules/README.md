@@ -11,19 +11,19 @@
 
 | 模块（命名空间） | 文档 | 源码目录（相对仓库根） | 测试目录 | 职责一句话 |
 |---|---|---|---|---|
-| Common.Events | `events.md` | `Common/Events/` | `Di.Tests/Events/` | 进程内事件总线：ReAct 只发事件不渲染，CLI 拉流渲染 |
-| Core.AgentLoop | `agent-loop.md` | `Core/AgentLoop/` | `Di.Tests/AgentLoop/` | ReAct 循环 + 跨回合宿主（历史 / 快照 / skills） |
-| Core.ContextManagement | `context-management.md` | `Core/ContextManagement/` | `Di.Tests/ContextManagement/` | 上下文压缩：BudgetPolicy 预算/水位线 + L1 工具结果预算控制（大输出落盘 + 摘要） |
-| Core.Llm | `llm.md` | `Core/Llm/` | `Di.Tests/Llm/` | 模型层抽象：路由 / 流式协议 / 重试 / 计量 / 成本 / 目录 / 认证 |
-| Core.Providers.DeepSeek | `deepseek.md` | `Core/Providers/DeepSeek/` | `Di.Tests/Providers/` | DeepSeek 适配器：厂商怪癖唯一居所 |
-| Core.Providers.ChatGpt | `chatgpt.md` | `Core/Providers/ChatGpt/` | `Di.Tests/Providers/` | 官方 OAuth、Responses、缓存计量与模型切换 |
-| Core.Tools | `tools.md` | `Core/Tools/` | `Di.Tests/Tools/` | 8 个内置编码工具 + 注册表 + 执行器 |
-| Core.Skills | `skills.md` | `Core/Skills/` | `Di.Tests/Skills/` | SKILL.md 解析 / 发现合并 / 词法匹配 / 渐进式披露 / 评估 |
-| Core.Sessions | `sessions.md` | `Core/Sessions/` | `Di.Tests/Sessions/` | 会话 JSONL 落盘（对齐 codex 格式） |
-| Core.Logging | `logging.md` | `Core/Logging/` | `Di.Tests/Logging/` | 运行日志（jcode 格式，~/.di/logs 按日一个文件，EventBus 旁路订阅） |
+| Common.Events | `events.md` | `Common/Events/`; `packages/coding-agent/src/core/events/`; `packages/agent/src/types.ts` | `Di.Tests/Events/`; `packages/agent/test/agent-loop.test.ts` | 进程内事件总线：循环发事件，宿主和前端订阅渲染 |
+| Core.AgentLoop | `agent-loop.md` | `Core/AgentLoop/`; `packages/agent/src/`; `packages/coding-agent/src/core/agent-session.ts` | `Di.Tests/AgentLoop/`; `packages/agent/test/`; `packages/coding-agent/test/agent-session.test.ts` | ReAct 循环 + 跨回合宿主（历史 / 快照 / skills） |
+| Core.ContextManagement | `context-management.md` | `Core/ContextManagement/`; `packages/coding-agent/src/core/context-management.ts` | `Di.Tests/ContextManagement/`; `packages/coding-agent/test/cli/context-budget.test.ts` | 上下文压缩：预算/水位线 + L1 工具结果落盘与摘要 |
+| Core.Llm | `llm.md` | `Core/Llm/`; `packages/ai/src/` | `Di.Tests/Llm/`; `packages/ai/test/` | 模型层抽象：流式协议 / 重试 / 计量 / 成本 / 目录 |
+| Core.Providers.DeepSeek | `deepseek.md` | `Core/Providers/DeepSeek/`; `packages/ai/src/providers/deepseek/` | `Di.Tests/Providers/`; `packages/ai/test/` | DeepSeek 适配器：厂商线格式翻译与传输 |
+| Core.Providers.ChatGpt | `chatgpt.md` | `Core/Providers/ChatGpt/`; `packages/ai/src/providers/chatgpt/`; `packages/coding-agent/src/core/auth/` | `Di.Tests/Providers/`; `packages/ai/test/`; `packages/coding-agent/test/auth/` | ChatGPT Responses 适配器与宿主 OAuth 凭据组件 |
+| Core.Tools | `tools.md` | `Core/Tools/`; `packages/coding-agent/src/core/tools/` | `Di.Tests/Tools/`; `packages/coding-agent/test/tools/` | 内置编码工具、注册表、进程与共享会话执行器 |
+| Core.Skills | `skills.md` | `Core/Skills/`; `packages/coding-agent/src/core/skills/` | `Di.Tests/Skills/`; `packages/coding-agent/test/skills/` | SKILL.md 解析 / 发现合并 / 词法匹配 / 渐进式披露 / 评估 |
+| Core.Sessions | `sessions.md` | `Core/Sessions/`; `packages/coding-agent/src/core/sessions/` | `Di.Tests/Sessions/`; `packages/coding-agent/test/`; `packages/coding-agent/test/fixtures/sessions/` | 会话 JSONL、checkpoint、恢复与统计 |
+| Core.Logging | `logging.md` | `Core/Logging/`; `packages/coding-agent/src/core/logging/` | `Di.Tests/Logging/`; `packages/coding-agent/test/logging/` | 运行日志与进程诊断 |
 
 > `Core.Configuration`（家目录单一来源 / 分层配置）没有独立模块文档，其规范统一维护在顶层设计
-> 文档 `../di-home.md`。Common / Core 其它基础设施目录如无专门文档，则不在此列出。
+> 文档 `../di-home.md`；TS 对应实现位于 `packages/coding-agent/src/core/config/`。Common / Core 其它基础设施目录如无专门文档，则不在此列出。C# 路径是迁移参考实现，TS 路径是当前实现入口；阶段缺口以迁移进度表为准。
 
 ## 跨模块依赖与数据流
 

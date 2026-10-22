@@ -21,7 +21,19 @@ ReAct 只**发布**事件、不渲染；CLI 从总线**消费**并流式渲染�
 - **异常隔离**：单个订阅者抛异常不中断其它订阅者；`EventBusOptions.OnHandlerError` 配置错误接收器后
   转发并吞掉，未配置则在发布结束后抛出（见 §代码入口）。
 
-## 代码入口
+## 当前 TypeScript 代码入口
+
+| 文件（仓库根相对路径） | 职责 |
+|---|---|
+| `packages/coding-agent/src/core/events/event-bus.ts` | host event buffering and subscription |
+| `packages/coding-agent/src/core/events/log-events.ts` / `model-call-probe.ts` | run/model lifecycle events and model-call observation |
+| `packages/agent/src/types.ts` | agent-domain event vocabulary |
+| `packages/coding-agent/src/modes/event-renderer.ts` / `rpc-mode.ts` | CLI rendering and RPC event mapping |
+| `packages/agent/test/agent-loop.test.ts` / `packages/coding-agent/test/logging/di-log.test.ts` | loop event and subscriber behavior coverage |
+
+下表是固定 C# 迁移基线位置，供事件语义与线协议差异核对。
+
+## C# 基线代码入口（行为参考）
 
 | 文件（相对仓库根） | 职责 |
 |---|---|

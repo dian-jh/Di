@@ -68,7 +68,20 @@ harness 在回合前按消息语义**自动匹配**激活，未激活的只**广
 缺省 = 排除测试）。文件级错误抛异常；条目级错误告警并跳过。加载后用**与生产一致的 skills**
 （复用宿主发现结果）跑 `SkillEvaluator`，输出四项指标。
 
-## 组件清单（全部在 `Core/Skills/`）
+## 当前 TypeScript 代码入口
+
+| 文件（仓库根相对路径） | 职责 |
+|---|---|
+| `packages/coding-agent/src/core/skills/skill-markdown.ts` / `skill-case-loader.ts` | SKILL.md and evaluation-case parsing |
+| `packages/coding-agent/src/core/skills/skill-repository.ts` / `skill-locations.ts` | ordered multi-source discovery and merge |
+| `packages/coding-agent/src/core/skills/skill-matcher.ts` / `skill-activation.ts` | matching and fixed/automatic activation |
+| `packages/coding-agent/src/core/skills/skill-context.ts` / `skill-tools.ts` | disclosure text and `load_skill` execution |
+| `packages/coding-agent/src/core/skills/skill-evaluator.ts` | labeled-case evaluation |
+| `packages/coding-agent/test/skills/` | parser, discovery, matcher, activation, disclosure and evaluation tests |
+
+下列清单描述固定 C# 迁移基线（不是 TS 当前源码目录）。
+
+## C# 基线组件清单（行为参考）
 
 | 组件 | 代码（相对仓库根） | 职责 |
 |---|---|---|

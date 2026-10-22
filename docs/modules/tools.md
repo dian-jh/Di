@@ -93,7 +93,19 @@ schema 表达不了的**操作知识**（观察约定 / 行为偏好 / 协议）
 
 枚举（`ToolHelpers.EnumerateFiles`）除构建/依赖/版本控制目录（obj、bin、node_modules、.git 等）外，还按名跳过**缓存/配置宿主目录**：`AppData`、`Temp`、`cache`、`Caches`、`.cache`——它们是可再生目录，跳过不影响"搜代码"语义（2026-10-15 事故回归：grep 直扫 `C:\Users\52143` 含 AppData 卡死 10+ 分钟）。
 
-## 代码入口
+## 当前 TypeScript 代码入口
+
+| 文件（仓库根相对路径） | 职责 |
+|---|---|
+| `packages/coding-agent/src/core/tools/index.ts` | core tool registry and `createToolExecutor` |
+| `packages/coding-agent/src/core/tools/read.ts`, `write.ts`, `edit.ts`, `glob.ts`, `grep.ts`, `bash.ts`, `powershell.ts`, `python.ts` | model schemas and tool implementations |
+| `packages/coding-agent/src/core/tools/process-runner.ts` / `shell-session.ts` / `encoding.ts` / `output-buffer.ts` | process lifecycle, persistent shells, Windows decoding, bounded output |
+| `packages/coding-agent/src/cli/cli-host-compose.ts` | production tool construction and host-owned shell lifetimes |
+| `packages/coding-agent/test/tools/` / `packages/coding-agent/test/cli/bash-tool-rpc.test.ts` | tool and host/RPC integration tests |
+
+下表是固定 C# 迁移基线位置，供行为差异核对。
+
+## C# 基线代码入口（行为参考）
 
 | 文件（相对仓库根） | 职责 |
 |---|---|

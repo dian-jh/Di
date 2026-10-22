@@ -489,6 +489,14 @@ test("no model window invents no token limit while the ledger still accumulates 
   assert.deepEqual(session.usage, { inputTokens: 12, outputTokens: 15 });
 });
 
+test("dynamic model budget is validated like a static session budget", async () => {
+  const session = new AgentSession(
+    { systemPrompt: "sys", tokenBudgetProvider: () => -1 },
+    { model: new FakeModel([{ text: "unused" }]), toolExecutor: new FakeExecutor(), estimateRequestTokens: () => 1 },
+  );
+  await assert.rejects(session.runTurn({ userMessage: "hello" }), RangeError);
+});
+
 test("a soft-stop request is honored and cleared at turn end (no leak into the next turn)", async () => {
   const model = new FakeModel([{ text: "second" }]);
   const session = new AgentSession(

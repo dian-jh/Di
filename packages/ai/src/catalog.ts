@@ -23,6 +23,11 @@ export interface ModelSpec {
   readonly contextWindow?: number;
   /** Suggested default `maxTokens`, when known. */
   readonly defaultMaxTokens?: number;
+  /** Provider-supported reasoning effort IDs and optional default. */
+  readonly reasoning?: {
+    readonly efforts: readonly { readonly id: string; readonly name: string }[];
+    readonly defaultEffort?: string;
+  };
   /** Per-million-token cost rates; absent means cost is unknown (not zero). */
   readonly cost?: ModelCostRates;
 }
@@ -32,6 +37,21 @@ export interface ModelSpec {
  * {@link ModelRef} / the model registry ("deepseek", "chatgpt"). Rates are
  * transcribed from the C# baseline adapters' `Catalog` records.
  */
+const DEEPSEEK_REASONING_EFFORTS = [
+  { id: "off", name: "Off" },
+  { id: "low", name: "Low" },
+  { id: "high", name: "High" },
+  { id: "max", name: "Max" },
+] as const;
+
+const CHATGPT_REASONING_EFFORTS = [
+  { id: "low", name: "Low" },
+  { id: "medium", name: "Medium" },
+  { id: "high", name: "High" },
+  { id: "xhigh", name: "Extra high" },
+  { id: "max", name: "Max" },
+] as const;
+
 export const MODEL_CATALOG: Readonly<Record<string, readonly ModelSpec[]>> = {
   deepseek: [
     {
@@ -39,6 +59,7 @@ export const MODEL_CATALOG: Readonly<Record<string, readonly ModelSpec[]>> = {
       name: "DeepSeek Flash (V4.1)",
       contextWindow: 1_000_000,
       defaultMaxTokens: 64 * 1024,
+      reasoning: { efforts: DEEPSEEK_REASONING_EFFORTS },
       cost: { inputPerMillion: 0.28, outputPerMillion: 0.42, cacheReadPerMillion: 0.07, cacheWritePerMillion: 0 },
     },
     {
@@ -46,6 +67,7 @@ export const MODEL_CATALOG: Readonly<Record<string, readonly ModelSpec[]>> = {
       name: "DeepSeek V4 Pro",
       contextWindow: 1_000_000,
       defaultMaxTokens: 64 * 1024,
+      reasoning: { efforts: DEEPSEEK_REASONING_EFFORTS },
       cost: { inputPerMillion: 1.2, outputPerMillion: 4.0, cacheReadPerMillion: 0.3, cacheWritePerMillion: 0 },
     },
   ],
@@ -54,6 +76,7 @@ export const MODEL_CATALOG: Readonly<Record<string, readonly ModelSpec[]>> = {
       id: "gpt-6.1-sol",
       name: "GPT-6.1 Sol",
       contextWindow: 1_050_000,
+      reasoning: { efforts: CHATGPT_REASONING_EFFORTS, defaultEffort: "medium" },
       // 订阅制：基线无每 token 费率 → cost 保持未知（undefined），不得伪造为零。
     },
   ],
