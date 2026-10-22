@@ -21,10 +21,10 @@ import { CHATGPT_DIRECT_SCOPE } from "./constants.ts";
  * temp file is cleaned. The ACL adapter protects the directory and the temp file
  * before it is committed; any ACL failure refuses the token write (fail closed).
  *
- * The lock is the DI-injectable {@link LockProvider} seam; the contract-mandated
- * default is {@link FAIL_CLOSED_LOCK_PROVIDER} until a real OS-advisory-lock
- * adapter is approved. `open('wx')` here only names the temp file (a unique
- * random name, never a lock) — it is never used as a lock.
+ * The lock is the DI-injectable {@link LockProvider} seam. Production composition
+ * supplies the native OS lock provider; tests may inject a synthetic provider.
+ * `open('wx')` here only names the temp file (a unique random name, never a lock);
+ * it is never used as a lock.
  *
  * Reading tolerates the legacy C# shape (`Accounts` + `ActiveClientId`, PascalCase
  * fields, ISO dates) and migrates it atomically while preserving the active

@@ -129,6 +129,36 @@ export class ChatGptAuth {
     );
   }
 
+  /** Fetch the account-visible model ids without exposing OAuth tokens to callers. */
+  async listModels(signal?: AbortSignal): Promise<readonly string[]> {
+    const accessToken = await this.accessToken(signal);
+    if (accessToken === null) throw new ChatGptAuthError("Run di auth chatgpt login first.", "missing-credential");
+    let response: Awaited<ReturnType<FetchLike>>;
+    try {
+      response = await this.http(`${CHATGPT_RESOURCE}/models?visibility=list`, {
+        method: "GET",
+        headers: { authorization: `Bearer ${accessToken}` },
+        signal,
+      });
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      throw new ChatGptAuthError("Cannot reach the ChatGPT model catalog.", "connection", undefined, { cause: error });
+    }
+    let value: unknown;
+    try { value = await response.json(); } catch { throw new ChatGptAuthError("Invalid ChatGPT model catalog response.", "bad-response"); }
+    if (!response.ok) throw new ChatGptAuthError("ChatGPT model catalog request failed.", "bad-response", response.status);
+    if (value === null || typeof value !== "object" || !Array.isArray((value as Record<string, unknown>).data)) {
+      throw new ChatGptAuthError("Invalid ChatGPT model catalog response.", "bad-response");
+    }
+    const ids = (value as { data: unknown[] }).data.map((entry) => {
+      if (entry === null || typeof entry !== "object" || typeof (entry as Record<string, unknown>).id !== "string") {
+        throw new ChatGptAuthError("Invalid ChatGPT model catalog entry.", "bad-response");
+      }
+      return (entry as { id: string }).id;
+    });
+    return ids;
+  }
+
   /** Full OAuth PKCE sign-in (C# `SignInAsync`). `openBrowser` receives the authorize URL. */
   async signIn(
     openBrowser: (uri: URL) => Promise<void>,

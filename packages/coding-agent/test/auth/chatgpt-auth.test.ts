@@ -343,6 +343,27 @@ test("a fresh credential is returned without refreshing (only inside the 3-minut
   }
 });
 
+test("model discovery uses a refreshed-or-current synthetic bearer token and visibility filter", async () => {
+  const f = createFixture();
+  try {
+    await f.store.update((data) => {
+      data.credential = new ChatGptCredential({
+        clientId: "synthetic-client", accessToken: "synthetic-catalog-access", scopes: ["chatgpt.tokens.use.direct"], expiresAt: Date.now() + 3_600_000,
+      });
+    });
+    let url = "";
+    let authorization = "";
+    const auth = new ChatGptAuth(f.store, { http: async (requestUrl, init) => {
+      url = requestUrl;
+      authorization = init?.headers?.authorization ?? "";
+      return jsonResponse({ data: [{ id: "gpt-synthetic" }, { id: "gpt-synthetic-2" }] });
+    } });
+    assert.deepEqual(await auth.listModels(), ["gpt-synthetic", "gpt-synthetic-2"]);
+    assert.equal(url, "https://api.openai.com/v1/models?visibility=list");
+    assert.equal(authorization, "Bearer synthetic-catalog-access");
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
+});
+
 test("refresh rotates exactly once across concurrent instances (C# Refresh_RotatesOnceAcrossInstances)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "di-p8b-rot-"));
   try {

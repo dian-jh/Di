@@ -51,7 +51,25 @@ DeepSeek 提供方的**线格式适配器**：HTTP/SSE 传输、chunk 归一化�
 - **鉴权**：`Auth` = `DEEPSEEK_API_KEY` 环境变量；`ResolveApiKeyAsync` 覆盖为 config
   （`DeepSeek:ApiKey`）优先、环境变量兜底，均在请求时解析。
 
-## 代码入口
+## 当前 TypeScript 代码入口
+
+| 文件（仓库根相对路径） | 职责 |
+|---|---|
+| `packages/ai/src/providers/deepseek/adapter.ts` | HTTP/SSE 请求、usage、错误与流超时处理 |
+| `packages/ai/src/providers/deepseek/translator.ts` / `wire.ts` | provider wire translation and DTOs |
+| `packages/ai/src/catalog.ts` | 当前目录中的模型窗口与成本元数据 |
+| `packages/coding-agent/src/cli/provider-runtime.ts` / `windows-system-proxy.ts` | 生产模型路由、Windows 静态用户代理配置和请求 dispatch |
+| `packages/ai/test/` | DeepSeek adapter、翻译、请求/响应与故障测试 |
+
+### `UseSystemProxy` in the TypeScript host
+
+The host reads current-user Windows Internet Settings with fixed-argument `reg.exe query` calls. It supports configured static HTTP/HTTPS proxy endpoints and WinINET bypass entries, including `*.host` wildcards and `<local>`. If the system proxy setting is disabled, requests use the direct route. PAC or WPAD flags cause a clear error because automatic proxy rule execution is not implemented. Missing or malformed connection flags also fail closed; the host does not assume that an unknown configuration means direct access. The implementation does not modify Windows proxy settings.
+
+Static routing uses exact dependency `undici@7.25.0` (`MIT`) with its own `fetch` and `ProxyAgent`; it does not change Node's global dispatcher. Loopback tests cover successful CONNECT, proxy error, cancellation, bypass, and direct mode. PAC/WPAD remain a compatibility gap relative to Windows automatic proxy behavior.
+
+下表是固定 C# 迁移基线位置，供行为差异核对。
+
+## C# 基线代码入口（行为参考）
 
 | 文件（相对仓库根） | 职责 |
 |---|---|

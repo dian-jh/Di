@@ -1,217 +1,91 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  ChatGptCredential,
-  CliApp,
-  CredentialStore,
-  nullTextReader,
-  runAuthCommand,
-  StringTextWriter,
-} from "@di/coding-agent";
+import { ChatGptAuth, ChatGptCredential, CredentialStore, runAuthCommand, StringTextWriter } from "@di/coding-agent";
 import { mockLockProvider, noopAcl } from "../auth/test-doubles.ts";
 
-/**
- * P6.3b card — `di auth chatgpt ...` command resolution (the argument-validation
- * half of C# `Di.Cli/ChatGptAuthCommand.cs` at baseline 09f4e08). The actual OAuth
- * sign-in / status / logout / models flows are P8b and BLOCKED on the unresolved
- * Windows-ACL/lock credential-store platform gate: every valid subcommand FAILS
- * CLOSED with an honest "not yet available" message on stderr and exit 1 — no
- * fake credentials, no fake OAuth flow. Invalid syntax mirrors the C# usage and
- * argument errors exactly.
- */
-
-function run(...args: string[]) {
-  const stdout = new StringTextWriter();
-  const stderr = new StringTextWriter();
-  const app = new CliApp(() => {
-    throw new Error("auth 路径不应构建宿主");
-  });
-  return {
-    codePromise: app.runAsync(args, nullTextReader, stdout, stderr, true, true),
-    stdout,
-    stderr,
-  };
+async function tempStore(): Promise<{ directory: string; store: CredentialStore }> {
+  const directory = await mkdtemp(join(tmpdir(), "di-auth-cli-"));
+  return { directory, store: new CredentialStore({ lock: mockLockProvider(), acl: noopAcl, directory }) };
 }
 
-test("Auth_UnknownService_UsageToStderr_ExitsOne", async () => {
-  const { codePromise, stdout, stderr } = run("auth", "foo");
-
-  const code = await codePromise;
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("Usage: di auth chatgpt login [--new] [--consent] | status | logout | models"));
-  assert.equal(stdout.text(), "");
-});
-
-test("Auth_ChatgptMissingSubcommand_UsageToStderr_ExitsOne", async () => {
-  const { codePromise, stdout, stderr } = run("auth", "chatgpt");
-
-  const code = await codePromise;
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("Usage: di auth chatgpt login [--new] [--consent] | status | logout | models"));
-  assert.equal(stdout.text(), "");
-});
-
-test("Auth_ChatgptTooManyArgs_UsageToStderr_ExitsOne", async () => {
-  const { codePromise, stdout, stderr } = run("auth", "chatgpt", "login", "--new", "--consent", "--extra");
-
-  const code = await codePromise;
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("Usage: di auth chatgpt login [--new] [--consent] | status | logout | models"));
-  assert.equal(stdout.text(), "");
-});
-
-test("Auth_ChatgptUnknownSubcommand_ErrorToStderr_ExitsOne", async () => {
-  const { codePromise, stdout, stderr } = run("auth", "chatgpt", "signup");
-
-  const code = await codePromise;
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("Unknown ChatGPT auth command or arguments."));
-  assert.equal(stdout.text(), "");
-});
-
-test("Auth_ChatgptLogin_InvalidExtraFlag_ErrorToStderr_ExitsOne", async () => {
-  // C# throws ArgumentException("Use --new to register another ChatGPT connection.")
-  // for any flag other than --new/--consent.
-  const { codePromise, stdout, stderr } = run("auth", "chatgpt", "login", "--bogus");
-
-  const code = await codePromise;
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("Use --new to register another ChatGPT connection."));
-  assert.equal(stdout.text(), "");
-});
-
-test("Auth_ChatgptStatus_WithExtraArg_ErrorToStderr_ExitsOne", async () => {
-  const { codePromise, stdout, stderr } = run("auth", "chatgpt", "status", "extra");
-
-  const code = await codePromise;
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("Unknown ChatGPT auth command or arguments."));
-  assert.equal(stdout.text(), "");
-});
-
-// ---- valid subcommands: fail closed, honest "not yet available" ----
-
-test("Auth_ChatgptLogin_NotYetAvailable_ExitsOne", async () => {
-  const { codePromise, stdout, stderr } = run("auth", "chatgpt", "login");
-
-  const code = await codePromise;
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("尚未在 TypeScript 后端"));
-  assert.ok(stderr.text().includes("chatgpt"));
-  assert.equal(stdout.text(), "");
-});
-
-test("Auth_ChatgptLogin_NewAndConsent_NotYetAvailable_ExitsOne", async () => {
-  const { codePromise, stdout, stderr } = run("auth", "chatgpt", "login", "--new", "--consent");
-
-  const code = await codePromise;
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("尚未在 TypeScript 后端"));
-  assert.equal(stdout.text(), "");
-});
-
-test("Auth_ChatgptStatus_NotYetAvailable_ExitsOne", async () => {
-  const { codePromise, stdout, stderr } = run("auth", "chatgpt", "status");
-
-  const code = await codePromise;
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("尚未在 TypeScript 后端"));
-  assert.equal(stdout.text(), "");
-});
-
-test("Auth_ChatgptModels_NotYetAvailable_ExitsOne", async () => {
-  const { codePromise, stdout, stderr } = run("auth", "chatgpt", "models");
-
-  const code = await codePromise;
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("尚未在 TypeScript 后端"));
-  assert.equal(stdout.text(), "");
-});
-
-test("Auth_ChatgptLogout_NotYetAvailable_ExitsOne", async () => {
-  const { codePromise, stdout, stderr } = run("auth", "chatgpt", "logout");
-
-  const code = await codePromise;
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("尚未在 TypeScript 后端"));
-  assert.equal(stdout.text(), "");
-});
-
-// ---- P8b: valid subcommands attempt the store through the fail-closed lock seam ----
-
-function workingStore(dir: string) {
-  return new CredentialStore({ lock: mockLockProvider(), acl: noopAcl, directory: dir });
+function authDouble(overrides: Partial<Pick<ChatGptAuth, "signIn" | "status" | "signOut" | "listModels">> = {}) {
+  const calls: unknown[][] = [];
+  const auth = {
+    signIn: async (...args: unknown[]) => { calls.push(["signIn", ...args]); },
+    status: async () => ({ signedIn: false, planEnabled: false }),
+    signOut: async () => { calls.push(["signOut"]); return true; },
+    listModels: async () => { calls.push(["listModels"]); return ["gpt-synthetic-a", "gpt-synthetic-b"]; },
+    ...overrides,
+  } as unknown as ChatGptAuth;
+  return { auth, calls };
 }
 
-test("Auth_ChatgptStatus_WithStoreAvailable_PrintsRealStatusLine_ExitsZero", async () => {
-  // A store backed by a working (mock) lock makes `status` a real local read —
-  // never faked: no credentials yet, so the C#-mirrored line says signed_in=False.
-  const dir = mkdtempSync(join(tmpdir(), "di-p8b-authcmd-"));
-  try {
-    const stdout = new StringTextWriter();
-    const stderr = new StringTextWriter();
-    const code = await runAuthCommand(["auth", "chatgpt", "status"], stdout, stderr, workingStore(dir));
-    assert.equal(code, 0);
-    assert.equal(stdout.text(), "ChatGPT: signed_in=False plan=False client_id=none\n");
-    assert.equal(stderr.text(), "");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("Auth_ChatgptStatus_WithStoredCredential_PrintsRealStatusLine", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "di-p8b-authcmd-"));
-  try {
-    const store = workingStore(dir);
-    await store.update((data) => {
-      data.credential = new ChatGptCredential({
-        clientId: "oaiapp_test",
-        accessToken: "access-initial",
-        scopes: ["chatgpt.tokens.use.direct"],
-        expiresAt: Date.now() + 3_600_000,
-      });
-    });
-    const stdout = new StringTextWriter();
-    const stderr = new StringTextWriter();
-    const code = await runAuthCommand(["auth", "chatgpt", "status"], stdout, stderr, store);
-    assert.equal(code, 0);
-    assert.equal(stdout.text(), "ChatGPT: signed_in=True plan=True client_id=oaiapp_test\n");
-    assert.equal(stderr.text(), "");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("Auth_ChatgptLogin_AttemptsStore_ThenFailsClosedHonestly", async () => {
-  // login really attempts the store (acquires the lock through the seam); with the
-  // real OAuth flow still unwired it fails closed with the honest message and
-  // exit 1 — never faking a credential or a sign-in.
-  const dir = mkdtempSync(join(tmpdir(), "di-p8b-authcmd-"));
-  try {
-    const lock = mockLockProvider();
-    const stdout = new StringTextWriter();
-    const stderr = new StringTextWriter();
-    const store = new CredentialStore({ lock, acl: noopAcl, directory: dir });
-    const code = await runAuthCommand(["auth", "chatgpt", "login"], stdout, stderr, store);
-    assert.equal(code, 1);
-    assert.ok(stderr.text().includes("尚未在 TypeScript 后端"));
-    assert.equal(stdout.text(), "");
-    assert.ok(lock.acquireCalls > 0, "login must attempt the store through the lock seam");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("Auth_ChatgptLogout_WithFailClosedStore_ExitsOne", async () => {
-  // Default (fail-closed) store: logout surfaces the honest message, exit 1.
+async function invoke(args: string[], store: CredentialStore, auth: ChatGptAuth) {
   const stdout = new StringTextWriter();
   const stderr = new StringTextWriter();
-  const code = await runAuthCommand(["auth", "chatgpt", "logout"], stdout, stderr);
-  assert.equal(code, 1);
-  assert.ok(stderr.text().includes("尚未在 TypeScript 后端"));
-  assert.equal(stdout.text(), "");
+  const code = await runAuthCommand(args, stdout, stderr, store, auth);
+  return { code, stdout, stderr };
+}
+
+test("auth command rejects invalid service, command, and flags without side effects", async () => {
+  const { directory, store } = await tempStore();
+  try {
+    const { auth, calls } = authDouble();
+    for (const args of [["auth", "else"], ["auth", "chatgpt"], ["auth", "chatgpt", "signup"], ["auth", "chatgpt", "login", "--bogus"]]) {
+      const result = await invoke(args, store, auth);
+      assert.equal(result.code, 1);
+      assert.equal(result.stdout.text(), "");
+      assert.notEqual(result.stderr.text(), "");
+    }
+    assert.deepEqual(calls, []);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("status reads isolated synthetic credentials and never needs a network call", async () => {
+  const { directory, store } = await tempStore();
+  try {
+    await store.update((data) => { data.credential = new ChatGptCredential({
+      clientId: "synthetic-client", accessToken: "synthetic-access", scopes: ["chatgpt.tokens.use.direct"], expiresAt: Date.now() + 60_000,
+    }); });
+    const auth = new ChatGptAuth(store);
+    const result = await invoke(["auth", "chatgpt", "status"], store, auth);
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout.text(), "ChatGPT: signed_in=True plan=True client_id=synthetic-client\n");
+    assert.equal(result.stderr.text(), "");
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("login, logout, and models dispatch to the authenticated client", async () => {
+  const { directory, store } = await tempStore();
+  try {
+    const { auth, calls } = authDouble();
+    const login = await invoke(["auth", "chatgpt", "login", "--new", "--consent"], store, auth);
+    assert.equal(login.code, 0);
+    assert.equal(login.stdout.text(), "Continue with ChatGPT — complete authorization in your browser (5 minute timeout).\nChatGPT connected. Run di auth chatgpt models to list models.\n");
+    assert.deepEqual(calls[0], ["signIn", ChatGptAuth.openSystemBrowser, true, true]);
+
+    const logout = await invoke(["auth", "chatgpt", "logout"], store, auth);
+    assert.equal(logout.code, 0);
+    assert.equal(logout.stdout.text(), "Signed out of ChatGPT.\n");
+
+    const models = await invoke(["auth", "chatgpt", "models"], store, auth);
+    assert.equal(models.code, 0);
+    assert.equal(models.stdout.text(), "chatgpt/gpt-synthetic-a  gpt-synthetic-a\nchatgpt/gpt-synthetic-b  gpt-synthetic-b\n");
+    assert.equal(calls.some((call) => call[0] === "signOut"), true);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("auth operations surface lock-unavailable without attempting an unlocked transaction", async () => {
+  const { directory } = await tempStore();
+  const store = new CredentialStore({ lock: { acquire: async () => { throw Object.assign(new Error("synthetic lock failure"), { code: "lock-unavailable" }); } }, acl: noopAcl, directory });
+  try {
+    const auth = new ChatGptAuth(store);
+    const result = await invoke(["auth", "chatgpt", "login"], store, auth);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr.text(), /credential lock could not be acquired/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

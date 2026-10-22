@@ -102,6 +102,7 @@ SHA-256 快照（共 **216 条**：config.json 1 + sessions 212 + auth 2 + decom
     node_modules/@di/{coding-agent,ai,agent}/   （workspace 包）
     node_modules/di-tui/                        （tui → di-tui）
     node_modules/{jsonc-parser,@earendil-works/pi-tui,marked,get-east-asian-width}/  （第三方闭包叶包）
+    node_modules/{iconv-lite,safer-buffer,koffi,undici}/                   （编码、native ABI 与 HTTP/proxy 运行时）
 ```
 
 ## 5. 记录的有意简化 / 边界

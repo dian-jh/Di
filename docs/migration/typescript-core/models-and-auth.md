@@ -215,11 +215,17 @@ Streams、`node:crypto` 和小型自有 DTO。Pi 包可作为对照源码，不�
    禁止合入 provider 集成。
 5. OAuth 先完成纯回调/PKCE/令牌响应验证，不读取任何真实凭据。停止条件：坏响应覆盖旧数据、错误 scope
    被接受、真实账户/token 出现在测试或日志中时，立即停止该单元。
-6. credential storage 的跨进程 advisory lock 与 Windows ACL 是未决平台依赖门：先完成依赖/API 选型记录
-   （确切 npm 版本、许可、Node 22.19 ESM/Windows 构建方式、目标平台 OS-lock 语义），再写 adapter。
-   当前没有已核准的跨 Windows/POSIX Node advisory-lock 依赖；若不能提供真实 OS 锁和 ACL 设置/回读，
-   停止 ChatGPT login/refresh 文件存储实现，保持 fail closed。不得用 mkdir/lockfile TTL、PID-only 判断、
-   内存 mutex 或只记录 ACL warning 的实现替代。
+6. credential storage 依赖采用精确版本 `koffi@2.14.1`（MIT）：Windows 通过 `CreateFileW` +
+   `LockFileEx`，POSIX 通过 Node `FileHandle.fd` + libc `flock`。Koffi 发布包包含 Windows/Linux/macOS
+   预编译构建；本机 Node 24.16 / Windows x64 已验证 FFI ABI、双进程互斥、持锁进程强杀后自动释放，
+   以及双进程合成 refresh 仅消费一次轮换 token。Linux/macOS 的 `flock` 分支尚未本机验收；不据此
+   宣称这些平台已验收。运行时缺失 FFI、无法打开/取得/释放锁时均 fail closed，凭据保持不变。
+   不得用 mkdir/lockfile TTL、PID-only 判断、内存 mutex 或只记录 ACL warning 的实现替代。
+   DeepSeek 的 Windows `UseSystemProxy` 使用固定版本 `undici@7.25.0`（MIT，Node >=20.18.1），
+   通过 `ProxyAgent` 路由当前用户静态 HTTP/HTTPS 代理；本机 Node 24.16 loopback 已验证 CONNECT、
+   成功响应、代理错误和取消。Internet Settings 与 `Connections\\DefaultConnectionSettings` flags
+   由只读 `reg.exe query` 读取；PAC/WPAD 尚未迁移，未知 flags fail closed。WinHTTP Koffi 输出指针
+   探针在本机曾异常退出，生产路径不使用该未验证 FFI。
 7. 最后才接 `@di/coding-agent`。停止条件：任一 provider fixture、跨进程竞争、权限拒绝、retry 安全门失败，
    不得标记模型/auth 阶段完成。
 

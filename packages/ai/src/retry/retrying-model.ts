@@ -23,10 +23,15 @@ export const defaultRetrySleep: RetrySleep = async (ms, signal) => {
       reject(new SseStreamError("aborted", "retry wait aborted"));
       return;
     }
-    const timer = setTimeout(resolve, ms);
-    const onAbort = (): void => {
+    const finish = (error?: Error): void => {
       clearTimeout(timer);
-      reject(new SseStreamError("aborted", "retry wait aborted"));
+      signal?.removeEventListener("abort", onAbort);
+      if (error === undefined) resolve();
+      else reject(error);
+    };
+    const timer = setTimeout(() => finish(), ms);
+    const onAbort = (): void => {
+      finish(new SseStreamError("aborted", "retry wait aborted"));
     };
     signal?.addEventListener("abort", onAbort, { once: true });
   });

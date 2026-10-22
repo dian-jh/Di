@@ -2,134 +2,93 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { TextWriter } from "./io.ts";
-import { CredentialStore } from "../core/auth/credential-store.ts";
 import { createAclAdapter } from "../core/auth/acl.ts";
-import { FAIL_CLOSED_LOCK_PROVIDER, LockUnavailableError } from "../core/auth/lock-provider.ts";
-import { CHATGPT_DIRECT_SCOPE } from "../core/auth/constants.ts";
+import { ChatGptAuth } from "../core/auth/chatgpt-auth.ts";
+import { ChatGptAuthError } from "../core/auth/errors.ts";
+import { CredentialStore } from "../core/auth/credential-store.ts";
+import { LockUnavailableError, NativeOsLockProvider } from "../core/auth/lock-provider.ts";
 import { DiHome } from "../core/config/di-home.ts";
+import { createSystemProxyFetch } from "./windows-system-proxy.ts";
 
-/**
- * `di auth chatgpt ...` command resolution. Mirrors the argument validation of
- * C# `Di.Cli/ChatGptAuthCommand.cs` at baseline 09f4e08 (same usage line, same
- * per-subcommand shape checks and error strings).
- *
- * P8b wires every VALID subcommand to the host credential store through its
- * fail-closed lock seam: the default store uses {@link FAIL_CLOSED_LOCK_PROVIDER}
- * (no approved real OS-advisory-lock adapter yet), so each attempt surfaces the
- * contract-mandated recoverable error and the command FAILS CLOSED with an
- * honest "not yet available" message on stderr, exit 1. No fake credentials are
- * minted and no OAuth flow is faked. When a store IS available (tests inject a
- * mocked lock; a real lock adapter is a later optional enhancement), `status`
- * performs a genuine local read and prints the C#-mirrored status line; the
- * login/logout/models FLOWS still fail closed honestly until their real
- * pipelines are wired.
- */
-
-/** Fail-closed gate message for every valid `auth chatgpt` subcommand (P8b). */
-export const AUTH_CHATGPT_NOT_AVAILABLE =
-  "ChatGPT 认证（auth chatgpt）尚未在 TypeScript 后端可用：宿主凭据存储按契约失败关闭——无真实 OS advisory lock 适配器（凭据已保留，不伪造凭据、不跑 OAuth；待真实锁适配器批准后启用）。";
-
+/** Recoverable message used when the host cannot acquire its credential lock. */
+export const AUTH_CHATGPT_NOT_AVAILABLE = "ChatGPT authentication is unavailable because the credential lock could not be acquired.";
 export const AUTH_USAGE = "Usage: di auth chatgpt login [--new] [--consent] | status | logout | models";
 
-/** The default store used by the CLI: fail-closed lock seam until a real adapter is approved. */
+/** Default ChatGPT credential store with kernel locking and owner-only ACLs. */
 export function defaultChatGptStore(): CredentialStore {
   const home = DiHome.fromEnvironment(process.env, homedir());
   return new CredentialStore({
-    lock: FAIL_CLOSED_LOCK_PROVIDER,
+    lock: new NativeOsLockProvider(),
     acl: createAclAdapter(),
     directory: join(home.rootDirectory, "auth", "chatgpt"),
   });
 }
 
+/** `di auth chatgpt ...` command resolution. OAuth and token operations use ChatGptAuth. */
 export async function runAuthCommand(
   args: readonly string[],
   stdout: TextWriter,
   stderr: TextWriter,
   store: CredentialStore = defaultChatGptStore(),
+  auth: ChatGptAuth = new ChatGptAuth(store, { http: createSystemProxyFetch() }),
 ): Promise<number> {
-  // C#: args.Length < 3 || args[1] != "chatgpt" || args.Length > 5 → usage + exit 1.
   if (args.length < 3 || args[1] !== "chatgpt" || args.length > 5) {
     stderr.writeLine(AUTH_USAGE);
     return 1;
   }
 
-  const subcommand = args[2]!;
-  switch (subcommand) {
+  switch (args[2]) {
     case "login":
-      // C#: any extra flag other than --consent/--new → ArgumentException.
-      if (args.slice(3).some((a) => a !== "--consent" && a !== "--new")) {
+      if (args.slice(3).some((arg) => arg !== "--consent" && arg !== "--new")) {
         stderr.writeLine("ChatGPT: Use --new to register another ChatGPT connection.");
         return 1;
       }
-      return attemptStore(store, async () => {
-        await store.update(async () => {});
-      }, stdout, stderr);
+      return runAuth(async () => {
+        stdout.writeLine("Continue with ChatGPT — complete authorization in your browser (5 minute timeout).");
+        await auth.signIn(ChatGptAuth.openSystemBrowser, args.includes("--new"), args.includes("--consent"));
+        stdout.writeLine("ChatGPT connected. Run di auth chatgpt models to list models.");
+      }, stderr);
     case "status":
-      if (args.length !== 3) {
-        stderr.writeLine("ChatGPT: Unknown ChatGPT auth command or arguments.");
-        return 1;
-      }
-      return attemptStore(store, async () => {
-        const data = await store.read();
-        const c = data.credential;
-        stdout.writeLine(
-          `ChatGPT: signed_in=${c?.accessToken !== undefined ? "True" : "False"} ` +
-            `plan=${c?.scopes.includes(CHATGPT_DIRECT_SCOPE) ? "True" : "False"} client_id=${c?.clientId ?? "none"}`,
-        );
-        return true;
-      }, stdout, stderr);
+      if (args.length !== 3) return unknownCommand(stderr);
+      return runAuth(async () => {
+        const status = await auth.status();
+        stdout.writeLine(`ChatGPT: signed_in=${status.signedIn ? "True" : "False"} plan=${status.planEnabled ? "True" : "False"} client_id=${status.clientId ?? "none"}`);
+      }, stderr);
     case "logout":
-      if (args.length !== 3) {
-        stderr.writeLine("ChatGPT: Unknown ChatGPT auth command or arguments.");
-        return 1;
-      }
-      return attemptStore(store, async () => {
-        await store.update(async () => {});
-      }, stdout, stderr);
+      if (args.length !== 3) return unknownCommand(stderr);
+      return runAuth(async () => {
+        const revoked = await auth.signOut();
+        stdout.writeLine(revoked ? "Signed out of ChatGPT." : "Signed out locally. Remote revocation was not confirmed; disconnect the app in ChatGPT Settings.");
+      }, stderr);
     case "models":
-      if (args.length !== 3) {
-        stderr.writeLine("ChatGPT: Unknown ChatGPT auth command or arguments.");
-        return 1;
-      }
-      return attemptStore(store, async () => {
-        await store.update(async () => {});
-      }, stdout, stderr);
+      if (args.length !== 3) return unknownCommand(stderr);
+      return runAuth(async () => {
+        for (const model of await auth.listModels()) stdout.writeLine(`chatgpt/${model}  ${model}`);
+      }, stderr);
     default:
-      stderr.writeLine("ChatGPT: Unknown ChatGPT auth command or arguments.");
-      return 1;
+      return unknownCommand(stderr);
   }
 }
 
-/**
- * Attempt the store through the lock seam. A `lock-unavailable` (the contract-
- * mandated fail-closed default) surfaces the honest message and exit 1. If the
- * store is genuinely available the operation runs — `status` handles the result
- * and returns 0; the login/logout/models flows are not yet wired, so they still
- * fail closed honestly.
- */
-async function attemptStore(
-  store: CredentialStore,
-  operation: () => Promise<boolean | void>,
-  stdout: TextWriter,
-  stderr: TextWriter,
-): Promise<number> {
-  let handled = false;
+async function runAuth(operation: () => Promise<void>, stderr: TextWriter): Promise<number> {
   try {
-    const result = await operation();
-    handled = result === true;
+    await operation();
+    return 0;
   } catch (error) {
     if (error instanceof LockUnavailableError || (error instanceof Error && "code" in error && error.code === "lock-unavailable")) {
       stderr.writeLine(AUTH_CHATGPT_NOT_AVAILABLE);
+    } else if (error instanceof ChatGptAuthError) {
+      stderr.writeLine(`ChatGPT: ${error.message}`);
+    } else if (error instanceof Error && error.name === "AbortError") {
+      stderr.writeLine("ChatGPT authorization cancelled or timed out.");
     } else {
-      stderr.writeLine(`ChatGPT: ${errorMessage(error)}`);
+      stderr.writeLine(`ChatGPT command failed: ${error instanceof Error ? error.name : "Error"}`);
     }
     return 1;
   }
-  if (handled) return 0;
-  stderr.writeLine(AUTH_CHATGPT_NOT_AVAILABLE);
-  return 1;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function unknownCommand(stderr: TextWriter): number {
+  stderr.writeLine("ChatGPT: Unknown ChatGPT auth command or arguments.");
+  return 1;
 }

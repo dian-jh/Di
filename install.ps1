@@ -105,6 +105,8 @@ Copy-Tree (Join-Path $RepoRoot "node_modules\marked") (Join-Path $TsNodeModules 
 Copy-Tree (Join-Path $RepoRoot "node_modules\get-east-asian-width") (Join-Path $TsNodeModules "get-east-asian-width")
 Copy-Tree (Join-Path $RepoRoot "node_modules\iconv-lite") (Join-Path $TsNodeModules "iconv-lite")
 Copy-Tree (Join-Path $RepoRoot "node_modules\safer-buffer") (Join-Path $TsNodeModules "safer-buffer")
+Copy-Tree (Join-Path $RepoRoot "node_modules\koffi") (Join-Path $TsNodeModules "koffi")
+Copy-Tree (Join-Path $RepoRoot "node_modules\undici") (Join-Path $TsNodeModules "undici")
 if (-not (Test-Path $InstalledEntry)) {
     throw "installed CLI entry missing after copy: $InstalledEntry"
 }

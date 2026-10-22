@@ -23,8 +23,11 @@ logout 撤销 refresh token 并清空本地令牌，保留 host ID 和 issued cl
 scope 或字段不合法时拒绝替换已有连接。回调在 127.0.0.1 随机端口监听，5 分钟超时。
 
 凭据位于 $DI_HOME/auth/chatgpt/credentials.json（默认 ~/.di）。
-Windows 使用当前用户目录 ACL；Unix 为目录 0700、文件 0600。存储仅有一个
-UpdateAsync 写入口，文件锁覆盖读取、刷新和原子替换，避免跨进程重复使用轮换令牌。
+Windows 使用当前用户目录 ACL；Unix 为目录 0700、文件 0600。`CredentialStore.update` 是唯一写入口，
+`NativeOsLockProvider` 用 Windows `LockFileEx` 或 POSIX `flock` 覆盖读取、网络刷新和原子替换，避免跨进程
+重复使用轮换令牌。Windows x64 已通过合成双进程竞争与持锁进程强杀释放验证；Linux/macOS 尚未本机验收。
+
+TS CLI 的认证与模型请求通过 `packages/coding-agent/src/cli/windows-system-proxy.ts` 的 `createSystemProxyFetch` 默认读取 Windows 当前用户静态系统代理；其它平台目前使用直接 fetch。PAC/WPAD 尚未实现，遇到自动配置会明确报错，不静默直连。注入测试 fetch 时不会读取真实代理设置。
 旧格式升级时保留原先 active credential。状态检查只读本地凭据；实际请求或刷新目录时
 才刷新即将过期的 token。临时网络错误保留凭据，终态 refresh 错误清空令牌并要求重新登录。
 
@@ -112,9 +115,12 @@ max token 或 stop 选项会在请求前报 UNSUPPORTED_OPTION。
 
 ## 参考与验证
 
-- 本地 pi：packages/ai/src/auth/oauth/openai-chatgpt.ts
-- 本地 pi：packages/coding-agent/src/core/model-resolver.ts
-- 本地 pi：packages/coding-agent/src/core/agent-session.ts 的 setModel
+- `packages/coding-agent/src/core/auth/chatgpt-auth.ts`：`ChatGptAuth`
+- `packages/coding-agent/src/core/auth/credential-store.ts`：`CredentialStore`
+- `packages/coding-agent/src/core/auth/lock-provider.ts`：`NativeOsLockProvider`
+- `packages/coding-agent/src/cli/auth-command.ts`：`defaultChatGptStore`、`runAuthCommand`
+- `packages/coding-agent/src/cli/provider-runtime.ts`：`createDefaultProviderRuntime`
+- `packages/ai/src/providers/chatgpt/adapter.ts`：`ChatGptAdapter`
 - [官方注册与授权](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
 - [官方刷新与撤销](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)
 - [官方模型与 Responses](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
@@ -125,4 +131,4 @@ max token 或 stop 选项会在请求前报 UNSUPPORTED_OPTION。
 本地测试使用模拟服务与 loopback 回调，覆盖 OAuth 契约、刷新串行化、失败保留凭据、
 跨 provider 路由、切换失败、busy 拒绝、动态预算、强度修改、缓存读写计量、原始 output 回放、
 会话标识传递和 TUI 目录解码。测试不发送真实推理请求。
-真实账户访问权限仍需完成浏览器登录后验证。
+真实账户的本地凭据刷新通过生产 CredentialStore、OS 锁和 Windows 静态代理完成。一次 `gpt-6.1-sol`、`low` reasoning smoke 返回 `finish=stop`，usage 为输入 11、输出 5、合计 16 tokens；此前不支持的 `minimal` 档位曾返回 HTTP 400。该 smoke 禁用重试，仅记录状态和用量，不保存响应正文或凭据。

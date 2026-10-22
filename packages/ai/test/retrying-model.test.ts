@@ -8,6 +8,7 @@ import {
   SseStreamError,
   DeepSeekError,
   deepSeekErrorCodes,
+  defaultRetrySleep,
 } from "@di/ai";
 
 /**
@@ -320,4 +321,17 @@ test("a clean successful stream is never retried", async () => {
   assert.deepEqual(events.map((e) => e.type), ["completed"]);
   assert.equal(model.attempts(), 1);
   assert.deepEqual(waits, []);
+});
+
+test("default retry sleep removes its AbortSignal listener after the timer resolves", async () => {
+  const controller = new AbortController();
+  let adds = 0;
+  let removes = 0;
+  const add = controller.signal.addEventListener.bind(controller.signal);
+  const remove = controller.signal.removeEventListener.bind(controller.signal);
+  Object.defineProperty(controller.signal, "addEventListener", { value: (...args: Parameters<AbortSignal["addEventListener"]>) => { adds++; return add(...args); } });
+  Object.defineProperty(controller.signal, "removeEventListener", { value: (...args: Parameters<AbortSignal["removeEventListener"]>) => { removes++; return remove(...args); } });
+  await defaultRetrySleep(1, controller.signal);
+  assert.equal(adds, 1);
+  assert.equal(removes, 1);
 });

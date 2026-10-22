@@ -1,83 +1,64 @@
-# di
+# Di
 
-简洁的 ReAct 编码助手（harness）——读文件、改代码、跑命令、调用模型。
+Di 是本地编程助手，当前提供 TypeScript CLI（`di-ts`）和现有 C# CLI（`di`）。迁移发布门槛完成前，两者并行安装。
 
-- **harness 层**（`Core/`）：会话驱动 API（`Core.AgentLoop.AgentRunner`）+ 事件流 + 模型层 + 工具。
-- **CLI 层**（`Di.Cli/`）：薄壳——参数解析 / 模式选择 / 渲染，可整体换语言重写（见 `docs/cli.md`）。
+## Install the TypeScript CLI
 
-## 安装（全局命令 `di`）
-
-在仓库根目录运行：
-
-```bat
-:: cmd
-install.cmd
-```
+需要 Node.js 22.19 或更新版本以及 npm。在仓库根目录运行：
 
 ```powershell
-# PowerShell
-powershell -ExecutionPolicy Bypass -File install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-脚本会 `dotnet publish` 出 win-x64 自包含单文件 `di.exe`（免 .NET 运行时），
-复制到 `~/.di/bin/`，并把该目录**幂等**追加到用户 PATH；同时构建 TS TUI 并安装到
-`~/.di/tui/`（node/npm 缺失或构建失败只告警，di 单独仍可用）。新开终端后：
+安装脚本会构建 TypeScript workspace，将私有运行时安装到 `~/.di/ts-cli`，并在 `~/.di/bin` 创建 `di-ts` 启动器。它会保留已有的 `~/.di/bin/di` 或 `di.exe`，不会迁移或改写配置、会话、skills、commands 或凭据。默认会将 `~/.di/bin` 加入用户 PATH，之后请打开新终端。使用 `-SkipPathUpdate` 可保持 PATH 不变。
 
-```bat
-di --version
+只构建而不安装：
+
+```powershell
+npm ci
+npm run build
+node .\packages\coding-agent\dist\cli\main.js --info
 ```
 
-## 用法
+使用 `di-ts` 启动 TypeScript CLI。迁移发布门槛完成前，普通 `di` 命令仍指向现有 C# CLI。
 
-> headless / JSON 契约与退出码语义见 `docs/cli.md` §4；本处为面向用户的示例。
+## Use
 
-```bat
-di "读一下 README"                :: headless 单发（文本，跑一个回合即退出）
-di --mode json "分析这个函数"       :: headless 单发（JSON 单文档，脚本友好）
-echo 总结 | di                    :: 无位置参数时从 stdin 读提示词
-di                                :: 交互 TS TUI（未装 TUI 时自动回退旧 REPL）
-set DI_UI=repl && di              :: 强制使用旧 C# REPL（/help /clear /exit）
-di --list-models                  :: 列出可用模型
-di -m deepseek-v4-pro "跑测试"      :: 指定模型 / --provider 指定 provider
-di --no-session --no-ansi "x"      :: 脚本友好：不写会话日志、无 ANSI
+```text
+di-ts --info
+di-ts --help
+di-ts --list-models
+di-ts --mode json "Summarize this repository"
+di-ts --print "Explain this function"
 ```
 
-交互模式默认启动 `tui/` 的 TypeScript 前端（`node ~/.di/tui/dist/main.js`，继承终端）；想用原来的
-C# REPL，设环境变量 `DI_UI=repl`。详情（`DI_TUI` 覆盖入口、TTY / node 判定、回退规则）与完整
-headless / JSON 契约见 `docs/cli.md` §3.4 / §4。退出码：`0` 成功；`1` 用法错误 / 运行错误
-（模型不可用等）。
+默认交互模式在可用时使用 TypeScript TUI。`--mode rpc` 用作 TUI 后端。CLI 模式、退出码和会话恢复行为见 [`docs/cli.md`](docs/cli.md)。
 
-## 配置
+## Configure a provider
 
-> 分层配置与 `~/.di` 家目录的规范定义见 `docs/di-home.md`；本处为面向用户的摘录。
-
-分层 JSON 配置，后加载覆盖先加载：
-
-1. `appsettings.json`（内置默认，随 exe 走）
-2. `~/.di/config.json`（用户全局）
-3. `<工作区>/.di/config.json`（项目级，随仓库走）
-4. 环境变量（运行时覆盖）
-
-API Key：环境变量 `DEEPSEEK_API_KEY`，或写进 `~/.di/config.json`。常用覆盖项：
+TypeScript CLI 按默认值、`~/.di/config.json`、`<workspace>/.di/config.json` 的顺序加载配置，环境变量优先级最高。使用 DeepSeek 时，设置 `DEEPSEEK_API_KEY`，或在用户配置中添加密钥：
 
 ```json
 {
-  "DeepSeek": { "ApiKey": "sk-..." },
-  "AgentLoop": { "MaxIterations": 0 }
+  "DeepSeek": { "ApiKey": "your-key" }
 }
 ```
 
-`AgentLoop:MaxIterations` 是单回合的迭代预算（一次迭代约一次模型往返，通常含一次工具调用）；
-默认 `0` 表示不限轮数。设置正整数可启用显式上限；轮数限制之外，每次模型调用前还有上下文预算检查，超限会以 `context_limit` 暂停并保留轨迹。
+不要将 API 密钥提交到仓库。由于尚未启用跨进程 OS advisory lock，TypeScript 的 ChatGPT 凭据存储当前会安全失败关闭；生产模型路由也尚未接入 ChatGPT。因此此 CLI 暂不支持 ChatGPT 登录或调用。配置与数据目录见 [`docs/di-home.md`](docs/di-home.md)。
 
-`AgentLoop:HistoryBudgetRatio`（默认 0.5）是**跨回合记忆**占模型上下文窗口的比例上限：
-超限自动丢最旧整回合，防止长会话把上下文撑爆。窗口来自模型目录（DeepSeek 为 1M token）。
+## Sessions and reference implementation
 
-会话日志默认写入 `~/.di/sessions/YYYY/MM/DD/*.jsonl`。
+TypeScript CLI 默认将会话日志写入 `~/.di/sessions/`；设置 `DI_HOME` 可更换数据根目录。迁移期间以 C# 实现作为行为参考，固定基线为 `09f4e0816c1b2dc42461e79a968b46e811d3880c`。迁移状态与未完成的发布门槛见 [`docs/migration/typescript-core/progress.md`](docs/migration/typescript-core/progress.md)。
 
-## 开发
+## Development
 
-```bat
-dotnet test Di.Tests
-dotnet test Di.Cli.Tests
+```powershell
+npm run build
+npm run typecheck
+npm test
+npm run test:compat
 ```
+
+`npm run test:compat` 还需单独构建好的 workspace 包；先运行 `npm run build`。它执行固定 C# 基线的双向 session 兼容探针，以及本地 HTTP SSE provider→loop→session store 探针，不访问真实 provider。
+
+C# solution 和原有行为文档继续保留供参考。项目文档索引从 [`docs/README.md`](docs/README.md) 开始。

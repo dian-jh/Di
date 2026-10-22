@@ -53,6 +53,27 @@ test("isolated install copies all CLI runtime dependencies and preserves user fi
   const installedModules = join(diHome, "ts-cli", "node_modules");
   assert.ok(existsSync(join(installedModules, "iconv-lite", "package.json")), "iconv-lite must be present in the private installed runtime");
   assert.ok(existsSync(join(installedModules, "safer-buffer", "package.json")), "safer-buffer must be present in the private installed runtime");
+  const koffiRoot = join(installedModules, "koffi");
+  assert.ok(existsSync(join(koffiRoot, "package.json")), "koffi must be present in the private installed runtime");
+  assert.ok(existsSync(join(koffiRoot, "build", "koffi", "win32_x64", "koffi.node")), "prebuilt Windows x64 Koffi binary must be copied");
+
+  const koffiImport = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", "const koffi = await import(process.argv[1]); if (!(koffi.version || koffi.default?.version)) process.exit(3)", pathToFileURL(join(koffiRoot, "index.js")).href],
+    { cwd: tempRoot, encoding: "utf8", windowsHide: true, timeout: 30_000, env: { ...process.env, DI_HOME: diHome, DEEPSEEK_API_KEY: "", NODE_PATH: "" } },
+  );
+  assert.equal(koffiImport.error, undefined, `installed Koffi could not start: ${koffiImport.error?.message ?? ""}`);
+  assert.equal(koffiImport.status, 0, `installed Koffi could not load its prebuilt native module (exit ${koffiImport.status})\n${koffiImport.stdout}\n${koffiImport.stderr}`);
+
+  const undiciRoot = join(installedModules, "undici");
+  assert.ok(existsSync(join(undiciRoot, "package.json")), "undici must be present in the private installed runtime");
+  const undiciImport = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", "const u = await import(process.argv[1]); if (typeof u.fetch !== 'function' || typeof u.ProxyAgent !== 'function') process.exit(3)", pathToFileURL(join(undiciRoot, "index.js")).href],
+    { cwd: tempRoot, encoding: "utf8", windowsHide: true, timeout: 30_000, env: { ...process.env, DI_HOME: diHome, DEEPSEEK_API_KEY: "", NODE_PATH: "" } },
+  );
+  assert.equal(undiciImport.error, undefined, `installed Undici could not start: ${undiciImport.error?.message ?? ""}`);
+  assert.equal(undiciImport.status, 0, `installed Undici could not load private fetch/ProxyAgent (exit ${undiciImport.status})\n${undiciImport.stdout}\n${undiciImport.stderr}`);
 
   const installedEncoding = join(dirname(installedEntry), "..", "core", "tools", "encoding.js");
   const encodingImport = spawnSync(
