@@ -75,8 +75,12 @@ test("a fetch-level connection failure maps to a retryable CONNECTION error", as
   );
 });
 
-test("parses an HTTP-date Retry-After into providerRetryAfterMs", async () => {
-  const retryAfterDate = new Date(Date.now() + 5000).toUTCString();
+test("parses an HTTP-date Retry-After into providerRetryAfterMs", async (t) => {
+  // HTTP-date has whole-second precision. The fixed current time is 1.001s
+  // after the header's source time, leaving exactly 3999ms until its date.
+  const now = 1_700_000_001_001;
+  const retryAfterDate = new Date(1_700_000_005_000).toUTCString();
+  t.mock.timers.enable({ apis: ["Date"], now });
   const fetchImpl = async (): Promise<Response> =>
     new Response('{"error":{"message":"Rate limit exceeded","type":"rate_limit_exceeded"}}', {
       status: 429,
@@ -89,9 +93,7 @@ test("parses an HTTP-date Retry-After into providerRetryAfterMs", async () => {
     (err) =>
       err instanceof DeepSeekError &&
       err.code === "RATE_LIMITED" &&
-      typeof err.providerRetryAfterMs === "number" &&
-      err.providerRetryAfterMs >= 4000 &&
-      err.providerRetryAfterMs <= 6000,
+      err.providerRetryAfterMs === 3999,
   );
 });
 
