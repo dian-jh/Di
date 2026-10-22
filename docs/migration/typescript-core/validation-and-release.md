@@ -6,7 +6,7 @@
 
 验收按用户可观察行为与数据安全语义做，不以 TS 测试数等于旧测试数作为目标。现有基线快照是 943 项 .NET 非集成测试、116 项 TUI 测试；它只描述一次验收，不是未来永久门槛。应逐项映射行为，补足旧测试未覆盖的跨进程损坏、双向格式兼容与平台差异。
 
-TDD 每个工作单元遵循：先在目标 workspace 写 `node:test` 行为测试，运行确认失败且失败原因对应缺失行为；实现最小逻辑；重跑对应测试到绿；最后跑包级 typecheck/test。未来建议脚本命令是 `npm test --workspace @di/coding-agent`、`npm run typecheck --workspace @di/coding-agent` 等，只有 P 阶段真正创建 scripts 后才可执行。在对应 scripts 落地前不要报告这些命令已存在或已运行。暂不要求为文档任务运行 .NET/TUI 套件；迁移实现时根据变更执行对应 gate。
+TDD 每个工作单元遵循：先在目标 workspace 写 `node:test` 行为测试，运行确认失败且失败原因对应缺失行为；实现最小逻辑；重跑对应测试到绿；最后跑包级 typecheck/test。根 `package.json` 及各 workspace manifests 已提供 `npm test --workspace @di/coding-agent`、`npm run typecheck --workspace @di/coding-agent` 等命令；先构建跨包导出，再检查和测试。文档任务只验证受影响链接及事实；实现任务按变更执行对应 gate。
 
 TS 与 C# 比较时规范化易变的 timestamp、cwd、随机 session id 和随机 turn id。不可规范化/抹去工具 `call_id`、`name`、原始 `arguments` 字符串、message ordering、record ordering、started/result 先后。对 JSON 对象字段顺序可按语义比较；另有 writer byte fixture 时再断言输出 key 顺序、UTF-8 和 LF。
 
@@ -84,36 +84,26 @@ dotnet run --project <temp-harness>/Reference.csproj -- read <ts-writer-session.
 
 实际脚本需保存两侧 stdout/stderr、退出码、JSONL、hash 前后值与规范化消息 diff；如果 `dotnet` 不存在则 compatibility gate 标为未执行/阻塞该发布门槛，不能跳过后报告整体通过。`Core/Core.csproj` 是 Di 基线中已核实存在的项目路径。
 
-## 平台 CI 蓝图（尚不存在）
+## 平台 CI：实际执行范围
 
-仓库当前没有 tracked workflow。未来 CI 在 P0–P9 总计划指定的工具链/集成阶段创建，建议 Windows、macOS、Linux 三平台矩阵，Node 最低支持版本 22.19 与 24.x。执行顺序必须是 `npm ci` → build 依赖 workspace 的 JS 与 `.d.ts` → typecheck → unit/integration tests；typecheck 若先于依赖 build 可能误用旧产物或失败在 workspace exports。首期版本固定建议从源 lock 已核实值出发：TypeScript `5.9.3`、`@types/node` `22.20.5`、`pi-tui` `1.2.0`；具体 workspace manifests 与 root lockfile 尚不存在，在相应阶段再提交。包 manager 为 npm workspaces，测试为 `node:test`，模块 ESM strict、TypeScript `noUncheckedIndexedAccess`、erasable TS；这些是已批准方案，不是当前仓库配置事实。
+唯一配置来源是 `.github/workflows/typescript-core.yml` 的 `verify` job。push 或 pull_request 触发 Windows、macOS、Ubuntu × Node 22.19.0 / 24，共六个独立任务；`fail-fast: false` 保留所有平台的结果。Actions 自身使用 Node 24 运行时，测试使用各矩阵指定的 Node 版本。
 
-未来 workflow 结构草案（文件尚未创建，不能直接运行；action ref 为待核实 SHA 占位符，不代表已选版本）：
+| 步骤 | 实际命令 / 验证范围 |
+|---|---|
+| 获取源码与工具链 | 完整 Git 历史（C# harness 需要固定基线），矩阵 Node，以及仅供兼容测试使用的 .NET 10 SDK |
+| 安装锁定依赖 | `npm ci`，使用根 `package-lock.json` |
+| 构建 | `npm run build`，先生成依赖 workspace 的 JS / `.d.ts` |
+| 类型检查 | `npm run typecheck` |
+| 平台 shell 前提 | Windows 验证 `powershell.exe`，POSIX 验证 `pwsh`；CI 缺少必需 shell 会报错 |
+| 单元测试 | `npm run test --workspaces --if-present`，运行原 TUI、`@di/agent`、`@di/ai`、`@di/coding-agent` 的测试；复用已构建产物 |
+| 兼容测试 | `npm run test:compat`，运行 `packages/coding-agent/test/compat/` 中的 C# 双向会话互读、两个 provider 的本地 SSE → loop → session、坏流、大日志与 UTF-8 恢复、长测工具自身检查 |
+| 留存证据 | job summary 区分各检查结果，`test-logs-<OS>-node-<version>` artifact 保存 unit / compat 日志 |
 
-```yaml
-name: TypeScript Core
-on: [push, pull_request]
-jobs:
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-        node: ['22.19', '24']
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@<CHECKOUT_ACTION_SHA>
-      - uses: actions/setup-node@<SETUP_NODE_ACTION_SHA>
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: npm run typecheck
-      - run: npm test
-```
+兼容测试在构建成功且任务未取消时独立执行，即使单元测试失败也保留兼容性证据；任一测试失败仍使整个 job 失败。首次运行 39717236044 使用旧的默认步骤条件，六个 unit 均失败，因而 compat 全部 skipped；不能把安装 .NET SDK 当成已经执行 C# 互读验收。具体运行结果保存在 [进度表](progress.md)。
 
-这是 pipeline 形状提案，不是可复制即用的 workflow：实现者需核对 action pin 策略、Node 最低 patch 版本可用性、各 workspace scripts，并将 action pin 到仓库安全策略要求的版本/SHA。若最低 Node 22.19 无可用 runner，增加一个显式版本安装 smoke，而不是把 engine 声明悄悄提高。依赖更新必须更新 lockfile、在三平台跑完矩阵并检查 SSE/crash fixtures 未改变语义。
+所有自动用例使用合成凭据、临时目录与 loopback 服务。真实 provider smoke、35 分钟预热及 10 小时长测、向用户目录安装、部署和默认 `di` 入口切换不在该 workflow 中。compat 中的 soak supervisor 测试仅验证启动、状态和来源记录，不等于完成 10 小时稳定性验收。
+
+工具链版本以 workspace manifests 与根锁文件为准。Action pin 使用已核实的发布 SHA，依赖更新需重跑三平台矩阵并检查 SSE/crash fixtures 未改变语义。
 
 平台检查点：Windows 验证 CRLF 输入仍只按 LF JSONL framing、输出严格 UTF-8/no BOM、路径有空格/反斜线、子进程被强制终止后句柄释放；macOS/Linux 验证 chmod/executable packaging、shell 子进程退出、临时目录权限。session JSON 字段与换行应平台一致，cwd/path 是显式值不做 golden 固定。
 
@@ -125,7 +115,7 @@ jobs:
 
 建议迁移分支/工作区与基线分开：`migration/typescript-core` worktree 是可变的实现现场，只用于当前工作；review 基线始终用 pinned SHA 的 `git show` 或独立只读 worktree。切换失败时保留新 session 数据，启动旧 C# branch/worktree 继续工作；不要尝试用旧二进制恢复新 schema，除非双向测试明确证明该具体记录子集兼容。若转换工具后续出现，应先写新文件、完整校验并保留源文件，禁止原地覆写。
 
-发布关卡采用逐步升级：先 CI 通过和本地隔离验收；再以新命令并行试用；完成 session/配置兼容和回退证据后再切换默认入口。本文未发布、未安装、未改默认命令，也没有运行尚不存在的 npm 脚本。
+发布关卡采用逐步升级：先 CI 通过和本地隔离验收；再以新命令并行试用；完成 session/配置兼容和回退证据后再切换默认入口。`install.ps1` 当前安装并行命令 `di-ts`，保留既有 C# `di`；CI 不自动安装到用户目录或切换默认入口。
 
 ## 文档与实现交付条件
 

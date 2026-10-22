@@ -20,18 +20,18 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24 action runtime
         with:
           fetch-depth: 0 # the C# compatibility harness archives its pinned baseline commit
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Set up .NET 10 SDK
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
@@ -39,28 +39,58 @@ jobs:
         run: npm ci
 
       - name: Build workspaces
+        id: build
         run: npm run build
 
       - name: Typecheck workspaces
+        id: typecheck
         run: npm run typecheck
 
+      - name: Verify platform PowerShell runtime
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            powershell.exe -NoLogo -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()'
+          else
+            pwsh -NoLogo -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()'
+          fi
+
       - name: Run unit tests
+        id: unit
         shell: bash
         run: |
           set -o pipefail
           mkdir -p test-results
-          npm test 2>&1 | tee test-results/unit.log
+          npm run test --workspaces --if-present 2>&1 | tee test-results/unit.log
 
       - name: Run C# compatibility tests
+        id: compat
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: bash
         run: |
           set -o pipefail
           mkdir -p test-results
           npm run test:compat 2>&1 | tee test-results/compat.log
 
+      - name: Summarize verification scope
+        if: always()
+        shell: bash
+        env:
+          BUILD_RESULT: ${{ steps.build.outcome }}
+          TYPECHECK_RESULT: ${{ steps.typecheck.outcome }}
+          UNIT_RESULT: ${{ steps.unit.outcome }}
+          COMPAT_RESULT: ${{ steps.compat.outcome }}
+        run: |
+          {
+            printf 'Check | Result\n--- | ---\n'
+            printf 'Workspace build | %s\nTypecheck | %s\nUnit tests (TUI, agent, ai, coding-agent) | %s\nCompatibility tests | %s\n' "$BUILD_RESULT" "$TYPECHECK_RESULT" "$UNIT_RESULT" "$COMPAT_RESULT"
+            printf '\nCompatibility covers pinned C# session interoperability, local provider SSE/session flows, large-log recovery, and soak harness checks.\n'
+            printf '\nThis workflow uses synthetic credentials and loopback services. Real model smoke, the 10-hour soak, installation into the user profile, and deployment are outside this workflow.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Save test logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-logs-${{ matrix.os }}-node-${{ matrix.node }}
           path: test-results/*.log
