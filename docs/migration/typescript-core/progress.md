@@ -4,16 +4,21 @@
 > 契约见 execution-plan.md / 各叶子文档。状态只用 `todo` / `in_progress` / `blocked` / `verified`。
 > 预研四项发现已提交（27e3e60），状态 `verified`：选型结论与最终发布验收仍需独立复核。
 
-## 当前接手摘要（2026-10-21，本轮复核）
+## 当前接手摘要（2026-10-22，本轮复核）
 
 | 范围 | 当前事实 / 下一动作 |
 |---|---|
 | 已有实现 | 三个 TS 包、原 TUI、核心循环、DeepSeek、ChatGPT 协议/OAuth组件、八工具组件、Skills、会话恢复、CLI/RPC、本地 Runner、隔离安装/回退；历史测试证据见各卡，不能据此宣布全迁移完成 |
-| 本轮任务 | `P4-shell-session-composition-root-wiring`：verified；默认 host 持久接线、OEM 输入、隔离安装与回归已完成，证据见末尾交接 |
-| 生产 ChatGPT | `packages/coding-agent/src/cli/cli-host-compose.ts` 的 `defaultModelForLabel` 仍拒绝 ChatGPT，`CatalogModelService.checkAuth` 返回 false；`packages/coding-agent/src/core/auth/lock-provider.ts` 的 `FAIL_CLOSED_LOCK_PROVIDER` 没有真实 OS 锁适配器，不能把组件完成记为生产可用 |
-| 生产预算 | 同一组合根构造 `AgentSession` 时未传 `tokenBudget` / `budgetTracker`，ContextLimit guard 未接通；后续按模型已知窗口/配置接线，并补组合根业务测试（对应 `loop-and-state.md` 预算契约） |
-| 长时间验收 | 既有 PID 118036 仍运行；2026-10-21 14:33:46Z 采样为 85,376 轮、0 失败、子进程创建/退出相等，未满 10h，尚无终态 `status.json`；到期后须按冻结 manifest 检查，不能提前记 verified |
-| 其他发布门槛 | 非 Windows 平台、最低 Node 22.19、真实 provider smoke 与默认入口切换仍需实际证据；不覆盖现有安装和用户数据 |
+| 本轮任务 | 全迁移收尾：in_progress；三个轻量子代理分别完成生产预算/L1、认证/原生锁、兼容/发布工具，后因服务用量限制停止；主代理接手全局复核、系统代理与大日志恢复修复。提交按 `git log` 核实；上一卡持久 shell 接线已 verified（daa6e95） |
+| 生产 ChatGPT | `packages/coding-agent/src/cli/provider-runtime.ts` 的 `createDefaultProviderRuntime` 已接入认证、适配器和重试；`packages/coding-agent/src/core/auth/lock-provider.ts` 的 `NativeOsLockProvider` 提供 Windows LockFileEx / POSIX flock。Windows 跨进程互斥、进程终止释放、并发刷新一次的隔离测试已通过，POSIX 尚待实机验证 |
+| 生产预算 | `packages/coding-agent/src/cli/cli-host-compose.ts` 已接入动态模型窗口、`InputBudgetTracker`、`BudgetPolicy`、`CompactingExecutor` 和回合配置。`packages/coding-agent/test/cli/context-budget.test.ts` 覆盖预算及 L1 artifact 行为 |
+| 长时间验收 | 旧 run `soak-2026-10-21T06-22-45-958Z` 已满 600 分钟：103,932 轮全部成功、0 残留子进程；checker **FAIL**，RSS 最大增量 81,428,480 B 超过冻结 20,971,520 B，恢复失败 78/346 次。该 run 无候选 git SHA 且期间 dist 有变化，不能作为最终候选通过证据。恢复失败已复现为 693,404,028 B 日志触发 `ERR_STRING_TOO_LONG`，`loadRecovery` 增量读取修复后该原日志恢复成功（49 条消息，约 12.2 秒）；RSS 原因仍待固定候选重测，未修改旧 manifest |
+| 真实 smoke | 用户明确授权本轮读取真实凭据并要求低 token。DeepSeek 单次通过（9 input / 1 output / 10 total）；ChatGPT 锁内刷新成功，首次误用 minimal 返回 400，纠正为 low 后通过（11 input / 5 output / 16 total，reasoning 0）。普通 unit/CI 仍只用隔离凭据；手动入口为 `packages/coding-agent/test/opt-in/provider-smoke.mjs` |
+| 本轮验证 | Windows Node 24 根 build/typecheck 通过，TUI 143、agent 50、ai 174；最终 coding-agent 848 通过 / 1 既有跳过，合计 1,215 通过 / 1 跳过。Node 22.19 根 build/typecheck/test 通过（coding-agent 846 / 1，其余同前），compat 8/8；后续代理、OAuth、增量恢复及跨块 UTF-8 变更又以 Node 22 跑 63/63 focused 通过。Node 24 最终 compat 9/9。20 篇本轮受影响文档的 Markdown 相对链接均有效，UTF-8 替换字符扫描无异常 |
+| 固定候选重测 | 候选 `46d58df854b8577f2a7cd239734d525bbe9863b4` 已检出到 `%TEMP%/di-ts-candidate-46d58df` 独立 detached worktree，`npm ci --ignore-scripts` 与根 build 成功，git clean。2026-10-22 00:32:10Z 启动 35 分钟 warmup，随后自动冻结该候选 manifest（沿用原数值阈值，不调宽），运行 600 分钟 full 并调用 checker。序列 PID 46496；状态 `%TEMP%/p9-soak-candidate-46d58df-20261022T0032/sequence.json`，当前 phase=warmup，未记通过；无失败时预计北京时间 2026-10-22 19:07 后得到最终结果 |
+| 其他发布门槛 | 非 Windows 实机、真实 PAC/WPAD 网络环境、最终候选 10h soak 与默认入口切换仍需实际证据。ChatGPT 的生产认证/模型请求默认使用 Windows 系统代理；DeepSeek 按 UseSystemProxy 配置。自动代理已接系统解析器并通过合成路由/错误测试及一次无模型消耗的本机 resolver 探针；不覆盖现有安装和用户数据 |
+
+本轮本机日志保留于 `%TEMP%/di-migration-finish-20261021/`：`root-test-final.log`（早期根套件）、`coding-candidate-final.log`（最终编码代理套件）、`node22-final.log` / `node22-final-followup.log`、`original-soak-check.log`。未通过及主动终止的中间诊断日志也保留，不用后续绿测覆盖原始证据。新序列日志和 artifact 独立于旧 `%TEMP%/p9-soak/full`，原 manifest 未修改。普通 unit/CI 与长测不读取真实账户令牌或调用真实模型。
 
 ## 基线快照（P0 建立时）
 
