@@ -53,9 +53,10 @@ try {
   assert.equal(archive.status, 0, `cannot archive pinned C# baseline: ${archive.stderr}`);
   const baselineRoot = join(root, "baseline");
   mkdirSync(baselineRoot, { recursive: true });
-  const extract = spawnSync("tar", ["-xf", "-", "-C", baselineRoot], {
+  const extract = spawnSync("tar", ["-xf", "-"], {
     input: archive.stdout,
     encoding: "utf8",
+    cwd: baselineRoot,
   });
   assert.equal(extract.status, 0, `cannot extract pinned C# baseline: ${extract.stderr}`);
   const tsRoot = join(root, "ts");
