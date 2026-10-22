@@ -61,7 +61,8 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p test-results
-          npm run test --workspaces --if-present 2>&1 | tee test-results/unit.log
+          node --test tools/test/run-ci-unit-tests.test.mjs 2>&1 | tee test-results/ci-runner.log
+          node tools/run-ci-unit-tests.mjs 2>&1 | tee test-results/unit.log
 
       - name: Run C# compatibility tests
         id: compat
