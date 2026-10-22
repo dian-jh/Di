@@ -14,7 +14,8 @@
   "scripts": {
     "build": "npm run build -w @di/ai && npm run build -w @di/agent && npm run build -w di-tui && npm run build -w @di/coding-agent",
     "test": "npm run build --workspaces --if-present && npm test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:compat": "node --test packages/coding-agent/test/compat/*.test.mjs packages/coding-agent/test/compat/*.test.ts"
   },
   "devDependencies": {
     "typescript": "5.9.3",

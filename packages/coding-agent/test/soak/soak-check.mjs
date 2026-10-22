@@ -51,7 +51,8 @@ const samples = readFileSync(args.samples, "utf8")
   .split("\n")
   .filter(Boolean)
   .map((l) => JSON.parse(l));
-const status = existsSync(args.status) ? readJson(args.status) : {};
+const statusAvailable = args.status !== undefined && existsSync(args.status);
+const status = statusAvailable ? readJson(args.status) : {};
 
 if (samples.length === 0) throw new Error("samples.jsonl is empty");
 
@@ -76,12 +77,18 @@ const last2hMax = Math.max(
   ...samples.filter((s) => s.uptime_ms >= (samples[samples.length - 1].uptime_ms - 2 * 3600_000)).map((s) => s.rss_bytes),
 );
 const turnFail = status.turnFail ?? samples[samples.length - 1].turn_fail ?? 0;
-const resumeSpawns = status.resumeSpawns ?? samples[samples.length - 1]?.turns_done ?? 0;
-const resumeOk = status.resumeOk ?? 0;
-const resumeFail = resumeSpawns - resumeOk;
-const wallMin = status.wallClockMs ? Math.round(status.wallClockMs / 60000) : 0;
+const resumeCountsAvailable =
+  Number.isInteger(status.resumeSpawns) && Number.isInteger(status.resumeOk) && status.resumeOk <= status.resumeSpawns;
+const resumeFail = resumeCountsAvailable ? status.resumeSpawns - status.resumeOk : undefined;
+const wallMin = Number.isFinite(status.wallClockMs) ? Math.round(status.wallClockMs / 60000) : undefined;
 
 const results = [
+  {
+    gate: "status_file",
+    threshold: "present",
+    observed: statusAvailable ? "present" : "missing",
+    pass: statusAvailable,
+  },
   {
     gate: "rss_max_delta_bytes",
     threshold: manifest.thresholds.rss_max_delta_bytes,
@@ -132,14 +139,14 @@ const results = [
   {
     gate: "resume_fail_max",
     threshold: manifest.thresholds.resume_fail_max,
-    observed: resumeFail,
-    pass: resumeFail <= manifest.thresholds.resume_fail_max,
+    observed: resumeCountsAvailable ? resumeFail : "unknown (status counters missing)",
+    pass: resumeCountsAvailable && resumeFail <= manifest.thresholds.resume_fail_max,
   },
   {
     gate: "wall_clock_min",
     threshold: manifest.thresholds.wall_clock_min,
-    observed: wallMin,
-    pass: wallMin >= manifest.thresholds.wall_clock_min,
+    observed: wallMin === undefined ? "unknown (status wallClockMs missing)" : wallMin,
+    pass: wallMin !== undefined && wallMin >= manifest.thresholds.wall_clock_min,
   },
 ];
 
@@ -150,7 +157,7 @@ for (const r of results) {
   if (!r.pass) overall = false;
   console.log(`  [${tag}] ${r.gate}: observed=${r.observed} threshold=${r.threshold}`);
 }
-if (status.completed === false) {
+if (statusAvailable && status.completed === false) {
   overall = false;
   console.log(`  [FAIL] status.completed=false (harness did not run the full wall-clock)`);
 }

@@ -1,6 +1,6 @@
 # Core 迁移执行顺序与任务卡
 
-> **状态：待实施。** 入口与基线见 [docs/migration/typescript-core/README.md](README.md)。本文件的 TS 产物 / scripts 均未创建。
+> **状态：实施中，发布验收未完成。** 入口与基线见 [docs/migration/typescript-core/README.md](README.md)，实际产物、命令和验证证据见 [进度表](progress.md)。下文“待创建”等措辞保留初始阶段要求，不代表当前源码缺失。
 > 完整模块映射和共用接口只在 [architecture.md](architecture.md) 维护；循环、模型、工具和恢复分别由对应叶子文档定义。
 
 ## 1. 依赖顺序与协作

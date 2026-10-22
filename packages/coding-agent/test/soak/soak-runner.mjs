@@ -27,7 +27,7 @@
  *       --session <file> --out <dir>          # resume child; prints RESUMED <ms>
  */
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   appendFileSync,
   closeSync,
@@ -46,6 +46,16 @@ import { createCliHost, DiHome } from "@di/coding-agent";
 
 const HERE_FILE = fileURLToPath(import.meta.url);
 const HERE_DIR = dirname(HERE_FILE);
+
+function sourceProvenance(workspace) {
+  const git = (args) => {
+    try { return execFileSync("git", args, { cwd: workspace, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); }
+    catch { return null; }
+  };
+  const gitSha = git(["rev-parse", "HEAD"]);
+  const dirtyPaths = (git(["status", "--porcelain"]) ?? "").split("\n").filter(Boolean);
+  return { gitSha, dirty: dirtyPaths.length > 0, dirtyPaths };
+}
 
 /** Short-lived child payloads: exit naturally (25ms) or park and get killed (30s). */
 const EXIT_CODE = "setTimeout(()=>{}, 25)";
@@ -309,7 +319,7 @@ async function runPhase(args) {
   const checkpointPath = store?.logFilePath;
   const runner = host.runner;
 
-  const runId = `soak-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  const runId = args["run-id"] ?? `soak-${new Date().toISOString().replace(/[:.]/g, "-")}`;
   const start = Date.now();
   const deadline = start + durationMin * 60_000;
   const runInfo = {
@@ -329,6 +339,8 @@ async function runPhase(args) {
     checkpointPath,
     node: process.version,
     platform: process.platform,
+    arch: process.arch,
+    ...sourceProvenance(workspace),
     model: "soak-fake (deterministic, no real provider)",
   };
   writeFileSync(runJsonPath, JSON.stringify(runInfo, null, 2));
@@ -356,7 +368,7 @@ async function runPhase(args) {
   if (!existsSync(csvPath)) {
     writeFileSync(
       csvPath,
-      "ts_utc,uptime_ms,rss_bytes,heap_used,handle_count,active_children,children_created,children_exited,turns_done,turn_ok,turn_fail,iterations,checkpoint_bytes,checkpoint_lines,last_resume_ms,cleared\n",
+      "ts_utc,uptime_ms,rss_bytes,heap_used,external_bytes,array_buffers_bytes,handle_count,active_children,children_created,children_exited,turns_done,turn_ok,turn_fail,iterations,checkpoint_bytes,checkpoint_lines,last_resume_ms,cleared\n",
     );
   }
 
@@ -371,6 +383,8 @@ async function runPhase(args) {
       uptime_ms: now - ctx.start,
       rss_bytes: mem.rss,
       heap_used: mem.heapUsed,
+      external_bytes: mem.external,
+      array_buffers_bytes: mem.arrayBuffers,
       handle_count: handles,
       active_children: activeChildren(),
       children_created: childState.created,
@@ -390,6 +404,8 @@ async function runPhase(args) {
       row.uptime_ms,
       row.rss_bytes,
       row.heap_used,
+      row.external_bytes,
+      row.array_buffers_bytes,
       row.handle_count,
       row.active_children,
       row.children_created,

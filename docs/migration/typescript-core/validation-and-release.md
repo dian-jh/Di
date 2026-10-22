@@ -1,6 +1,6 @@
 # TypeScript Core 验证与发布蓝图
 
-> 状态：未来迁移方案；当前没有 TypeScript Core 可执行脚本，也没有 tracked CI workflow。阶段与统一 gate 见 [`execution-plan.md`](execution-plan.md)；架构/包职责见 [`architecture.md`](architecture.md)。本文仅规范协议验证、兼容验收和切换风险控制。
+> 状态：实施中，尚未完成发布验收。根 `package.json` 已提供 build/typecheck/test/test:compat，`.github/workflows/typescript-core.yml` 已定义三平台 Node 22.19/24 矩阵，但 workflow 配置不等于远端执行通过。实际验证证据见 [进度表](progress.md)；阶段与统一 gate 见 [`execution-plan.md`](execution-plan.md)。本文规范协议验证、兼容验收和切换风险控制。
 
 ## 验收原则
 
