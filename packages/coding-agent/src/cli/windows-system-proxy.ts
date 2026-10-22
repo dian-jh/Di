@@ -17,6 +17,7 @@ export interface WindowsSystemProxyFetchOptions {
   readonly readSettings?: () => Promise<WindowsInternetProxySettings>;
   readonly directFetch?: (input: string, init?: RequestInit) => Promise<Response>;
   readonly proxyFetch?: (input: string, init: RequestInit | undefined, proxy: string) => Promise<Response>;
+  readonly resolveAutomaticProxy?: (input: string, signal?: AbortSignal) => Promise<string | undefined>;
 }
 
 export interface SystemProxyFetchOptions {
@@ -64,22 +65,26 @@ export function parseWindowsConnectionSettingsFlags(output: string): { readonly 
 }
 
 /**
- * A Web-API fetch seam for the configured Windows static user proxy. PAC and
- * WPAD deliberately fail closed: resolving their rules is a separate capability
- * and silently sending direct would violate `UseSystemProxy`.
+ * Windows static proxy routing, with PAC/WPAD decisions delegated to the OS
+ * proxy resolver through Windows PowerShell. Resolution errors never fall back.
  */
 export function createWindowsSystemProxyFetch(options: WindowsSystemProxyFetchOptions = {}): (input: string, init?: RequestInit) => Promise<Response> {
   const platform = options.platform ?? process.platform;
   const readSettings = options.readSettings ?? readWindowsInternetProxySettings;
   const directFetch = options.directFetch ?? ((input, init) => globalThis.fetch(input, init));
   const proxyFetch = options.proxyFetch ?? fetchThroughUndiciProxy;
+  const resolveAutomaticProxy = options.resolveAutomaticProxy ?? resolveWindowsSystemProxy;
 
   return async (input, init) => {
     if (platform !== "win32") throw new Error("DeepSeek:UseSystemProxy is available only on Windows.");
     const settings = await readSettings();
     if (!settings.connectionFlagsKnown) throw new Error("DeepSeek:UseSystemProxy automatic proxy flags could not be determined safely.");
     if (settings.autoConfigEnabled || settings.autoDetect || (settings.autoConfigUrl !== undefined && settings.autoConfigUrl.trim() !== "")) {
-      throw new Error("DeepSeek:UseSystemProxy PAC/WPAD auto-configuration is not supported by the TypeScript host.");
+      const selected = await resolveAutomaticProxy(input, init?.signal ?? undefined);
+      if (selected === undefined) return directFetch(input, init);
+      const proxy = proxyForTarget(selected, new URL(input).protocol);
+      if (proxy === undefined) throw new Error("Windows automatic proxy resolution returned an empty endpoint.");
+      return proxyFetch(input, init, proxy);
     }
     const target = new URL(input);
     if (!settings.enabled) return directFetch(input, init);
@@ -88,6 +93,37 @@ export function createWindowsSystemProxyFetch(options: WindowsSystemProxyFetchOp
     if (isBypassed(settings.bypass, target)) return directFetch(input, init);
     return proxyFetch(input, init, proxy);
   };
+}
+
+// Fixed code only: the request URL is passed as environment data, never shell code.
+// Windows PowerShell uses the OS-provided .NET Framework proxy resolver, including
+// automatic detection and PAC. No project C# build or installed .NET SDK is needed.
+const SYSTEM_PROXY_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+$target = [Uri]$env:DI_SYSTEM_PROXY_TARGET
+$systemProxy = [System.Net.WebRequest]::GetSystemWebProxy()
+if ($systemProxy.IsBypassed($target)) { @{ proxy = $null } | ConvertTo-Json -Compress }
+else { @{ proxy = $systemProxy.GetProxy($target).AbsoluteUri } | ConvertTo-Json -Compress }
+`;
+
+export function resolveWindowsSystemProxy(input: string, signal?: AbortSignal): Promise<string | undefined> {
+  if (process.platform !== "win32") return Promise.reject(new Error("Windows proxy resolution is unavailable on this platform."));
+  return new Promise((resolve, reject) => {
+    execFile("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(SYSTEM_PROXY_SCRIPT, "utf16le").toString("base64")], {
+      windowsHide: true, encoding: "utf8", timeout: 15_000, maxBuffer: 16 * 1024,
+      signal, env: { ...process.env, DI_SYSTEM_PROXY_TARGET: input },
+    }, (error, stdout) => {
+      if (error !== null) { reject(new Error("Windows automatic proxy resolution failed or timed out.", { cause: error })); return; }
+      try {
+        const result: unknown = JSON.parse(stdout.trim());
+        if (result === null || typeof result !== "object" || !("proxy" in result)) throw new Error("Invalid resolver result.");
+        const proxy = (result as { proxy: unknown }).proxy;
+        if (proxy === null) resolve(undefined);
+        else if (typeof proxy === "string" && proxy !== "") resolve(proxy);
+        else throw new Error("Invalid resolver endpoint.");
+      } catch { reject(new Error("Windows automatic proxy resolution returned an invalid result.")); }
+    });
+  });
 }
 
 /** Match ChatGPT's default HttpClient system-proxy behavior on Windows. */

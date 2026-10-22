@@ -224,7 +224,7 @@ Streams、`node:crypto` 和小型自有 DTO。Pi 包可作为对照源码，不�
    DeepSeek 的 Windows `UseSystemProxy` 使用固定版本 `undici@7.25.0`（MIT，Node >=20.18.1），
    通过 `ProxyAgent` 路由当前用户静态 HTTP/HTTPS 代理；本机 Node 24.16 loopback 已验证 CONNECT、
    成功响应、代理错误和取消。Internet Settings 与 `Connections\\DefaultConnectionSettings` flags
-   由只读 `reg.exe query` 读取；PAC/WPAD 尚未迁移，未知 flags fail closed。WinHTTP Koffi 输出指针
+   由只读 `reg.exe query` 读取；PAC/WPAD 经 Windows PowerShell 的系统代理解析器处理，支持取消及 15 秒超时，未知 flags/解析错误 fail closed；真实 PAC/WPAD 网络环境尚待验收。WinHTTP Koffi 输出指针
    探针在本机曾异常退出，生产路径不使用该未验证 FFI。
 7. 最后才接 `@di/coding-agent`。停止条件：任一 provider fixture、跨进程竞争、权限拒绝、retry 安全门失败，
    不得标记模型/auth 阶段完成。

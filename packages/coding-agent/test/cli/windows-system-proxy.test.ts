@@ -28,6 +28,41 @@ test("system fetch remains direct on non-Windows platforms", async () => {
   assert.equal(await response.text(), "direct");
 });
 
+test("PAC and WPAD use the system resolver for proxy and direct decisions", async () => {
+  for (const autoDetect of [false, true]) {
+    const signal = new AbortController().signal;
+    let resolvedUrl = "";
+    let resolvedSignal: AbortSignal | undefined;
+    let selectedProxy = "";
+    let direct = false;
+    const fetch = createWindowsSystemProxyFetch({
+      platform: "win32",
+      readSettings: async () => ({ enabled: false, autoDetect, autoConfigEnabled: !autoDetect, connectionFlagsKnown: true }),
+      resolveAutomaticProxy: async (url, receivedSignal) => { resolvedUrl = url; resolvedSignal = receivedSignal; return direct ? undefined : "http://pac-proxy.invalid:8080"; },
+      proxyFetch: async (_url, _init, proxy) => { selectedProxy = proxy; return new Response("proxy"); },
+      directFetch: async () => new Response("direct"),
+    });
+    assert.equal(await (await fetch("https://target.invalid/path", { signal })).text(), "proxy");
+    assert.equal(resolvedUrl, "https://target.invalid/path");
+    assert.equal(resolvedSignal, signal);
+    assert.equal(selectedProxy, "http://pac-proxy.invalid:8080/");
+    direct = true;
+    assert.equal(await (await fetch("https://target.invalid/path")).text(), "direct");
+  }
+});
+
+test("automatic proxy resolution errors never trigger a direct request", async () => {
+  let directCalls = 0;
+  const fetch = createWindowsSystemProxyFetch({
+    platform: "win32",
+    readSettings: async () => ({ enabled: false, autoDetect: true, autoConfigEnabled: false, connectionFlagsKnown: true }),
+    resolveAutomaticProxy: async () => { throw new Error("synthetic resolver failure"); },
+    directFetch: async () => { directCalls++; return new Response("unexpected"); },
+  });
+  await assert.rejects(fetch("https://target.invalid"), /synthetic resolver failure/);
+  assert.equal(directCalls, 0);
+});
+
 test("Windows Internet proxy settings parser reads static endpoints and bypasses", () => {
   const settings = parseWindowsInternetProxySettings([
     "ProxyEnable    REG_DWORD    0x1",
@@ -67,6 +102,7 @@ test("Windows system proxy fetch selects scheme proxy, honors bypass, and never 
   const fetch = createWindowsSystemProxyFetch({
     platform: "win32",
     readSettings: async () => settings,
+    resolveAutomaticProxy: async () => { throw new Error("PAC/WPAD resolver failure"); },
     directFetch: async (url) => { routed.push(`direct:${url}`); return new Response("direct"); },
     proxyFetch: async (url, _init, proxy) => { routed.push(`${proxy}:${url}`); return new Response("proxy"); },
   });
