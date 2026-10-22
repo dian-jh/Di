@@ -17,7 +17,8 @@
  * fail closed until an explicit reset.
  */
 
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readSync } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 import type { AgentMessage, ContentBlock, ToolCall } from "@di/ai";
 import { parseCheckpointMessage, parseEnvelopeLine, requireArray, requireField, requireString } from "./codec.ts";
 import { SessionDataError } from "./errors.ts";
@@ -36,20 +37,6 @@ export const RECOVERY_NOT_EXECUTED_NOTE =
  * a started-but-unfinished tool rejects the recovery (`unknown-outcome`).
  */
 export function loadRecovery(path: string): AgentMessage[] {
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch (cause) {
-    throw new SessionDataError("corrupt", `无法读取会话文件: ${path}`, { cause });
-  }
-  // The writer never emits a BOM; a stray BOM at the head is tolerated.
-  if (text.length > 0 && text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-  // A torn final append (no LF) is the only byte-level damage that is ignored.
-  if (text.length > 0 && !text.endsWith("\n")) {
-    const lastNewline = text.lastIndexOf("\n");
-    text = lastNewline < 0 ? "" : text.slice(0, lastNewline + 1);
-  }
-
   const trajectory: AgentMessage[] = [];
   let hasCheckpoint = false;
   const started = new Map<string, string>(); // call_id -> tool name (pending outcome)
@@ -57,7 +44,7 @@ export function loadRecovery(path: string): AgentMessage[] {
   const completedCalls = new Set<string>();
   let lineNumber = 0;
 
-  for (const line of text.split("\n")) {
+  for (const line of completeLines(path)) {
     if (line.trim().length === 0) continue; // blank lines are ignored (C# RemoveEmptyEntries)
     lineNumber += 1;
     const envelope = parseEnvelopeLine(line, lineNumber);
@@ -143,6 +130,39 @@ export function loadRecovery(path: string): AgentMessage[] {
   }
 
   return repairBatches(trajectory);
+}
+
+/** Validate every complete record while retaining only one chunk and partial line. */
+function* completeLines(path: string): Generator<string> {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, "r");
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    const decoder = new StringDecoder("utf8");
+    let pending = "";
+    let first = true;
+    for (;;) {
+      const count = readSync(fd, buffer, 0, buffer.length, null);
+      if (count === 0) break;
+      pending += decoder.write(buffer.subarray(0, count));
+      let start = 0;
+      for (;;) {
+        const end = pending.indexOf("\n", start);
+        if (end < 0) break;
+        let line = pending.slice(start, end);
+        if (first && line.charCodeAt(0) === 0xfeff) line = line.slice(1);
+        first = false;
+        yield line;
+        start = end + 1;
+      }
+      pending = pending.slice(start);
+    }
+    // No LF means a torn final append, including any incomplete UTF-8 sequence.
+  } catch (cause) {
+    throw new SessionDataError("corrupt", `无法读取会话文件: ${path}`, { cause });
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
 }
 
 /**

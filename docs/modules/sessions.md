@@ -3,6 +3,8 @@
 > 模块文档。说明追加式审计日志、同步恢复 checkpoint、工具副作用安全边界与 `--resume`。
 > 上一级入口：`docs/README.md`；落盘位置约定见 `docs/di-home.md`。
 
+TS 恢复入口为 `packages/coding-agent/src/core/sessions/session-recovery.ts` 的 `loadRecovery`：按 64 KiB 块增量解码 UTF-8、逐个验证完整 JSONL 行，仅丢弃无 LF 的末尾残行。不会把整个日志转换成一个字符串；回归测试 `packages/coding-agent/test/compat/large-session-recovery.test.mjs` 覆盖超出 Node 单字符串上限的日志与跨块中文。当前工作区原有约 693 MB 的长测日志已成功恢复。
+
 ## 目的与职责
 
 把每次 CLI 运行的轨迹**追加式落盘为 JSONL**（`~/.di/sessions/YYYY/MM/DD/session-*.jsonl`），
@@ -25,7 +27,18 @@
 - **追加按行 flush**：进程中断不损坏已写记录；线程安全（单锁 + 单调 `ordinal`）。
 - **审计日志尽力而为，恢复日志 fail-closed**：普通 `AppendTurn` 写入失败只告警；启用 checkpoint 时，assistant 消息、工具 intent、工具结果同步写入，intent 写盘失败则拒绝执行工具。异常恢复后会重载内存轨迹；工具已 started 但无结果时拒绝同进程重试，提示先核查副作用。
 
-## 代码入口
+## 当前 TypeScript 代码入口
+
+| 文件（仓库根相对路径） | 职责 |
+|---|---|
+| `packages/coding-agent/src/core/sessions/session-log.ts` / `codec.ts` | JSONL writer, envelope codec and checkpoint APIs |
+| `packages/coding-agent/src/core/sessions/session-recovery.ts` | checkpoint recovery and unknown-outcome validation |
+| `packages/coding-agent/src/core/sessions/session-stats.ts` | offline session usage aggregation |
+| `packages/coding-agent/test/session-log.test.ts`, `session-recovery.test.ts`, `session-stats.test.ts`, `session-codec.test.ts` | writer, recovery, stats and codec tests |
+
+下表是固定 C# 迁移基线位置，供会话互操作与行为差异核对。
+
+## C# 基线代码入口（行为参考）
 
 | 文件（相对仓库根） | 职责 |
 |---|---|
