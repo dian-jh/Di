@@ -188,6 +188,8 @@ Node `>=0.10.0`；公开 API `encodingExists` / `encode`，见 [上游说明](ht
   字节；不要依靠固定 prompt 或等待安静间隔。
 - cmd 每条输入会回显；初始化唯一 prompt tag，按原始字节剥掉仅以 tag 开头的 echo 行，再解码。
   PowerShell 单独使用 `-Command -` 与无 BOM UTF-8 stdin；POSIX shell 使用单独 argv/启动参数。
+  PowerShell 子进程使用 `TERM=dumb`，禁止 PowerShell 7 Unix 输入循环的终端模式控制序列干扰握手；
+  父进程环境不变。初始化的 stdout 等待须响应超时和外部取消，即使子进程存活但完全不输出也不能挂起。
 - 同一 session 使用 async mutex 串行 command；命令超时或外部取消杀整个会话树，保留 partial output，
   下一次调用自动惰性重建；用户命令自己执行 `exit` 也触发重建。跨调用 cwd/env 应仅在进程仍活时保留。
 - 每次命令的 stderr 与 stdout 收集到各自有界 Buffer。读到 exit marker 后取消 stderr drain 并等待其

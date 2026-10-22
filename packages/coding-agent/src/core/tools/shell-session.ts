@@ -69,7 +69,11 @@ class ByteQueue {
   private chunks: Uint8Array[] = [];
   private size_ = 0;
   private ended_ = false;
-  private waiters: Array<(chunk: Uint8Array | null) => void> = [];
+  private waiters: Array<{
+    resolve: (chunk: Uint8Array | null) => void;
+    signal?: AbortSignal;
+    onAbort?: () => void;
+  }> = [];
   private static readonly MAX_QUEUED = 256 * 1024;
 
   push(bytes: Uint8Array): void {
@@ -94,14 +98,27 @@ class ByteQueue {
   }
 
   /** Pull the next chunk; null at EOF (or after `halt`). */
-  read(): Promise<Uint8Array | null> {
+  read(signal?: AbortSignal): Promise<Uint8Array | null> {
     if (this.chunks.length > 0) {
       const chunk = this.chunks.shift()!;
       this.size_ -= chunk.length;
       return Promise.resolve(chunk);
     }
     if (this.ended_) return Promise.resolve(null);
-    return new Promise((resolve) => this.waiters.push(resolve));
+    if (signal?.aborted) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const waiter: (typeof this.waiters)[number] = { resolve, signal };
+      if (signal !== undefined) {
+        waiter.onAbort = () => {
+          const index = this.waiters.indexOf(waiter);
+          if (index >= 0) this.waiters.splice(index, 1);
+          signal.removeEventListener("abort", waiter.onAbort!);
+          resolve(null);
+        };
+        signal.addEventListener("abort", waiter.onAbort, { once: true });
+      }
+      this.waiters.push(waiter);
+    });
   }
 
   /** Return unconsumed bytes to the FRONT of the queue (reader leftover handoff). */
@@ -115,19 +132,26 @@ class ByteQueue {
   /** Resolve every pending read with null (drain stop); future data stays queued. */
   halt(): void {
     while (this.waiters.length > 0) {
-      this.waiters.shift()!(null);
+      const waiter = this.waiters.shift()!;
+      if (waiter.signal !== undefined && waiter.onAbort !== undefined) {
+        waiter.signal.removeEventListener("abort", waiter.onAbort);
+      }
+      waiter.resolve(null);
     }
   }
 
   private drainWaiters_(): void {
     while (this.waiters.length > 0 && (this.chunks.length > 0 || this.ended_)) {
-      const resolve = this.waiters.shift()!;
+      const waiter = this.waiters.shift()!;
+      if (waiter.signal !== undefined && waiter.onAbort !== undefined) {
+        waiter.signal.removeEventListener("abort", waiter.onAbort);
+      }
       if (this.chunks.length > 0) {
         const chunk = this.chunks.shift()!;
         this.size_ -= chunk.length;
-        resolve(chunk);
+        waiter.resolve(chunk);
       } else {
-        resolve(null);
+        waiter.resolve(null);
       }
     }
   }
@@ -294,6 +318,10 @@ export class ShellSession {
         cwd: this.workingDirectory,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
+        // PowerShell's Unix console host writes cursor-mode ANSI sequences to
+        // redirected stdout when TERM advertises virtual-terminal support.
+        // Keep that startup traffic out of the readiness-marker protocol.
+        ...(this.shell.sessionKind === "powershell" ? { env: { ...process.env, TERM: "dumb" } } : {}),
         // POSIX only: a new process group so the whole tree can be signaled
         // (Windows tree termination goes through taskkill /T, see killProcessTree).
         detached: process.platform !== "win32",
@@ -393,7 +421,7 @@ export class ShellSession {
       return new ProcessResult(
         -1,
         "",
-        found ? "终端会话初始化超时" : "终端会话初始化失败（进程提前退出）",
+        lifecycle.signal.aborted ? "终端会话初始化超时" : "终端会话初始化失败（进程提前退出）",
       );
     } finally {
       clearTimeout(timer);
@@ -592,7 +620,7 @@ export class ShellSession {
 
     while (true) {
       if (signal.aborted) return false;
-      const chunk = await this.stdoutQueue_.read();
+      const chunk = await this.stdoutQueue_.read(signal);
       if (chunk === null) return false; // session ended without the ready line
       const combined = Buffer.concat([carry.subarray(0, carryLen), chunk]);
       const at = indexOf(combined, target);
@@ -610,7 +638,7 @@ export class ShellSession {
         return true;
       }
       while (true) {
-        const c = await this.stdoutQueue_.read();
+        const c = await this.stdoutQueue_.read(signal);
         if (c === null) return true; // line end truncated by session end; ready appeared
         const inner = c.indexOf(0x0a);
         if (inner >= 0) {

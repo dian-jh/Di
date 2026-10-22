@@ -255,3 +255,100 @@ test("⑬ dispose kills the session process", async () => {
   session.dispose();
   assert.ok(!session.isAlive, "session dead after dispose");
 });
+
+test("initialization abort interrupts a pending ready read", async () => {
+  const shellScript = String.raw`
+process.stdin.resume();
+// Deliberately remain alive and never emit the readiness marker.
+setInterval(() => {}, 1000);
+`;
+  const session = new ShellSession(base, {
+    file: process.execPath,
+    prefixArgs: ["-e", shellScript],
+    sessionKind: "sh",
+  });
+  const controller = new AbortController();
+  const execution = session.execute("unused", TIMEOUT_MS, controller.signal);
+  let watchdogTimer: NodeJS.Timeout | undefined;
+  const watchdog = new Promise<never>((_, reject) => {
+    watchdogTimer = setTimeout(() => reject(new Error("initialization abort watchdog expired")), 8_000);
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    controller.abort();
+    await assert.rejects(Promise.race([execution, watchdog]), { name: "AbortError" });
+  } finally {
+    clearTimeout(watchdogTimer);
+    session.dispose();
+  }
+});
+
+test("initialization timeout interrupts a pending ready read", async () => {
+  const shellScript = String.raw`
+process.stdin.resume();
+setInterval(() => {}, 1000);
+`;
+  const session = new ShellSession(base, {
+    file: process.execPath,
+    prefixArgs: ["-e", shellScript],
+    sessionKind: "sh",
+  });
+  let watchdogTimer: NodeJS.Timeout | undefined;
+  const watchdog = new Promise<never>((_, reject) => {
+    watchdogTimer = setTimeout(() => reject(new Error("initialization timeout watchdog expired")), 20_000);
+  });
+  try {
+    const result = await Promise.race([session.execute("unused", TIMEOUT_MS), watchdog]);
+    assert.ok(result.error, "initialization timeout is reported");
+    assert.match(result.error, /初始化超时/);
+  } finally {
+    clearTimeout(watchdogTimer);
+    session.dispose();
+  }
+});
+
+test("PowerShell session startup sets TERM=dumb for redirected protocol output", async () => {
+  const shellScript = String.raw`
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", chunk => {
+  input += chunk;
+  for (;;) {
+    const at = input.indexOf("\n");
+    if (at < 0) break;
+    const line = input.slice(0, at).replace(/\r$/, "");
+    input = input.slice(at + 1);
+    const ready = line.match(/^echo (DI_[0-9a-f]+ready)$/);
+    if (ready) {
+      if (process.env.TERM === "dumb") process.stdout.write(ready[1] + "\n");
+      else process.stdout.write("\x1b[?1h");
+      continue;
+    }
+    const marker = line.match(/Write-Output '((DI_END_[0-9a-f]+))'; Write-Output \('((DI_END_[0-9a-f]+_exit)):/);
+    if (marker) process.stdout.write(marker[1] + "\n" + marker[3] + ":0\n");
+  }
+});
+`;
+  const session = new ShellSession(base, {
+    file: process.execPath,
+    prefixArgs: ["-e", shellScript],
+    sessionKind: "powershell",
+  });
+  let watchdogTimer: NodeJS.Timeout | undefined;
+  const previousTerm = process.env.TERM;
+  process.env.TERM = "xterm";
+  const execution = session.execute("probe", TIMEOUT_MS);
+  const watchdog = new Promise<never>((_, reject) => {
+    watchdogTimer = setTimeout(() => reject(new Error("PowerShell startup watchdog expired")), 8_000);
+  });
+  try {
+    const result = await Promise.race([execution, watchdog]);
+    assert.equal(result.exitCode, 0, obs(result));
+    assert.equal(process.env.TERM, "xterm", "the parent TERM value is unchanged");
+  } finally {
+    clearTimeout(watchdogTimer);
+    if (previousTerm === undefined) delete process.env.TERM;
+    else process.env.TERM = previousTerm;
+    session.dispose();
+  }
+});
