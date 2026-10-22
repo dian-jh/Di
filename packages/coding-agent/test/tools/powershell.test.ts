@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { createPowerShellTool, ShellSession, powershellSessionShell } from "@di/coding-agent";
 
 /**
  * P4-shell-session card — the PowerShell tool (port of
- * `Core/Tools/PowerShellTool.cs` at 09f4e08), real powershell.exe child process,
- * Windows. Same dual-mode design as C#:
+ * `Core/Tools/PowerShellTool.cs` at 09f4e08), a real PowerShell child process.
+ * Windows uses powershell.exe; POSIX uses pwsh when installed. Same dual-mode design as C#:
  * - persistent-session mode (a `ShellSession` with the PowerShell shell is
  *   injected): cd / variables / env persist across calls; `working_dir` is not
  *   in the schema.
@@ -25,6 +26,14 @@ import { createPowerShellTool, ShellSession, powershellSessionShell } from "@di/
  */
 
 const base = mkdtempSync(join(tmpdir(), "di-ps-"));
+const powershellExecutable = process.platform === "win32" ? "powershell.exe" : "pwsh";
+const hasPowerShell = spawnSync(powershellExecutable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "exit 0"], {
+  stdio: "ignore",
+}).error === undefined;
+
+function powerShellTest(name: string, run: () => void | Promise<void>): void {
+  test(name, { skip: !hasPowerShell }, run);
+}
 test.after(async () => {
   // Session kills are fire-and-forget (taskkill tree ~1-2s); a live powershell
   // session still holds `base` as its cwd, so Windows refuses the delete. Retry
@@ -49,7 +58,7 @@ function args(command: string, workingDir?: string, timeout?: number): string {
 
 // ---- 正常路径（一次性）----
 
-test("① Write-Output returns output and exit 0", async () => {
+powerShellTest("① Write-Output returns output and exit 0", async () => {
   const tool = createPowerShellTool(base);
   const obs = await tool.execute(args("Write-Output hello"));
   assert.equal(obs.isError, false);
@@ -57,14 +66,15 @@ test("① Write-Output returns output and exit 0", async () => {
   assert.ok(obs.text.includes("hello"), obs.text);
 });
 
-test("② non-zero exit code is reported as exit: N, not error", async () => {
-  // cmd /c exit 3 → native command failed → $LASTEXITCODE=3 → marker carries it.
-  const obs = await createPowerShellTool(base).execute(args("cmd /c exit 3"));
+powerShellTest("② non-zero exit code is reported as exit: N, not error", async () => {
+  // A native command failure sets $LASTEXITCODE on both Windows and POSIX.
+  const command = process.platform === "win32" ? "cmd /c exit 3" : "/bin/sh -c 'exit 3'";
+  const obs = await createPowerShellTool(base).execute(args(command));
   assert.ok(obs.text.startsWith("exit: 3"), obs.text);
   assert.ok(!obs.text.startsWith("error:"), obs.text);
 });
 
-test("③ unknown command is exit 1 with a readable error and no CLIXML", async () => {
+powerShellTest("③ unknown command is exit 1 with a readable error and no CLIXML", async () => {
   // $? false → fallback rule gives at least 1 (aligned with cmd/bash "not found").
   // Engine error travels stderr (OEM decoded); must not be CLIXML XML.
   const obs = await createPowerShellTool(base).execute(args("definitely_not_a_real_command_xyz"));
@@ -73,20 +83,20 @@ test("③ unknown command is exit 1 with a readable error and no CLIXML", async 
   assert.ok(!obs.text.includes("CLIXML"), obs.text);
 });
 
-test("④ Chinese output round-trips through stdin (UTF-8) and stdout (UTF-8)", async () => {
+powerShellTest("④ Chinese output round-trips through stdin (UTF-8) and stdout (UTF-8)", async () => {
   const obs = await createPowerShellTool(base).execute(args('Write-Output "你好世界"'));
   assert.ok(obs.text.startsWith("exit: 0"), obs.text);
   assert.ok(obs.text.includes("你好世界"), obs.text);
 });
 
-test("⑤ working directory is honored", async () => {
+powerShellTest("⑤ working directory is honored", async () => {
   mkdirSync(join(base, "sub"), { recursive: true });
   const obs = await createPowerShellTool(base).execute(args("(Get-Location).Path", "sub"));
   assert.ok(obs.text.startsWith("exit: 0"), obs.text);
   assert.ok(obs.text.includes("sub"), obs.text);
 });
 
-test("⑥ relative working directory resolves against the base directory", async () => {
+powerShellTest("⑥ relative working directory resolves against the base directory", async () => {
   mkdirSync(join(base, "w"), { recursive: true });
   const obs = await createPowerShellTool(base).execute(args("(Get-Location).Path", "w"));
   assert.ok(obs.text.startsWith("exit: 0"), obs.text);
@@ -95,7 +105,7 @@ test("⑥ relative working directory resolves against the base directory", async
 
 // ---- 失败路径 ----
 
-test("⑦ timeout returns a structured error mentioning 秒", async () => {
+powerShellTest("⑦ timeout returns a structured error mentioning 秒", async () => {
   const tool = createPowerShellTool(base, { timeoutSeconds: 0.3 });
   const obs = await tool.execute(args("Start-Sleep -Seconds 5"));
   assert.equal(obs.isError, true);
@@ -103,20 +113,20 @@ test("⑦ timeout returns a structured error mentioning 秒", async () => {
   assert.ok(obs.text.includes("秒"), obs.text);
 });
 
-test("⑧ per-call timeout overrides the default and times out", async () => {
+powerShellTest("⑧ per-call timeout overrides the default and times out", async () => {
   const tool = createPowerShellTool(base, { timeoutSeconds: 5 });
   const obs = await tool.execute(args("Start-Sleep -Seconds 5", undefined, 1));
   assert.ok(obs.text.startsWith("error:"), obs.text);
   assert.ok(obs.text.includes("秒"), obs.text);
 });
 
-test("⑨ per-call timeout longer than the default lets the command complete", async () => {
+powerShellTest("⑨ per-call timeout longer than the default lets the command complete", async () => {
   const tool = createPowerShellTool(base, { timeoutSeconds: 0.3 });
   const obs = await tool.execute(args("Start-Sleep -Milliseconds 300", undefined, 2));
   assert.ok(obs.text.startsWith("exit: 0"), obs.text);
 });
 
-test("⑩ invalid timeout arguments mention timeout", async () => {
+powerShellTest("⑩ invalid timeout arguments mention timeout", async () => {
   const tool = createPowerShellTool(base);
   for (const bad of [0, -3, 99999]) {
     assert.ok((await tool.execute(args("Write-Output x", undefined, bad))).text.includes("timeout"), `timeout=${bad}`);
@@ -125,19 +135,19 @@ test("⑩ invalid timeout arguments mention timeout", async () => {
   assert.ok(nonInteger.text.includes("timeout"), nonInteger.text);
 });
 
-test("⑪ nonexistent working directory returns an error", async () => {
+powerShellTest("⑪ nonexistent working directory returns an error", async () => {
   const obs = await createPowerShellTool(base).execute(args("Write-Output x", "no/such/dir"));
   assert.ok(obs.text.startsWith("error:"), obs.text);
   assert.ok(obs.text.includes("目录不存在"), obs.text);
 });
 
-test("⑫ missing command argument returns an error mentioning command", async () => {
+powerShellTest("⑫ missing command argument returns an error mentioning command", async () => {
   const obs = await createPowerShellTool(base).execute("{}");
   assert.ok(obs.text.startsWith("error:"), obs.text);
   assert.ok(obs.text.includes("command"), obs.text);
 });
 
-test("⑬ invalid JSON returns an error observation", async () => {
+powerShellTest("⑬ invalid JSON returns an error observation", async () => {
   const obs = await createPowerShellTool(base).execute("nope");
   assert.ok(obs.text.startsWith("error:"), obs.text);
 });
@@ -160,7 +170,7 @@ test("⑭ nonexistent shell executable returns 无法启动", async () => {
 
 // ---- 边界 ----
 
-test("⑮ long output is truncated with the notice and bounded", async () => {
+powerShellTest("⑮ long output is truncated with the notice and bounded", async () => {
   const big = "1..500 | ForEach-Object { \"a\" * 60 }";
   const obs = await createPowerShellTool(base).execute(args(big));
   assert.ok(obs.text.startsWith("exit: 0"), obs.text);
@@ -168,12 +178,12 @@ test("⑮ long output is truncated with the notice and bounded", async () => {
   assert.ok(obs.text.length < 30000, `bounded by head+tail+notice, actual ${obs.text.length}`);
 });
 
-test("⑯ empty command output is a clean exit 0", async () => {
+powerShellTest("⑯ empty command output is a clean exit 0", async () => {
   const obs = await createPowerShellTool(base).execute(args("Write-Output $null"));
   assert.ok(obs.text.startsWith("exit: 0"), obs.text);
 });
 
-test("⑰ definition has name powershell and a command property", () => {
+powerShellTest("⑰ definition has name powershell and a command property", () => {
   const spec = createPowerShellTool(base).spec;
   assert.equal(spec.name, "powershell");
   const properties = spec.parameters.properties as Record<string, { type?: string }>;
@@ -183,14 +193,14 @@ test("⑰ definition has name powershell and a command property", () => {
 
 // ---- 悲观：引号/特殊字符/工作目录 ----
 
-test("⑱ double quotes survive stdin without backslash corruption", async () => {
+powerShellTest("⑱ double quotes survive stdin without backslash corruption", async () => {
   const obs = await createPowerShellTool(base).execute(args('Write-Output "hello world"'));
   assert.ok(obs.text.startsWith("exit: 0"), obs.text);
   assert.ok(obs.text.includes("hello world"), obs.text);
   assert.ok(!obs.text.includes('\\"'), obs.text);
 });
 
-test("⑲ semicolon runs both statements", async () => {
+powerShellTest("⑲ semicolon runs both statements", async () => {
   const obs = await createPowerShellTool(base).execute(
     args("Write-Output 'first'; Write-Output 'second'"),
   );
@@ -199,7 +209,7 @@ test("⑲ semicolon runs both statements", async () => {
   assert.ok(obs.text.includes("second"), obs.text);
 });
 
-test("⑳ redirection writes the file in the working directory", async () => {
+powerShellTest("⑳ redirection writes the file in the working directory", async () => {
   const obs = await createPowerShellTool(base).execute(
     args("Set-Content -Path ps-marker.txt -Value 'marker'"),
   );
@@ -209,20 +219,20 @@ test("⑳ redirection writes the file in the working directory", async () => {
   assert.ok(readFileSync(path, "utf8").includes("marker"));
 });
 
-test("㉑ empty command returns an error mentioning command", async () => {
+powerShellTest("㉑ empty command returns an error mentioning command", async () => {
   const obs = await createPowerShellTool(base).execute('{"command":""}');
   assert.ok(obs.text.startsWith("error:"), obs.text);
   assert.ok(obs.text.includes("command"), obs.text);
 });
 
-test("㉒ working_dir containing NUL returns an error, never throws", async () => {
+powerShellTest("㉒ working_dir containing NUL returns an error, never throws", async () => {
   const obs = await createPowerShellTool(base).execute('{"command":"Write-Output x","working_dir":"bad\\u0000dir"}');
   assert.ok(obs.text.startsWith("error:"), obs.text);
 });
 
 // ---- 悲观：持久化会话模式 ----
 
-test("㉓ with a session, state persists across calls", async () => {
+powerShellTest("㉓ with a session, state persists across calls", async () => {
   mkdirSync(join(base, "work"), { recursive: true });
   const session = new ShellSession(base, powershellSessionShell);
   const tool = createPowerShellTool(base, { session });
@@ -236,7 +246,7 @@ test("㉓ with a session, state persists across calls", async () => {
   }
 });
 
-test("㉔ with a session, the working_dir param is ignored", async () => {
+powerShellTest("㉔ with a session, the working_dir param is ignored", async () => {
   const session = new ShellSession(base, powershellSessionShell);
   const tool = createPowerShellTool(base, { session });
   try {
@@ -248,7 +258,7 @@ test("㉔ with a session, the working_dir param is ignored", async () => {
   }
 });
 
-test("㉕ with a session, the definition omits working_dir and describes persistence", () => {
+powerShellTest("㉕ with a session, the definition omits working_dir and describes persistence", () => {
   const session = new ShellSession(base, powershellSessionShell);
   const spec = createPowerShellTool(base, { session }).spec;
   assert.equal(spec.name, "powershell");
@@ -258,7 +268,7 @@ test("㉕ with a session, the definition omits working_dir and describes persist
   assert.ok(spec.description.includes("持久化"), spec.description);
 });
 
-test("㉖ with a session, timeout self-heals", async () => {
+powerShellTest("㉖ with a session, timeout self-heals", async () => {
   const session = new ShellSession(base, powershellSessionShell);
   const tool = createPowerShellTool(base, { session, timeoutSeconds: 0.3 });
   try {
@@ -273,7 +283,7 @@ test("㉖ with a session, timeout self-heals", async () => {
   }
 });
 
-test("㉗ with a session, unknown command returns exit 1", async () => {
+powerShellTest("㉗ with a session, unknown command returns exit 1", async () => {
   const session = new ShellSession(base, powershellSessionShell);
   const tool = createPowerShellTool(base, { session });
   try {

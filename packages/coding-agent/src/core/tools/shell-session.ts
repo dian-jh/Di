@@ -23,8 +23,8 @@ import { killProcessTree, PROCESS_KILL_BUDGET_MS, ProcessResult } from "./proces
  * timeout / user `exit` / cancel (the session is a tree — `killProcessTree`).
  *
  * Platform differences (recorded divergences vs C#):
- * - cmd stdin uses the discovered OEM code page via iconv-lite, matching C#;
- *   an unavailable code page returns an error before a command is written.
+ * - cmd stdin uses the discovered OEM code page, matching its redirected-input
+ *   parser. Inputs that the page cannot represent are rejected before writing.
  *   PowerShell and POSIX stdin remain BOM-free UTF-8.
  * - the prompt tag (`prompt DI_<tag>$G`) is set for cmd only. C# sets it for sh
  *   too, but a pipe-fed sh never echoes input (nothing to strip) and `prompt` is
@@ -59,7 +59,7 @@ export const platformSessionShell: ShellCommand =
 
 /** PowerShell persistent session: `-Command -` reads commands from stdin (C# `ShellCommand.PowerShellSession`). */
 export const powershellSessionShell: ShellCommand = {
-  file: "powershell.exe",
+  file: process.platform === "win32" ? "powershell.exe" : "pwsh",
   prefixArgs: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"],
   sessionKind: "powershell",
 };
@@ -183,6 +183,7 @@ export class ShellSession {
   private disposed_ = false;
   private oem_: Promise<LegacyDecoder | undefined> | undefined;
   private inputEncoder_: ((text: string) => Uint8Array) | undefined;
+  private inputCodePage_: number | undefined;
   private mutex_: PromiseChainMutex;
 
   constructor(
@@ -209,13 +210,31 @@ export class ShellSession {
    */
   execute(command: string, timeoutMs: number, signal?: AbortSignal): Promise<ProcessResult> {
     return this.mutex_.runExclusive(async () => {
+      signal?.throwIfAborted();
       if (this.shell.sessionKind === "cmd" && this.inputEncoder_ === undefined) {
-        const codePage = await discoverOemCodePage();
-        const encoder = codePage === undefined ? undefined : createLegacyEncoder(codePage);
+        this.inputCodePage_ = await discoverOemCodePage();
+        const encoder = this.inputCodePage_ === undefined ? undefined : createLegacyEncoder(this.inputCodePage_);
         if (encoder === undefined) {
-          return new ProcessResult(-1, "", `无法编码终端输入：系统 OEM 代码页 ${codePage ?? "未知"} 不可用`);
+          return new ProcessResult(
+            -1,
+            "",
+            `无法使用系统 OEM 代码页 ${this.inputCodePage_ ?? "未知"} 编码终端输入；请使用 PowerShell`,
+          );
         }
         this.inputEncoder_ = encoder;
+      }
+      if (this.shell.sessionKind === "cmd" && this.inputEncoder_ !== undefined) {
+        try {
+          // Preflight before spawning or writing: iconv-lite otherwise replaces
+          // unrepresentable characters with `?`, while cmd can still report 0.
+          this.inputEncoder_(command);
+        } catch {
+          return new ProcessResult(
+            -1,
+            "",
+            `终端输入无法以系统 OEM 代码页 ${this.inputCodePage_ ?? "未知"} 无损编码；请使用 PowerShell`,
+          );
+        }
       }
       this.ensureAlive_();
       const process = this.process_;

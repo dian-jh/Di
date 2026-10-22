@@ -74,7 +74,10 @@ glob/grep/shell/powershell/python。all/coding/read-only 集合与名称别名�
   regex 前后检查。若采用 RE2 风格依赖，需核实其不支持特性并使用相同兼容矩阵。不能无限制运行
   未知表达式，也不能静默改正则语义。
 - glob 的 `**` 语义必须独立定义：匹配路径分隔符、`*` 不跨目录、`?` 单字符、Windows 大小写规则，
-  目录分隔符归一为 `/`。常见 npm glob package 对 `**/`、隐藏文件、`{}`、`[]`、绝对 pattern 有
+  输出目录分隔符归一为 `/`；输入反斜杠仅在 Windows 按路径分隔符处理，POSIX 文件名中的反斜杠保持字面值。
+  `packages/coding-agent/src/core/tools/paths.ts` 的 `normalizeToolPath` 供 glob/grep 共用，
+  仅转换原生目录分隔符，修正旧的无条件反斜杠替换对 POSIX 文件名的误写。
+  常见 npm glob package 对 `**/`、隐藏文件、`{}`、`[]`、绝对 pattern 有
   自己的扩展；不要把扩展泄漏进 Di 契约。继续保留独立 matcher，回归 C# fixture。
 - `path.relative`/`path.resolve` 返回平台分隔符；工具输出统一 `/`，匹配 Windows 路径时大小写策略
   明确，避免 locale-sensitive 比较。不要让忽略目录规则依赖某个平台特定路径大小写。
@@ -154,12 +157,18 @@ Node 替代必须按字节收集，不能直接让 `spawn({encoding:'utf8'})` �
   1–3 bytes 再判定，确实是 OEM 才 fallback。只允许接缝损失不超过一个字符，不能将全段 UTF-8
   中文误判 GBK。
 - PowerShell stdin 以无 BOM UTF-8 送入；Windows PowerShell 5.1 对开头 BOM 行为与现代 pwsh 不同。
-  需分别运行实际平台验收，不能只 mock `process.platform`。
+  `packages/coding-agent/src/core/tools/shell-session.ts` 的 `powershellSessionShell` 在 Windows
+  启动 `powershell.exe`，其他平台启动 `pwsh`；需分别运行实际平台验收，不能只 mock `process.platform`。
 
-cmd stdin 由 `packages/coding-agent/src/core/tools/encoding.ts` 的 `createLegacyEncoder` 按
-`discoverOemCodePage` 返回值编码；`packages/coding-agent/src/core/tools/shell-session.ts` 的
-`ShellSession.execute` 在代码页不可用时返回错误，不写入命令。PowerShell/POSIX 仍使用无 BOM
-UTF-8，不修改全局 console code page。编码器采用精确锁定的 `iconv-lite@0.7.3`（MIT，声明
+cmd 持久会话 stdin 按 `discoverOemCodePage` 返回的系统 OEM 编码，匹配 cmd 重定向输入的解析页，
+并在发送前由 `createLegacyEncoder` 验证命令可无损往返；英文 Windows OEM 437 无法表达中文时，命令
+会返回明确错误并建议使用 PowerShell，不会把字符静默替换为 `?` 后仍报告 exit 0。该限制来自原生
+cmd 的 OEM stdin 行为；C# 基线 `Core/Tools/ShellSession.cs` 同样将 stdin 固定为
+`ProcessEncoding.ChildOutput`（OEM），旧路径可能静默替换不可编码字符；TS 在此增加 fail-fast 检查。
+输出仍由
+`packages/coding-agent/src/core/tools/encoding.ts` 的 strict UTF-8 优先、系统 OEM 回退策略处理。
+PowerShell/POSIX 仍使用无 BOM UTF-8。`iconv-lite@0.7.3` 提供 legacy 编码与严格 round-trip 检查
+（MIT，声明
 Node `>=0.10.0`；公开 API `encodingExists` / `encode`，见 [上游说明](https://github.com/pillarjs/iconv-lite/blob/master/README.md)），
 传递依赖 `safer-buffer@2.1.2` 锁在根 lockfile；`install.ps1` 同时分发二者。接入前隔离探针验证
 936→GBK、437→OEM 字节及未知页拒绝；实际 Windows 中文目录往返与 helper 测试见

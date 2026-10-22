@@ -5,7 +5,13 @@ import iconv from "iconv-lite";
 export function createLegacyEncoder(codePage: number): ((text: string) => Uint8Array) | undefined {
   const label = codePage === 65001 ? "utf8" : `cp${codePage}`;
   if (!iconv.encodingExists(label)) return undefined;
-  return (text) => iconv.encode(text, label);
+  return (text) => {
+    const encoded = iconv.encode(text, label);
+    if (iconv.decode(encoded, label) !== text) {
+      throw new Error(`input cannot be represented by code page ${codePage}`);
+    }
+    return encoded;
+  };
 }
 
 /**

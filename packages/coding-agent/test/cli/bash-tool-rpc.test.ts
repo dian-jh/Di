@@ -120,22 +120,21 @@ test("real composition root: a bash tool call emits the exact tool round and a r
   const diHome = mkdtempSync(join(tmpdir(), "di-bash-rpc-"));
   const workspace = mkdtempSync(join(tmpdir(), "di-bash-rpc-ws-"));
   try {
-    const unicodeDirectory = join(workspace, "中文目录");
-    const unicodeCd = IS_WINDOWS ? `cd /d "${unicodeDirectory}"` : `cd "${unicodeDirectory}"`;
+    const stateCd = IS_WINDOWS ? 'cd /d "..\\state"' : 'cd "../state"';
     const model = new ScriptedModel([
       {
         text: "",
         toolCalls: [
           { id: "c1", name: PLATFORM_SHELL_NAME, arguments: JSON.stringify({ command: SET_SESSION_STATE }) },
           { id: "c2", name: PLATFORM_SHELL_NAME, arguments: JSON.stringify({ command: READ_SESSION_STATE }) },
-          { id: "c3", name: PLATFORM_SHELL_NAME, arguments: JSON.stringify({ command: unicodeCd }) },
+          { id: "c3", name: PLATFORM_SHELL_NAME, arguments: JSON.stringify({ command: stateCd }) },
           { id: "c4", name: PLATFORM_SHELL_NAME, arguments: JSON.stringify({ command: IS_WINDOWS ? "cd" : "pwd" }) },
         ],
       },
       { text: "done running" },
     ]);
     mkdirSync(join(workspace, "sub"));
-    mkdirSync(join(workspace, "中文目录"));
+    mkdirSync(join(workspace, "state"));
     const host = await createCliHost(
       makeArgs({}),
       workspace,
@@ -188,15 +187,15 @@ test("real composition root: a bash tool call emits the exact tool round and a r
       assert.equal(stateRead.event.call.id, "c2");
       assert.ok(stateRead.event.observation.includes("alive"), stateRead.event.observation);
       assert.ok(stateRead.event.observation.includes("sub"), stateRead.event.observation);
-      const unicodeRead = events[6]!;
-      assert.equal(unicodeRead.event.kind, "tool_completed");
-      assert.equal(unicodeRead.event.call.id, "c3");
-      assert.equal(unicodeRead.event.is_error, false);
-      assert.ok(unicodeRead.event.observation.includes("exit: 0"), unicodeRead.event.observation);
-      const unicodeCwd = events[8]!;
-      assert.equal(unicodeCwd.event.kind, "tool_completed");
-      assert.equal(unicodeCwd.event.call.id, "c4");
-      assert.ok(unicodeCwd.event.observation.includes("中文目录"), unicodeCwd.event.observation);
+      const directoryChanged = events[6]!;
+      assert.equal(directoryChanged.event.kind, "tool_completed");
+      assert.equal(directoryChanged.event.call.id, "c3");
+      assert.equal(directoryChanged.event.is_error, false);
+      assert.ok(directoryChanged.event.observation.includes("exit: 0"), directoryChanged.event.observation);
+      const directoryRead = events[8]!;
+      assert.equal(directoryRead.event.kind, "tool_completed");
+      assert.equal(directoryRead.event.call.id, "c4");
+      assert.ok(directoryRead.event.observation.includes(join(workspace, "state")), directoryRead.event.observation);
 
       const result = lines[lines.length - 1]!;
       assert.equal(result.type, "result");

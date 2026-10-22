@@ -116,7 +116,10 @@ test("⑥ subsequent cd overrides the previous one", async () => {
 
 test("⑦ multiline output is collected in order", async () => {
   const session = new ShellSession(base);
-  const result = await session.execute("echo one & echo two & echo three", TIMEOUT_MS);
+  const command = IS_WINDOWS
+    ? "echo one & echo two & echo three"
+    : "printf 'one\\ntwo\\nthree\\n'";
+  const result = await session.execute(command, TIMEOUT_MS);
   session.dispose();
   const text = obs(result);
   const i1 = text.indexOf("one");
@@ -144,7 +147,10 @@ test("⑨ empty command still returns the marker / exit 0", async () => {
 
 test("⑨b user output that merely resembles a marker does not end the command early", async () => {
   const session = new ShellSession(base);
-  const result = await session.execute("echo DI_END_FOO & echo DI_END_BAR_exit:7", TIMEOUT_MS);
+  const command = IS_WINDOWS
+    ? "echo DI_END_FOO & echo DI_END_BAR_exit:7"
+    : "printf 'DI_END_FOO\\nDI_END_BAR_exit:7\\n'";
+  const result = await session.execute(command, TIMEOUT_MS);
   session.dispose();
   assert.ok(obs(result).startsWith("exit: 0"), obs(result));
   assert.ok(obs(result).includes("DI_END_FOO"), obs(result));
