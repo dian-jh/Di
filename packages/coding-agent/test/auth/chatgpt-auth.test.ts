@@ -154,14 +154,16 @@ function createFixture(behavior: HttpBehavior = {}, browserOpts: BrowserOptions 
       (browserOpts.deny
         ? "&error=access_denied"
         : `&code=code_test&client_id=${browserOpts.callbackClientId ?? "oaiapp_test"}`);
-    // Browser navigation runs concurrently with the callback listener loop (C# Task.Run).
-    void (async () => {
-      if (browserOpts.sendInvalidState) {
-        const invalid = await fetch(`${redirect}?state=wrong&code=bad`);
-        state.invalidStateRejected = invalid.status === 400;
-      }
-      await fetch(callback);
-    })();
+    // authorize races this promise with its live callback queue. Returning the
+    // navigation promise also reports fetch failures and avoids detached work
+    // continuing after fixture cleanup or the next sign-in.
+    if (browserOpts.sendInvalidState) {
+      const invalid = await fetch(`${redirect}?state=wrong&code=bad`);
+      state.invalidStateRejected = invalid.status === 400;
+      await invalid.text();
+    }
+    const response = await fetch(callback);
+    await response.text();
   };
 
   return {
