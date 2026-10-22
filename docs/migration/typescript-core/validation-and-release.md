@@ -101,6 +101,8 @@ dotnet run --project <temp-harness>/Reference.csproj -- read <ts-writer-session.
 
 兼容测试在构建成功且任务未取消时独立执行，即使单元测试失败也保留兼容性证据；任一测试失败仍使整个 job 失败。首次运行 39717236044 使用旧的默认步骤条件，六个 unit 均失败，因而 compat 全部 skipped；不能把安装 .NET SDK 当成已经执行 C# 互读验收。具体运行结果保存在 [进度表](progress.md)。
 
+`packages/coding-agent/package.json` 的单测命令设置 `--test-timeout=120000`，使挂起的测试在两分钟内失败并保留文件名和日志，避免耗尽整个 job 的 40 分钟预算。`packages/coding-agent/test/compat/csharp-session-interop.mjs` 解包固定 C# 基线时以目标目录作为子进程 `cwd`，不向 GNU tar 传入 Windows 绝对路径 `-C`；Windows CI 的 Git Bash 与本地系统 tar 都需要支持。
+
 所有自动用例使用合成凭据、临时目录与 loopback 服务。真实 provider smoke、35 分钟预热及 10 小时长测、向用户目录安装、部署和默认 `di` 入口切换不在该 workflow 中。compat 中的 soak supervisor 测试仅验证启动、状态和来源记录，不等于完成 10 小时稳定性验收。
 
 工具链版本以 workspace manifests 与根锁文件为准。Action pin 使用已核实的发布 SHA，依赖更新需重跑三平台矩阵并检查 SSE/crash fixtures 未改变语义。
