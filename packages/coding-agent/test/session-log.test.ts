@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 import type { AgentResult } from "@di/agent";
 import { SessionStore } from "@di/coding-agent";
@@ -91,7 +91,7 @@ test("session file lives under a UTC date directory with a stable name prefix", 
       String(now.getUTCMonth() + 1).padStart(2, "0"),
       String(now.getUTCDate()).padStart(2, "0"),
     );
-    assert.ok(store.logFilePath.startsWith(expectedDir + "\\"));
+    assert.ok(store.logFilePath.startsWith(expectedDir + sep));
     const name = store.logFilePath.split(/[\\/]/).pop()!;
     assert.ok(name.startsWith("session-"));
     assert.ok(name.endsWith(".jsonl"));

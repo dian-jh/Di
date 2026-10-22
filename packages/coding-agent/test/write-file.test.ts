@@ -85,10 +85,13 @@ test("invalid JSON arguments return an error", async () => {
   assert.ok(obs.text.startsWith("error:"));
 });
 
-test("relative path with backslashes resolves against the base", async () => {
+test("backslashes follow native path semantics", async () => {
   const obs = await run({ path: "sub\\file.txt", content: "x" });
   assert.ok(obs.text.startsWith("OK"));
-  assert.equal(readFileSync(join(base, "sub", "file.txt"), "utf8"), "x");
+  const expected = process.platform === "win32"
+    ? join(base, "sub", "file.txt")
+    : join(base, "sub\\file.txt");
+  assert.equal(readFileSync(expected, "utf8"), "x");
 });
 
 test("confirmation mentions the path and the content length", async () => {

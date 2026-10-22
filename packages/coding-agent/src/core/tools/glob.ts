@@ -6,7 +6,7 @@ import type { CoreTool } from "./types.ts";
 import { errorObservation, okObservation } from "./types.ts";
 import { getOptionalInt, getRequiredString, parseArguments, toolSchema } from "./args.ts";
 import { messageOf } from "./errors.ts";
-import { resolvePath } from "./paths.ts";
+import { normalizeToolPath, resolvePath } from "./paths.ts";
 import { enumerateFiles } from "./enumerate.ts";
 import { globToRegex } from "./glob-matcher.ts";
 
@@ -84,7 +84,11 @@ export function createGlobTool(baseDirectory: string, options?: GlobToolOptions)
       signal?.throwIfAborted();
 
       const effectiveLimit = Math.max(1, limitResult.value ?? defaultLimit);
-      const regex = globToRegex(patternResult.value, process.platform === "win32");
+      const regex = globToRegex(
+        patternResult.value,
+        process.platform === "win32",
+        process.platform === "win32",
+      );
       const results: string[] = [];
       const startedAt = performance.now();
       let scanBudgetExceeded = false;
@@ -94,7 +98,7 @@ export function createGlobTool(baseDirectory: string, options?: GlobToolOptions)
           scanBudgetExceeded = true;
           break;
         }
-        const rel = relative(searchRoot, file).replace(/\\/g, "/");
+        const rel = normalizeToolPath(relative(searchRoot, file));
         if (regex.test(rel)) {
           results.push(rel);
           if (results.length >= effectiveLimit) break;

@@ -56,8 +56,13 @@ test("regex special characters are escaped literally", () => {
 });
 
 test("windows backslash pattern is normalized to slash", () => {
-  assert.equal(globIsMatch("src\\*.cs", "src/a.cs", false), true);
-  assert.equal(globIsMatch("src\\*.cs", "src/deep/a.cs", false), false);
+  assert.equal(globIsMatch("src\\*.cs", "src/a.cs", false, true), true);
+  assert.equal(globIsMatch("src\\*.cs", "src/deep/a.cs", false, true), false);
+});
+
+test("POSIX backslash pattern character remains literal", () => {
+  assert.equal(globIsMatch("literal\\name.txt", "literal\\name.txt", false, false), true);
+  assert.equal(globIsMatch("literal\\name.txt", "literal/name.txt", false, false), false);
 });
 
 test("double star in the middle of a segment crosses directories", () => {

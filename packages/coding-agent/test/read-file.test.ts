@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { createReadFileTool } from "@di/coding-agent";
+import { createLegacyDecoder, discoverOemCodePage } from "../src/core/tools/encoding.ts";
 
 /**
  * P4.1 card 1: read_file tool.
@@ -70,10 +71,16 @@ test("subdirectory path resolves relative to the base directory", async () => {
   assert.equal(obs.text, "1: code");
 });
 
-test("relative path with backslashes resolves on Windows", async () => {
-  write(join("src", "b.cs"), "x");
-  const obs = await run("b.cs", { path: "src\\b.cs" });
-  assert.equal(obs.text, "1: x");
+test("backslashes follow native path semantics", async () => {
+  if (process.platform === "win32") {
+    write(join("src", "b.cs"), "x");
+    const obs = await run("b.cs", { path: "src\\b.cs" });
+    assert.equal(obs.text, "1: x");
+  } else {
+    write("src\\b.cs", "x");
+    const obs = await run("b.cs", { path: "src\\b.cs" });
+    assert.equal(obs.text, "1: x");
+  }
 });
 
 test("start_line and end_line return that slice and hint at remaining lines", async () => {
@@ -263,11 +270,24 @@ test("GBK-encoded file falls back to the OEM code page (explicit 936)", async ()
   assert.equal(obs.text, "1: 你好");
 });
 
-test("GBK-encoded file decodes via auto-discovered system OEM page (this machine = 936)", async () => {
-  writeBytes("gbk-auto.txt", [0xc4, 0xe3, 0xba, 0xc3]);
+test("GBK bytes use the discovered OEM decoder or return an explicit decode error", async () => {
+  const bytes = Buffer.from([0xc4, 0xe3, 0xba, 0xc3]); // 你好 in GBK; invalid UTF-8.
+  writeBytes("gbk-auto.txt", [...bytes]);
+
+  const codePage = await discoverOemCodePage();
+  const decoder = codePage === undefined ? undefined : createLegacyDecoder(codePage);
   const obs = await run("gbk-auto.txt", { path: "gbk-auto.txt" });
-  assert.equal(obs.isError, false);
-  assert.equal(obs.text, "1: 你好");
+
+  if (codePage === 936 && decoder !== undefined) {
+    assert.equal(obs.isError, false);
+    assert.equal(obs.text, "1: 你好");
+  } else if (decoder === undefined || codePage === 65001) {
+    assert.equal(obs.isError, true);
+    assert.match(obs.text, /无法解码/);
+  } else {
+    assert.equal(obs.isError, false);
+    assert.equal(obs.text, `1: ${decoder(bytes)}`);
+  }
 });
 
 test("non-UTF-8 file with an unavailable OEM decoder returns an explicit decode error", async () => {

@@ -13,7 +13,7 @@ import {
   toolSchema,
 } from "./args.ts";
 import { messageOf } from "./errors.ts";
-import { resolvePath } from "./paths.ts";
+import { normalizeToolPath, resolvePath } from "./paths.ts";
 import { enumerateFiles } from "./enumerate.ts";
 import { globToRegex } from "./glob-matcher.ts";
 import { translateDotNetRegex } from "./unicode-regex.ts";
@@ -173,7 +173,7 @@ export function createGrepTool(baseDirectory: string, options?: GrepToolOptions)
           }
           if (matchCount >= effectiveLimit) break;
 
-          const rel = relative(searchRoot, file).replace(/\\/g, "/");
+          const rel = normalizeToolPath(relative(searchRoot, file));
           if (globRegex !== null && !globRegex.test(rel)) continue;
 
           // C# FileInfo.Length check first so oversized files are never read.

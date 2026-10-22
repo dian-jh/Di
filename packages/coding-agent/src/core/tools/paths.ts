@@ -1,4 +1,9 @@
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
+
+/** Use slash separators in tool results without changing legal filename characters. */
+export function normalizeToolPath(path: string, separator = sep): string {
+  return path.split(separator).join("/");
+}
 
 /**
  * Resolve a (possibly relative) tool path against the workspace base directory.

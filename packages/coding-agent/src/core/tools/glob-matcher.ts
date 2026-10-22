@@ -16,8 +16,12 @@
  */
 
 /** Translate a glob pattern into an anchored RegExp for matching relative paths. */
-export function globToRegex(pattern: string, ignoreCase: boolean): RegExp {
-  const normalized = pattern.replace(/\\/g, "/");
+export function globToRegex(
+  pattern: string,
+  ignoreCase: boolean,
+  normalizeBackslashes = process.platform === "win32",
+): RegExp {
+  const normalized = normalizeBackslashes ? pattern.replace(/\\/g, "/") : pattern;
   let source = "^";
   for (let i = 0; i < normalized.length; i += 1) {
     const c = normalized[i]!; // i < length, so the element always exists
@@ -44,8 +48,13 @@ export function globToRegex(pattern: string, ignoreCase: boolean): RegExp {
 }
 
 /** True when `path` (with `/` separators) matches `pattern`. */
-export function globIsMatch(pattern: string, path: string, ignoreCase: boolean): boolean {
-  return globToRegex(pattern, ignoreCase).test(path);
+export function globIsMatch(
+  pattern: string,
+  path: string,
+  ignoreCase: boolean,
+  normalizeBackslashes = process.platform === "win32",
+): boolean {
+  return globToRegex(pattern, ignoreCase, normalizeBackslashes).test(path);
 }
 
 /** Escape one regex metacharacter (C# Regex.Escape for the pattern's literal chars). */

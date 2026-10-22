@@ -181,10 +181,11 @@ test("definition has glob name and pattern schema", () => {
   assert.deepEqual(spec.parameters.required, ["pattern"]);
 });
 
-test("windows separator pattern is normalized", async () => {
-  write("src/a.cs");
+test("backslash patterns follow the platform's path semantics", async () => {
+  const expectedPath = process.platform === "win32" ? "src/a.cs" : "src\\a.cs";
+  write(expectedPath);
   const obs = await run({ pattern: "src\\*.cs" });
-  assert.ok(obs.text.includes("src/a.cs"));
+  assert.ok(obs.text.includes(expectedPath), obs.text);
 });
 
 test("question mark matches exactly one character", async () => {
@@ -340,15 +341,29 @@ test("symlink/junction directories are not descended into (cycle safety)", async
 });
 
 test("symlink files are yielded like regular files", async (t) => {
-  write("target.txt", "x");
+  write("symlink-file-scope/target.txt", "x");
   try {
-    symlinkSync(join(base, "target.txt"), join(base, "link.txt"), "file");
+    symlinkSync(
+      join(base, "symlink-file-scope", "target.txt"),
+      join(base, "symlink-file-scope", "link.txt"),
+      "file",
+    );
   } catch (error) {
     t.skip(`file symlinks unavailable here: ${(error as Error).message}`);
     return;
   }
 
-  const obs = await run({ pattern: "*.txt" });
+  const obs = await run({ pattern: "*.txt", path: "symlink-file-scope" });
   assert.ok(obs.text.includes("target.txt"));
   assert.ok(obs.text.includes("link.txt"));
+});
+
+test("POSIX backslash in a glob pattern is a literal filename character", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("backslash is a path separator on Windows");
+    return;
+  }
+  write("literal\\name.txt");
+  const obs = await run({ pattern: "literal\\name.txt" });
+  assert.equal(obs.text, "literal\\name.txt");
 });
