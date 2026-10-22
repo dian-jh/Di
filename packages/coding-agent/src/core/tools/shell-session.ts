@@ -262,8 +262,6 @@ export class ShellSession {
   private spawn_(): void {
     this.tag_ = "DI_" + randomUUID().replaceAll("-", "");
     this.echoPrefix_ = Buffer.from(this.tag_ + ">", "ascii");
-    this.marker_ = "DI_END_" + randomUUID().replaceAll("-", "");
-    this.exitMarker_ = this.marker_ + "_exit";
     this.initialized_ = false;
     this.spawnError_ = undefined;
     this.stdoutQueue_ = new ByteQueue();
@@ -426,6 +424,11 @@ export class ShellSession {
     let stderrDrain: Promise<void> | undefined;
 
     try {
+      // Keep the prompt tag session-scoped, but issue a fresh, unpredictable
+      // boundary for each command so user output from an earlier command cannot
+      // forge the current command's completion marker.
+      this.marker_ = "DI_END_" + randomUUID().replaceAll("-", "");
+      this.exitMarker_ = this.marker_ + "_exit";
       const input = command + "\n" + this.markerLine_() + "\n";
       await writeStdin(process.stdin, this.inputEncoder_?.(input) ?? input);
 

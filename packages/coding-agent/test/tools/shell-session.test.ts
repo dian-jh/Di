@@ -164,6 +164,49 @@ test("⑨c concurrent executes serialize through the session mutex", async () =>
   assert.ok(obs(r2).includes("two"), obs(r2));
 });
 
+test("⑨d an old command nonce printed by a later command is ordinary output", async () => {
+  const shellScript = String.raw`
+let previousExit = "";
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", chunk => {
+  input += chunk;
+  for (;;) {
+    const at = input.indexOf("\n");
+    if (at < 0) break;
+    const line = input.slice(0, at).replace(/\r$/, "");
+    input = input.slice(at + 1);
+    const ready = line.match(/^echo (DI_[0-9a-f]+ready)$/);
+    if (ready) { process.stdout.write(ready[1] + "\n"); continue; }
+    const marker = line.match(/echo (DI_END_[0-9a-f]+); echo (DI_END_[0-9a-f]+_exit):\$__di_rc/);
+    if (marker) {
+      process.stdout.write(marker[1] + "\n" + marker[2] + ":0\n");
+      previousExit = marker[2];
+      continue;
+    }
+    if (line === "trace-first") process.stdout.write("first-command\n");
+    else if (line === "emit-old") process.stdout.write("\n" + previousExit + ":7\ncommand-finished\n");
+    else process.stdout.write(line + "\n");
+  }
+});
+`;
+  const session = new ShellSession(base, { file: process.execPath, prefixArgs: ["-e", shellScript], sessionKind: "sh" });
+  try {
+    const first = await session.execute("trace-first", TIMEOUT_MS);
+    assert.equal(first.exitCode, 0, obs(first));
+    const printed = await session.execute("emit-old", TIMEOUT_MS);
+    assert.equal(printed.exitCode, 0, obs(printed));
+    assert.match(printed.output, /DI_END_[0-9a-f]{32}_exit:7/, obs(printed));
+    assert.ok(printed.output.includes("command-finished"), obs(printed));
+
+    const following = await session.execute("echo following-command", TIMEOUT_MS);
+    assert.equal(following.exitCode, 0, obs(following));
+    assert.ok(obs(following).includes("following-command"), obs(following));
+  } finally {
+    session.dispose();
+  }
+});
+
 // ---- 失败/自愈 ----
 
 test("⑩ timeout kills the session and the next call self-heals", async () => {
@@ -191,9 +234,7 @@ test("⑪ user exit ends the session and the next call respawns", async () => {
 
 test("⑫ long output is truncated with the notice", async () => {
   const session = new ShellSession(base);
-  const big = IS_WINDOWS
-    ? "for /l %i in (1,1,500) do @echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    : "head -c 30000 < /dev/zero | tr '\\0' x";
+  const big = `node -e "process.stdout.write('x'.repeat(30000))"`;
   const result = await session.execute(big, TIMEOUT_MS);
   session.dispose();
   assert.ok(obs(result).startsWith("exit: 0"), obs(result));

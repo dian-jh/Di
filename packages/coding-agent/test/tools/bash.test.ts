@@ -30,8 +30,11 @@ test.after(async () => {
 const IS_WINDOWS = process.platform === "win32";
 const PLATFORM_SHELL_NAME = IS_WINDOWS ? "cmd" : "bash";
 
-/** Windows-only, takes ~1s: short wait command. */
-const SHORT_SLEEP = IS_WINDOWS ? "ping -n 2 127.0.0.1 >nul" : "sleep 1";
+/** Cross-platform deterministic wait used to exercise timeout behavior. */
+const waitCommand = (milliseconds: number) =>
+  `node -e "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,${milliseconds})"`;
+const SHORT_SLEEP = waitCommand(500);
+const OVERRIDE_TIMEOUT_RUN = waitCommand(1500);
 /** Long-running command that never finishes on its own. */
 const LONG_RUN = IS_WINDOWS ? "for /l %i in (1,1,100000000) do @rem" : "sleep 60";
 
@@ -104,15 +107,15 @@ test("⑦ timeout returns a structured error mentioning 秒 (injected small defa
 });
 
 test("⑧ per-call timeout overrides the default and times out", async () => {
-  // Tool default 5s would not fire; per-call timeout=1 must -> error in ~1s.
+  // The 1.5s producer completes under the 5s default but exceeds the 1s override.
   const tool = createBashTool(base, { timeoutSeconds: 5 });
-  const obs = await tool.execute(args(LONG_RUN, undefined, 1));
+  const obs = await tool.execute(args(OVERRIDE_TIMEOUT_RUN, undefined, 1));
   assert.ok(obs.text.startsWith("error:"), obs.text);
   assert.ok(obs.text.includes("秒"), obs.text);
 });
 
 test("⑨ per-call timeout longer than the default lets the command complete", async () => {
-  // Tool default 300ms would kill a ~1s command; per-call timeout=2 must complete.
+  // Tool default 300ms kills the 500ms producer; per-call timeout=2 lets it complete.
   const tool = createBashTool(base, { timeoutSeconds: 0.3 });
   const obs = await tool.execute(args(SHORT_SLEEP, undefined, 2));
   assert.ok(obs.text.startsWith("exit: 0"), obs.text);
