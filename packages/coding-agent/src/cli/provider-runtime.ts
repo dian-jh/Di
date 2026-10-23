@@ -2,13 +2,15 @@ import { ChatGptAdapter, DeepSeekAdapter, MODEL_CATALOG, RetryingChatModel, type
 import type { DiConfig } from "../core/config/di-config.ts";
 import type { ChatGptAuth } from "../core/auth/chatgpt-auth.ts";
 import { ModelReference } from "../core/model-selection.ts";
-import { createSystemProxyFetch, createWindowsSystemProxyFetch } from "./windows-system-proxy.ts";
+import { createSystemProxyFetch } from "./windows-system-proxy.ts";
 
 export interface DefaultProviderRuntimeOptions {
   readonly config: DiConfig;
   readonly chatGptAuth?: Pick<ChatGptAuth, "accessToken">;
   readonly deepSeekApiKey?: string;
   readonly retry?: RetryPolicyOptions;
+  readonly platform?: string;
+  readonly environment?: NodeJS.ProcessEnv;
   readonly deepSeekFetch?: (input: string, init?: RequestInit) => Promise<Response>;
   readonly deepSeekSystemProxyFetch?: (input: string, init?: RequestInit) => Promise<Response>;
   readonly chatGptFetch?: (input: string, init?: RequestInit) => Promise<Response>;
@@ -23,11 +25,8 @@ export function createDefaultProviderRuntime(options: DefaultProviderRuntimeOpti
         const strictTools = isTrue(options.config.get("deepseek:stricttools"));
         const systemProxy = isTrue(options.config.get("deepseek:usesystemproxy"));
         const proxyFetch = systemProxy
-          ? options.deepSeekSystemProxyFetch ?? createWindowsSystemProxyFetch()
+          ? options.deepSeekSystemProxyFetch ?? createSystemProxyFetch({ platform: options.platform, environment: options.environment })
           : undefined;
-        if (systemProxy && options.deepSeekSystemProxyFetch === undefined && process.platform !== "win32") {
-          throw new Error("DeepSeek:UseSystemProxy static Windows settings are available only on Windows.");
-        }
         const configuredBaseUrl = asString(options.config.get("deepseek:baseurl"));
         const model = new DeepSeekAdapter({
           model: reference.id,
@@ -51,7 +50,7 @@ export function createDefaultProviderRuntime(options: DefaultProviderRuntimeOpti
         const model: ChatModel = {
           async *stream(request: ModelRequest, signal?: AbortSignal): AsyncIterable<ModelEvent> {
             const token = await auth.accessToken(signal);
-            const adapter = new ChatGptAdapter({ model: reference.id, apiKey: token ?? "", fetch: options.chatGptFetch ?? createSystemProxyFetch() });
+            const adapter = new ChatGptAdapter({ model: reference.id, apiKey: token ?? "", fetch: options.chatGptFetch ?? createSystemProxyFetch({ platform: options.platform, environment: options.environment }) });
             yield* adapter.stream(request, signal);
           },
         };

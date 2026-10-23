@@ -58,7 +58,7 @@ DeepSeek 提供方的**线格式适配器**：HTTP/SSE 传输、chunk 归一化�
 | `packages/ai/src/providers/deepseek/adapter.ts` | HTTP/SSE 请求、usage、错误与流超时处理 |
 | `packages/ai/src/providers/deepseek/translator.ts` / `wire.ts` | provider wire translation and DTOs |
 | `packages/ai/src/catalog.ts` | 当前目录中的模型窗口与成本元数据 |
-| `packages/coding-agent/src/cli/provider-runtime.ts` / `windows-system-proxy.ts` | 生产模型路由、Windows 静态用户代理配置和请求 dispatch |
+| `packages/coding-agent/src/cli/provider-runtime.ts` / `windows-system-proxy.ts` | 生产模型路由、Windows 系统代理、POSIX 环境代理和请求 dispatch |
 | `packages/ai/test/` | DeepSeek adapter、翻译、请求/响应与故障测试 |
 
 ### `UseSystemProxy` in the TypeScript host
@@ -66,6 +66,10 @@ DeepSeek 提供方的**线格式适配器**：HTTP/SSE 传输、chunk 归一化�
 The host reads current-user Windows Internet Settings with fixed-argument `reg.exe query` calls. It supports configured static HTTP/HTTPS proxy endpoints and WinINET bypass entries, including `*.host` wildcards and `<local>`. If the system proxy setting is disabled, requests use the direct route. PAC/WPAD delegates each URL to `resolveWindowsSystemProxy` in `packages/coding-agent/src/cli/windows-system-proxy.ts`: fixed Windows PowerShell code calls the system proxy resolver with a 15-second timeout and cancellation. The URL is environment data, never executable shell text. Resolver errors and unknown connection flags fail closed. The implementation does not modify Windows proxy settings.
 
 Static routing uses exact dependency `undici@7.25.0` (`MIT`) with its own `fetch` and `ProxyAgent`; it does not change Node's global dispatcher. Loopback tests cover CONNECT, proxy error, cancellation, bypass, and direct mode. Synthetic resolver tests cover automatic proxy/direct decisions and failure. The OS resolver was probed against a loopback destination, but an actual PAC/WPAD network environment remains unverified. The system API is documented in [GetSystemWebProxy](https://learn.microsoft.com/en-us/dotnet/api/system.net.webrequest.getsystemwebproxy?view=netframework-4.8.1); this bridge requires Windows PowerShell, not the project's C# binaries or a .NET SDK.
+
+On POSIX, `createSystemProxyFetch` selects `http_proxy` / `https_proxy`, falling back to uppercase names and then `all_proxy` / `ALL_PROXY`. Empty proxy values fall through; lowercase `no_proxy` takes precedence over `NO_PROXY`, including an empty value. An existing `GATEWAY_INTERFACE` suppresses uppercase `HTTP_PROXY`. NO_PROXY follows .NET host matching: a bare name matches exactly; a leading dot matches the domain and subdomains; `*` is literal, and entries containing a port do not match. Matching ignores the target port. No configured proxy or an explicit bypass uses the direct route; invalid configuration, proxy errors and cancellation do not trigger an implicit direct retry. DeepSeek only enables this path when `UseSystemProxy=true`; ChatGPT auth/model requests use it by default.
+
+This implementation supports HTTP/HTTPS and SOCKS5 environment proxy endpoints using the bundled `ProxyAgent` and `Socks5ProxyAgent`. SOCKS5 without an explicit port uses 80 to match the .NET 10 Unix parser; specify the port when using a proxy on 1080 or another port. SOCKS4/4a and macOS system proxy discovery through CFNetwork are not implemented. It therefore covers POSIX environment proxies, not all `.NET HttpClient.DefaultProxy` capabilities. Selection rules are checked against the [.NET 10 environment proxy implementation](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Net.Http/src/System/Net/Http/SocketsHttpHandler/HttpEnvironmentProxy.Unix.cs); explicitly unsupported protocols fail without changing routes, and invalid configured endpoints with no valid alternative fail closed instead of silently selecting direct networking.
 
 下表是固定 C# 迁移基线位置，供行为差异核对。
 

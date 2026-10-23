@@ -22,8 +22,10 @@ export interface WindowsSystemProxyFetchOptions {
 
 export interface SystemProxyFetchOptions {
   readonly platform?: string;
+  readonly environment?: NodeJS.ProcessEnv;
   readonly windowsProxyFetch?: (input: string, init?: RequestInit) => Promise<Response>;
   readonly directFetch?: (input: string, init?: RequestInit) => Promise<Response>;
+  readonly proxyFetch?: (input: string, init: RequestInit | undefined, proxy: string) => Promise<Response>;
 }
 
 const INTERNET_SETTINGS_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
@@ -131,9 +133,95 @@ export function createSystemProxyFetch(options: SystemProxyFetchOptions = {}): (
   const platform = options.platform ?? process.platform;
   const directFetch = options.directFetch ?? ((input, init) => globalThis.fetch(input, init));
   const windowsProxyFetch = options.windowsProxyFetch ?? createWindowsSystemProxyFetch({ platform });
-  return (input, init) => platform === "win32"
-    ? windowsProxyFetch(input, init)
-    : directFetch(input, init);
+  const environment = options.environment ?? process.env;
+  const proxyFetch = options.proxyFetch ?? fetchThroughUndiciProxy;
+  return async (input, init) => {
+    if (platform === "win32") return windowsProxyFetch(input, init);
+    return fetchThroughEnvironmentProxy(input, init, environment, directFetch, proxyFetch);
+  };
+}
+
+/** POSIX .NET HttpEnvironmentProxy-compatible routing for environment variables. */
+export function fetchThroughEnvironmentProxy(
+  input: string,
+  init: RequestInit | undefined,
+  environment: NodeJS.ProcessEnv,
+  directFetch: (input: string, init?: RequestInit) => Promise<Response> = (url, request) => globalThis.fetch(url, request),
+  proxyFetch: (input: string, init: RequestInit | undefined, proxy: string) => Promise<Response> = fetchThroughUndiciProxy,
+): Promise<Response> {
+  const target = new URL(input);
+  const vars = environment;
+  const noProxy = envValue(vars, "no_proxy", "NO_PROXY");
+  if (isDotNetNoProxyBypassed(noProxy, target)) return directFetch(input, init);
+  const cgi = vars.GATEWAY_INTERFACE !== undefined;
+  const specific = target.protocol === "http:"
+    ? (cgi ? proxyEnvValue(vars, "http_proxy", undefined) : proxyEnvValue(vars, "http_proxy", "HTTP_PROXY"))
+    : target.protocol === "https:"
+      ? proxyEnvValue(vars, "https_proxy", "HTTPS_PROXY")
+      : undefined;
+  const allProxy = specific == null ? proxyEnvValue(vars, "all_proxy", "ALL_PROXY") : undefined;
+  if ((specific === null && allProxy === undefined) || (specific === undefined && allProxy === null)) {
+    throw new Error("The configured environment proxy endpoint is invalid.");
+  }
+  const proxy = specific ?? allProxy;
+  if (proxy === null) throw new Error("The configured environment proxy endpoint is invalid.");
+  if (proxy === undefined) return directFetch(input, init);
+  return proxyFetch(input, init, proxy);
+}
+
+function envValue(environment: NodeJS.ProcessEnv, lower: string, upper: string): string | undefined {
+  return environment[lower] ?? environment[upper];
+}
+
+function proxyEnvValue(environment: NodeJS.ProcessEnv, lower: string, upper: string | undefined): string | null | undefined {
+  const values = [environment[lower], ...(upper === undefined ? [] : [environment[upper]])];
+  let configured = false;
+  for (const value of values) {
+    const candidate = nonEmpty(value);
+    if (candidate === undefined) continue;
+    configured = true;
+    try { return parseEnvironmentProxy(candidate); }
+    catch (error) {
+      if (error instanceof UnsupportedEnvironmentProxyProtocolError) throw error;
+      // .NET proceeds to the upper-case spelling or ALL_PROXY when a value cannot be parsed.
+    }
+  }
+  return configured ? null : undefined;
+}
+
+function nonEmpty(value: string | undefined): string | undefined {
+  return value?.trim() === "" ? undefined : value;
+}
+
+function parseEnvironmentProxy(value: string): string {
+  let uri: URL;
+  try {
+    uri = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `http://${value}`);
+  } catch {
+    throw new Error("The configured environment proxy endpoint is invalid.");
+  }
+  if (uri.protocol === "socks4:" || uri.protocol === "socks4a:") throw new UnsupportedEnvironmentProxyProtocolError();
+  if ((uri.protocol !== "http:" && uri.protocol !== "https:" && uri.protocol !== "socks5:") || uri.hostname === "") {
+    throw new UnsupportedEnvironmentProxyProtocolError();
+  }
+  // .NET 10's Unix environment proxy parser defaults an unqualified proxy port to 80.
+  // Undici's Socks5ProxyAgent defaults to 1080, so preserve the source runtime's value explicitly.
+  if (uri.protocol === "socks5:" && uri.port === "") uri.port = "80";
+  return uri.toString();
+}
+
+class UnsupportedEnvironmentProxyProtocolError extends Error {
+  constructor() { super("The configured environment proxy protocol is unsupported."); }
+}
+
+/** .NET NO_PROXY: comma-separated; leading-dot suffix matches apex/subdomains; bare names are exact. */
+function isDotNetNoProxyBypassed(noProxy: string | undefined, target: URL): boolean {
+  if (noProxy === undefined) return false;
+  const host = target.hostname.toLowerCase();
+  return noProxy.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean).some((entry) => {
+    if (entry.startsWith(".")) return host === entry.slice(1) || host.endsWith(entry);
+    return host === entry;
+  });
 }
 
 async function readWindowsInternetProxySettings(): Promise<WindowsInternetProxySettings> {
@@ -211,6 +299,7 @@ function isBypassed(bypass: string | undefined, target: URL): boolean {
 
 interface UndiciProxyApi {
   readonly ProxyAgent: new (proxyUri: string) => { close(): Promise<void> };
+  readonly Socks5ProxyAgent: new (proxyUri: string) => { close(): Promise<void> };
   readonly fetch: (input: string, init?: RequestInit & { readonly dispatcher: unknown }) => Promise<Response>;
 }
 
@@ -220,7 +309,9 @@ async function fetchThroughUndiciProxy(input: string, init: RequestInit | undefi
     let undici: UndiciProxyApi;
     try { undici = require("undici") as UndiciProxyApi; }
     catch (error) { throw new Error("DeepSeek:UseSystemProxy requires the bundled undici dependency.", { cause: error }); }
-    dispatcher = new undici.ProxyAgent(proxy);
+    dispatcher = new URL(proxy).protocol === "socks5:"
+      ? new undici.Socks5ProxyAgent(proxy)
+      : new undici.ProxyAgent(proxy);
     proxyAgents.set(proxy, dispatcher);
   }
   const undici = require("undici") as UndiciProxyApi;

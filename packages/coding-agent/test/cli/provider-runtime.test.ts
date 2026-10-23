@@ -59,6 +59,28 @@ test("DeepSeek runtime routes UseSystemProxy through the Windows proxy fetch sea
   assert.equal(endpoint, "https://api.deepseek.com/chat/completions");
 });
 
+test("DeepSeek UseSystemProxy on POSIX routes through environment proxy handling", async () => {
+  const runtime = createDefaultProviderRuntime({
+    config: DiConfig.merge({ DeepSeek: { UseSystemProxy: true } }, undefined, undefined, {}),
+    deepSeekApiKey: "synthetic-key",
+    retry: { maxAttempts: 1 },
+    platform: "linux",
+    environment: { HTTPS_PROXY: "http://[invalid" },
+  });
+  await assert.rejects(async () => { for await (const _ of runtime.createModel("deepseek/deepseek-flash").stream(request)) {} }, /environment proxy endpoint is invalid/);
+});
+
+test("ChatGPT model requests use POSIX environment proxy handling", async () => {
+  const runtime = createDefaultProviderRuntime({
+    config: DiConfig.merge({}, undefined, undefined, {}),
+    chatGptAuth: { accessToken: async () => "synthetic-access-token" } as never,
+    retry: { maxAttempts: 1 },
+    platform: "linux",
+    environment: { HTTPS_PROXY: "http://[invalid" },
+  });
+  await assert.rejects(async () => { for await (const _ of runtime.createModel("chatgpt/gpt-6.1-sol").stream(request)) {} }, /environment proxy endpoint is invalid/);
+});
+
 test("ChatGPT model obtains a synthetic access token per call and is retry wrapped", async () => {
   const config = DiConfig.merge({}, undefined, undefined, {});
   let tokenCalls = 0;
