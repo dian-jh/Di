@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createGlobTool, GLOB_DEFAULT_LIMIT } from "@di/coding-agent";
+import { enumerateFiles } from "../src/core/tools/enumerate.ts";
 
 /**
  * P4.2 card 2: glob tool (recursive file enumeration).
@@ -300,18 +301,41 @@ test("pre-aborted signal rejects with AbortError", async () => {
   );
 });
 
-test("abort during the scan rejects with AbortError (async cancellable walk)", async () => {
-  // A tree large enough that the walk spans many awaited readdir boundaries, so
-  // an abort issued from a timer lands mid-scan and is observed at a boundary.
-  // The search is scoped to its own root so files created by earlier tests in
-  // the shared base cannot trip the 200-result cap before the abort lands.
-  for (let i = 0; i < 400; i++) write(`abort-scan/d${i}/x.txt`);
-
+test("enumerateFiles rejects when aborted after yielding a file", async () => {
+  // Wait for the real async walker to yield a file before aborting. Keep one
+  // directory pending so the next traversal boundary must observe cancellation.
+  write("abort-scan/d0/x.txt");
+  write("abort-scan/d1/x.txt");
   const controller = new AbortController();
-  const promise = run({ pattern: "**/*.txt", path: "abort-scan" }, controller.signal);
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  const files = enumerateFiles(join(base, "abort-scan"), controller.signal);
+  const first = await files.next();
+  assert.equal(first.done, false);
   controller.abort();
-  await assert.rejects(promise, { name: "AbortError" });
+  await assert.rejects(files.next(), { name: "AbortError" });
+});
+
+test("glob.execute forwards an AbortSignal cancellation to the walker", async () => {
+  write("abort-execute/d0/x.txt");
+  write("abort-execute/d1/x.txt");
+  const controller = new AbortController();
+  let checks = 0;
+  const signal = new Proxy(controller.signal, {
+    get(target, property) {
+      if (property === "throwIfAborted") {
+        return () => {
+          checks++;
+          // execute checks before parsing, after path resolution, and after
+          // stat; enumerateFiles checks before and after its first real readdir.
+          if (checks === 5) controller.abort();
+          target.throwIfAborted();
+        };
+      }
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as AbortSignal;
+  await assert.rejects(run({ pattern: "**/*.txt", path: "abort-execute" }, signal), { name: "AbortError" });
+  assert.equal(checks, 5);
 });
 
 test("scan budget exceeded returns partial results with a notice", async () => {
