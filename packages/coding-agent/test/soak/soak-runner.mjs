@@ -37,11 +37,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createCliHost, DiHome } from "@di/coding-agent";
+import { makeCheckpointTracker } from "./checkpoint-tracker.mjs";
 import { sampleProcessMetrics } from "./process-metrics.mjs";
+import { runResumeChild } from "./resume-child.mjs";
+import { validateSoakPaths } from "./soak-path-validation.mjs";
 
 const HERE_FILE = fileURLToPath(import.meta.url);
 const HERE_DIR = dirname(HERE_FILE);
@@ -61,8 +64,9 @@ const EXIT_CODE = "setTimeout(()=>{}, 25)";
 const KILL_CODE = "setTimeout(()=>{}, 30000)";
 
 /** Global child-process accounting so residual/leaked children are visible. */
-const childState = { created: 0, exited: 0 };
+const childState = { created: 0, exited: 0, resumeCreated: 0, resumeExited: 0 };
 const activeChildren = () => childState.created - childState.exited;
+const activeResumeChildren = () => childState.resumeCreated - childState.resumeExited;
 
 /** Deterministic fake ChatModel: alternate tool-call / final-text across calls. */
 class FakeModel {
@@ -204,37 +208,6 @@ async function buildHost(diHomeDir, workspace, resumePath) {
   return { host, model };
 }
 
-/** Incremental checkpoint line counter: O(delta) per sample, not O(total). */
-function makeCheckpointTracker() {
-  const cp = { offset: 0, lines: 0 };
-  return function sampleCheckpoint(path) {
-    if (!existsSync(path)) return { bytes: 0, lines: 0 };
-    const size = statSync(path).size;
-    if (size < cp.offset) {
-      cp.offset = 0;
-      cp.lines = 0; // file truncated / recreated
-    }
-    const delta = size - cp.offset;
-    if (delta > 0) {
-      const fd = openSync(path, "r");
-      try {
-        let got = 0;
-        const buf = Buffer.alloc(delta);
-        while (got < delta) {
-          const r = readSync(fd, buf, got, delta - got, cp.offset + got);
-          if (r === 0) break;
-          got += r;
-        }
-        for (let i = 0; i < got; i++) if (buf[i] === 0x0a) cp.lines += 1;
-      } finally {
-        closeSync(fd);
-      }
-      cp.offset = size;
-    }
-    return { bytes: size, lines: cp.lines };
-  };
-}
-
 /** Read the N trailing bytes of a file (for error/summary dumps). */
 function tail(path, n) {
   if (!existsSync(path)) return "";
@@ -262,6 +235,9 @@ function parseArgs(argv) {
     if (!a.startsWith("--")) continue;
     const key = a.slice(2);
     const next = argv[i + 1];
+    if (["di-home", "out", "workspace"].includes(key) && (next === undefined || next.startsWith("--"))) {
+      throw new Error(`--${key} requires a non-empty path value before the next option`);
+    }
     out[key] = next !== undefined && !next.startsWith("--") ? next : "true";
     if (next !== undefined && !next.startsWith("--")) i += 1;
   }
@@ -358,7 +334,9 @@ async function runPhase(args) {
     fail: 0,
     cleared: 0,
     lastResumeMs: undefined,
+    lastResumeHandshakeMs: undefined,
     lastResumeChildMs: undefined,
+    unreapedResumePid: undefined,
     resumeSpawns: 0,
     resumeOk: 0,
     lastError: undefined,
@@ -367,7 +345,7 @@ async function runPhase(args) {
   if (!existsSync(csvPath)) {
     writeFileSync(
       csvPath,
-      "ts_utc,uptime_ms,rss_bytes,heap_used,external_bytes,array_buffers_bytes,handle_count,js_handle_count,os_handle_count,working_set_bytes,peak_working_set_bytes,private_bytes,native_metrics_error,v8_total_heap_size_bytes,v8_total_physical_size_bytes,v8_malloced_memory_bytes,v8_peak_malloced_memory_bytes,active_children,children_created,children_exited,turns_done,turn_ok,turn_fail,iterations,checkpoint_bytes,checkpoint_lines,last_resume_ms,cleared\n",
+      "ts_utc,uptime_ms,rss_bytes,heap_used,external_bytes,array_buffers_bytes,handle_count,js_handle_count,os_handle_count,working_set_bytes,peak_working_set_bytes,private_bytes,native_metrics_error,v8_total_heap_size_bytes,v8_total_physical_size_bytes,v8_malloced_memory_bytes,v8_peak_malloced_memory_bytes,active_children,children_created,children_exited,active_resume_children,resume_children_created,resume_children_exited,turns_done,turn_ok,turn_fail,iterations,checkpoint_bytes,checkpoint_lines,last_resume_ms,last_resume_handshake_ms,cleared\n",
     );
   }
 
@@ -390,6 +368,9 @@ async function runPhase(args) {
       active_children: activeChildren(),
       children_created: childState.created,
       children_exited: childState.exited,
+      active_resume_children: activeResumeChildren(),
+      resume_children_created: childState.resumeCreated,
+      resume_children_exited: childState.resumeExited,
       turns_done: ctx.turns,
       turn_ok: ctx.ok,
       turn_fail: ctx.fail,
@@ -397,6 +378,7 @@ async function runPhase(args) {
       checkpoint_bytes: cp.bytes,
       checkpoint_lines: cp.lines,
       last_resume_ms: ctx.lastResumeMs ?? "",
+      last_resume_handshake_ms: ctx.lastResumeHandshakeMs ?? "",
       cleared: ctx.cleared,
       phase: ctx.phase,
     };
@@ -421,6 +403,9 @@ async function runPhase(args) {
       row.active_children,
       row.children_created,
       row.children_exited,
+      row.active_resume_children,
+      row.resume_children_created,
+      row.resume_children_exited,
       row.turns_done,
       row.turn_ok,
       row.turn_fail,
@@ -428,6 +413,7 @@ async function runPhase(args) {
       row.checkpoint_bytes,
       row.checkpoint_lines,
       row.last_resume_ms,
+      row.last_resume_handshake_ms,
       row.cleared,
     ].join(",");
     appendFileSync(ctx.csv, csvLine + "\n");
@@ -442,74 +428,23 @@ async function runPhase(args) {
     );
   };
 
-  /** Spawn a fresh resume child against the parent's checkpoint, measure latency. */
+  /** Spawn a fresh resume child, measure handshake/total latency, and wait for close. */
   const doResume = async () => {
-    const childStart = performance.now();
-    const child = spawn(
-      process.execPath,
-      [HERE_FILE, "child", "--di-home", diHome, "--workspace", workspace, "--session", checkpointPath, "--out", out],
-      { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
-    );
-    let outText = "";
-    let errText = "";
-    let childMs = undefined;
-    let parentMs = undefined;
-    const timer = setTimeout(() => {
-      try {
-        child.kill();
-      } catch {
-        /* done */
-      }
-    }, 120000); // failsafe: a hung resume child is killed and counted as a failure
-    await new Promise((resolve2) => {
-      let settled = false;
-      const settle = (v) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve2(v);
-      };
-      child.stdout.on("data", (c) => {
-        outText += c.toString("utf8");
-        const m = outText.match(/RESUMED (\d+)/);
-        if (m) {
-          childMs = int(m[1], undefined);
-          parentMs = performance.now() - childStart;
-          settle(parentMs);
-        }
-      });
-      child.stderr.on("data", (c) => {
-        errText += c.toString("utf8");
-      });
-      child.on("exit", (code) => {
-        if (parentMs === undefined) {
-          // Child exited without a RESUMED line (or failed).
-          if (/RESUME_FAIL/.test(outText)) {
-            ctx.lastError = `resume child failed: ${outText.trim()}`;
-          } else if (code !== 0) {
-            ctx.lastError = `resume child exit ${code}: ${errText.trim().slice(0, 300)}`;
-          }
-        }
-        settle(code);
-      });
-      child.on("error", (err) => {
-        settle(-1);
-      });
+    const result = await runResumeChild({
+      spawn: () => spawn(
+        process.execPath,
+        [HERE_FILE, "child", "--di-home", diHome, "--workspace", workspace, "--session", checkpointPath, "--out", out],
+        { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
+      ),
+      childState,
     });
-    if (parentMs !== undefined) {
-      ctx.lastResumeMs = Math.round(parentMs);
-      ctx.lastResumeChildMs = childMs ?? null;
-      ctx.resumeOk += 1;
-    }
     ctx.resumeSpawns += 1;
-    if (child.exitCode === undefined && !child.killed) {
-      try {
-        child.kill();
-      } catch {
-        /* done */
-      }
-    }
-    return parentMs;
+    ctx.lastResumeMs = Math.round(result.parentMs);
+    ctx.lastResumeHandshakeMs = result.handshakeMs === null ? null : Math.round(result.handshakeMs);
+    ctx.lastResumeChildMs = result.childMs;
+    if (result.ok) ctx.resumeOk += 1;
+    else ctx.lastError = result.message;
+    return result;
   };
 
   sample(); // t=0 baseline sample
@@ -533,7 +468,11 @@ async function runPhase(args) {
         ctx.cleared += 1;
       }
       if (resumeEvery > 0 && ctx.turns % resumeEvery === 0) {
-        await doResume();
+        const resumeResult = await doResume();
+        if (resumeResult.spawned && !resumeResult.closed) {
+          ctx.unreapedResumePid = resumeResult.pid;
+          break; // do not accumulate more processes after a failed reap
+        }
       }
       if (Date.now() >= nextSampleAt) {
         sample();
@@ -561,21 +500,36 @@ async function runPhase(args) {
     resumeSpawns: ctx.resumeSpawns,
     resumeOk: ctx.resumeOk,
     lastResumeMs: ctx.lastResumeMs ?? null,
+    lastResumeParentMs: ctx.lastResumeMs ?? null,
+    lastResumeHandshakeMs: ctx.lastResumeHandshakeMs ?? null,
+    lastResumeChildMs: ctx.lastResumeChildMs ?? null,
+    unreapedResumePid: ctx.unreapedResumePid ?? null,
     lastError: ctx.lastError ?? null,
     finalRssBytes: process.memoryUsage().rss,
     finalActiveChildren: activeChildren(),
-    completed: ctx.fail === 0 && end - ctx.start >= durationMin * 60_000 - 5000,
+    finalActiveResumeChildren: activeResumeChildren(),
+    resumeChildrenCreated: childState.resumeCreated,
+    resumeChildrenExited: childState.resumeExited,
+    completed: ctx.fail === 0 && ctx.resumeOk === ctx.resumeSpawns && end - ctx.start >= durationMin * 60_000 - 5000,
   };
   writeFileSync(statusJsonPath, JSON.stringify(status, null, 2));
   process.stderr.write(
     `[soak] END runId=${runId} wall=${Math.round(status.wallClockMs / 1000)}s turns=${ctx.turns} ok=${ctx.ok} fail=${ctx.fail} ` +
-      `resume=${ctx.resumeOk}/${ctx.resumeSpawns} clears=${ctx.cleared} active_children=${activeChildren()} completed=${status.completed}\n`,
+      `resume=${ctx.resumeOk}/${ctx.resumeSpawns} clears=${ctx.cleared} active_children=${activeChildren()} ` +
+      `active_resume_children=${activeResumeChildren()} completed=${status.completed}\n`,
   );
   return status.completed ? 0 : 2;
 }
 
 const mode = process.argv[2];
 const args = parseArgs(process.argv.slice(3));
+
+if (mode === "child" || mode === "run") {
+  const validated = validateSoakPaths({ mode, diHome: args["di-home"], out: args.out, workspace: args.workspace, repo: resolve(HERE_DIR, "../../../..") });
+  args["di-home"] = validated.diHome;
+  args.out = validated.out;
+  args.workspace = validated.workspace;
+}
 
 if (mode === "child") {
   process.exitCode = await childPhase(args);

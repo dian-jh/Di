@@ -12,6 +12,47 @@ unit 合计 1,257 pass / 3 skip，compat 为 16 pass / 1 macOS skip，CI 测试�
 3 pass。示例与夹具最后修订后，agent 的 50 项和技能/命令/模式相关的 236 项定向复验均通过。
 这些检查使用本地服务与合成凭据，不消耗真实模型 token，也不能代替下列长时间验收。
 
+## RSS 排查与长测工具修正
+
+候选 `0faa697` 的既有样本中，Node RSS 与 Windows PSAPI working set 基本一致，未发现显著的
+读数接口偏差。2026-10-23 14:55:13Z 的只读页分类中，工作集为 171,921,408 B，其中
+142,807,040 B 的页带 shareable 标志，主要属于 `MEM_IMAGE` 与 `MEM_MAPPED`。
+同次 `PrivateUsage` 为 83,587,072 B：它是私有提交内存，不能当作私有工作集与 RSS 直接相减。
+API 语义见微软的 [Shared 位定义](https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-psapi_working_set_block)
+与 [PrivateUsage 定义](https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters_ex)。
+
+上述分类只能解释该采样时刻，不能倒推旧峰值的页组成。旧峰值期间 heap 与私有提交内存未同步增长，
+之后 RSS 回落；基础短对照中原生采样/DLL 加载只增加数 MB。现有证据不足以认定业务层泄漏，
+也不足以宣布资源验收通过；冻结 RSS 门槛保持不变。
+
+`packages/coding-agent/test/soak/inspect-working-set.mjs` 导出 `inspectWorkingSet`，可在 Windows x64
+用 `--pid` 指定长测进程；不传则检查自身。仅查询工作集及虚拟页元数据，不读取目标页内容或 CLI 配置。
+结果区分 shareable/notShareable 与内存区域类型，未知类型明确保留。Shared 表示页可共享，
+ShareCount 分布单独记录；页分类与 RSS 取样时间略有差异，不应要求字节数完全相同。
+
+已修正的长测工具问题：
+
+- `packages/coding-agent/test/soak/resume-child.mjs` 的 `runResumeChild` 将握手与退出分开，成功必须
+  收到 `RESUMED` 且子进程 `close` 返回 0。恢复子进程也计入创建/回收数；超时分级终止，最终仍无法
+  回收则记录 PID、停止产生新回合并写失败状态，不把它算作成功。
+- `packages/coding-agent/test/soak/checkpoint-tracker.mjs` 的 `makeCheckpointTracker` 复用固定
+  64 KiB 缓冲扫描新增日志，避免按增长字节数反复分配临时 Buffer。
+- `packages/coding-agent/test/soak/soak-runner.mjs` 分别记录恢复握手、等待退出的总耗时，以及恢复
+  子进程数。旧版本的 `active_children=0` 不能证明恢复子进程已回收；旧结果不重写为新工具的证据。
+- `packages/coding-agent/test/soak/soak-path-validation.mjs` 在创建 host 或写文件前验证必填路径。
+  `DI_HOME` 必须位于 `out` 的父目录之内，且不得覆盖用户家目录、默认数据根或仓库/workspace；
+  推荐使用 supervisor 自动生成的 `runRoot/di-home`、`runRoot/artifacts` 布局。缺值及被后续选项
+  吞掉的路径直接拒绝，防止诊断误写正常用户目录。
+
+对应回归测试位于 `packages/coding-agent/test/compat/soak-helpers.test.mjs` 与
+`packages/coding-agent/test/compat/soak-working-set.test.mjs`，路径入口回归位于
+`packages/coding-agent/test/compat/soak-path-validation.test.mjs`，均纳入 `npm run test:compat`。
+
+本轮本机 Windows / Node 24 开发回归中，build、typecheck 通过，unit 为 1,267 pass / 3 skip，
+compat 为 32 pass / 1 macOS skip。真实一分钟回归完成 153 轮、51 次清理、51 次恢复，恢复子进程
+创建/回收均为 51，最终工具及恢复子进程存活数均为 0。32 个采样的 RSS 最大增量为 888,832 B。
+这次高频恢复回归使用开发工作区和合成模型，只验证功能及回收，不是干净固定候选的 10 小时资源验收。
+
 ## 未完成门槛
 
 - 固定候选 `46d58df854b8577f2a7cd239734d525bbe9863b4` 的 10 小时 soak 已完成，但 checker
