@@ -3,13 +3,10 @@ import type { Skill } from "../core/skills/skill.ts";
 import type { TurnRunner } from "../cli/cli-host.ts";
 
 /*
- * Bridge an {@link AgentSession} to the {@link TurnRunner} seam the modes drive
- * (`CliHost.Create` builds the AgentRunner once and hands its `IAgentRunner`
- * surface to every mode). The current-model LABEL is a separate holder (the
- * composition root owns it and resolves the label to the session's `ChatModel`
- * at turn boundaries / switches — wiring); the rest maps one-to-one:
- * `runTurn` → `session.runTurn`, `resetHistory` → `session.resetHistory`,
- * `setActiveSkills` → the session's volatile skill tail (name + instructions).
+ * Bridge an {@link AgentSession} to the {@link TurnRunner} seam shared by the
+ * CLI modes. The host stores the current model label and resolves it to a
+ * `ChatModel` at turn boundaries and model switches. The remaining methods
+ * delegate to the session: `runTurn`, `resetHistory`, and `setActiveSkills`.
  */
 export function createSessionRunner(
   session: AgentSession,

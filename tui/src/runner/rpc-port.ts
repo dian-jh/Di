@@ -7,8 +7,8 @@
  * `RpcClientOptions` 回调，ready 回调原样调用 onReady 后让 connect resolve。
  * 两种实现（RpcClientPort / LocalAgentRunnerAdapter）都不得在订阅前发 ready/event。
  *
- * `tui/src/main.ts` 只做旧 RPC launcher：解析后端启动器、创建 RpcClientPort、
- * 调用 `runInteractive(rpcPort)`——外部 RPC 路径行为保持不变。
+ * `tui/src/main.ts` 解析后端启动器、创建 RpcClientPort，并调用
+ * `runInteractive(rpcPort)`，作为独立运行 TUI 的入口。
  */
 
 import type { RpcAgentResult, RunnerCommandResult, RunnerPort, RunnerPortHandlers } from "./port.ts";

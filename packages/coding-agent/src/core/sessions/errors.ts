@@ -1,11 +1,8 @@
 /*
- * Session format / recovery state-machine failure classes.
- *
- * 状态机与错误处理": the migration must normalize the 's low-level
- * `GetProperty` exceptions into line-numbered `InvalidData`-style errors, reject
- * unknown top-level/checkpoint records (never skip them as audit noise), and fail
- * closed on any started tool whose outcome is unknown. Codes map 1:1 to the
- * fixture manifest `expected_error_class` values.
+ * Session format and recovery state-machine failure classes. Parsing reports
+ * line-numbered errors, rejects unknown top-level and checkpoint records, and
+ * fails closed when a started tool has no known outcome. Codes map to the
+ * fixture manifest's expected error classes.
  */
 
 /** Stable machine-readable session failure classes. */

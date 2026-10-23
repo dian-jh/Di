@@ -9,22 +9,21 @@ import type { SlashCommandRegistry } from "./slash-command-registry.ts";
  * instance); it persists across commands and is read/written by /skill and
  * /skills. /help derives the help text from `registry`. REPL provides
  * `runTurn` (turn-based commands run through it); RPC passes none and maps a
- * Turn result to `turn_not_supported` (docs/tui-rpc.md §2.5) — never silently
+ * Turn result to `turn_not_supported` (see `docs/tui-rpc.md`) — never silently
  * opening a second turn.
- *.
  */
 
-/** The host capabilities commands need (the `IAgentRunner` surface). */
+/** The host capabilities available to commands. */
 export interface CommandHost {
-  /** Current model reference (`runner.CurrentModel`). */
+  /** Current model label. */
   readonly currentModel: string;
-  /** Clear screen + conversation memory (`runner.ResetHistory`). */
+  /** Clear screen and conversation memory. */
   resetHistory(): void;
-  /** Replace the active skill set (`runner.ActiveSkills =...`). */
+  /** Replace the active skill set. */
   setActiveSkills(skills: readonly Skill[]): void;
 }
 
-/** Command output sink (`TextWriter`; buffered in tests / mode wiring). */
+/** Command output sink, buffered in tests and mode wiring. */
 export interface CommandOutput {
   /** Write raw text without a trailing newline (ANSI clear screen). */
   write(text: string): void;
@@ -32,7 +31,7 @@ export interface CommandOutput {
   writeLine(text?: string): void;
 }
 
-/** Simple in-memory {@link CommandOutput} (`StringWriter`). */
+/** Simple in-memory {@link CommandOutput}. */
 export class StringCommandOutput implements CommandOutput {
   private buffer_ = "";
 

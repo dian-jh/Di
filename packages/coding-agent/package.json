@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Di TypeScript CLI host, tools, session store, and migration runtime",
+  "description": "Di TypeScript CLI host, tools, and session store",
   "engines": {
     "node": ">=22.19"
   },

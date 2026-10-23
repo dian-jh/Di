@@ -2,7 +2,7 @@
  * @di/coding-agent — Node host composition root.
  *
  * Public TypeScript host package: AgentSession, tools, skills, session/config/auth
- * storage, CLI modes, and the `di-ts` entry point form the parallel migration CLI.
+ * storage, CLI modes, and the `di-ts` entry point.
  */
 
 export { DiHome } from "./core/config/di-home.ts";

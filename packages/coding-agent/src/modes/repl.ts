@@ -13,7 +13,7 @@ import { drainEvents, EventRenderer, renderAll } from "./event-renderer.ts";
 import { tryLaunchTui, type TuiDecision, type TuiLauncherContext } from "./tui-launcher.ts";
 
 /*
- * Outer REPL loop (the counterpart ):
+ * Outer REPL loop:
  * read a line → handle slash commands through the shared registry → run one
  * agent turn. Turn-type commands (/skill <name> <args>, user commands) are
  * executed by THIS REPL's own turn mechanism (the command definition never

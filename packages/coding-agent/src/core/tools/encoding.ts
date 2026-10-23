@@ -74,7 +74,7 @@ export async function decodeSmart(
   return { ok: true, text: smartDecode(bytes, oem) };
 }
 
-/** Windows OEM code page -> WHATWG TextDecoder label (probe §2 table). */
+/** Windows OEM code page to WHATWG TextDecoder label. */
 const CODE_PAGE_TO_LABEL: Readonly<Record<number, string>> = {
   65001: "utf-8",
   936: "gbk",
@@ -105,7 +105,7 @@ export function createLegacyDecoder(codePage: number): LegacyDecoder | undefined
 let cachedOemCodePage: number | undefined;
 let oemDiscoveryFailed = false;
 
-/** Discover and cache the system OEM code page (probe §1: chcp.com, ~50 ms once). */
+/** Discover and cache the system OEM code page using `chcp.com`. */
 export async function discoverOemCodePage(): Promise<number | undefined> {
   if (cachedOemCodePage !== undefined || oemDiscoveryFailed) {
     return cachedOemCodePage;

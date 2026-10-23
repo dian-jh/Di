@@ -8,16 +8,14 @@ import { CredentialStore, FAIL_CLOSED_LOCK_PROVIDER, LockUnavailableError, type 
 import { mockLockProvider, noopAcl } from "./test-doubles.ts";
 
 /**
- *
- * The migration contract (models-and-auth.md §OAuth PKCE、轮换与原子凭据写入) mandates a
- * real OS advisory lock (Windows LockFileEx / POSIX flock) held across read →
- *
+ * Credentials are protected by a real OS advisory lock (Windows LockFileEx /
+ * POSIX flock) held across read →
  * cross-platform adapter is acceptable (proper-lockfile/lockfile are mkdir/TTL —
  * forbidden; fs-ext needs a native node-gyp build, not distributed), so the
  * CONTRACT-MANDATED default is FAIL CLOSED: acquire() rejects with a recoverable
  * error, credentials are preserved, the store never proceeds unlocked, and stale
  * locks are never auto-recovered by PID/age. `open('wx')` existence locks are
- * forbidden (crash → permanent deadlock, probe §2).
+ * forbidden because a crash can leave a permanent deadlock.
  */
 
 async function tempDir(): Promise<string> {

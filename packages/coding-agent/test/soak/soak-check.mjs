@@ -3,7 +3,8 @@
  * Reads the frozen threshold manifest in docs/soak-thresholds.json and evaluates
  * every gate and prints PASS/FAIL per gate plus an overall verdict with the
  * exact observed numbers. Used at 10h completion; the manifest is frozen BEFORE
- * the soak and is never adjusted by results (docs/typescript-validation.md §47-55).
+ * the soak and is never adjusted by results (see "未完成门槛" in
+ * docs/typescript-validation.md).
  *
  * Gates (each threshold frozen in the manifest after the >=30-min warm-up):
  *   rss_max_delta_bytes   max(rss_bytes) - baseline rss <= delta

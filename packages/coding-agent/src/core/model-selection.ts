@@ -89,7 +89,7 @@ export interface ModelSelectionHost {
   readonly currentModel: string;
   /** Whether a turn is currently running (busy policy rejects switching mid-turn). */
   isBusy(): boolean;
-  /** Commit a model switch (`runner.CurrentModel =...`). */
+  /** Commit a model switch. */
   setCurrentModel(model: string): void;
   /** Called when the reasoning tier changes (`onReasoningChanged`). */
   onReasoningChanged?(effort: string | null): void;

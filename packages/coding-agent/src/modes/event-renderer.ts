@@ -4,8 +4,8 @@ import type { TextWriter } from "../cli/io.ts";
 import { EventConsumer } from "../core/events/event-bus.ts";
 
 /*
- * Renders AgentLoopEvents and AgentResult into terminal text (the * counterpart ): TextDelta appends
- * in real time (streaming), other events each become a line; RenderResult prints
+ * Renders agent events and results into terminal text. Text deltas append in
+ * real time (streaming), other events each become a line; final results print
  * the meta footnote and, for non-streamed answers (final_output_tool /
  * max_iterations), the final text so a capped run is never silent. ReasoningDelta
  * renders only when `renderReasoning` is enabled (a real terminal — never pipe /

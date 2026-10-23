@@ -29,11 +29,9 @@ import { errorObservation, okObservation, type CoreTool } from "./types.ts";
  * `runProcess(shell, [command],...)` (`new List<string>(PrefixArguments)
  * { command }`).
  *
- * Documented migration differences from:
- * - PromptSnippet/PromptGuidelines reflect the selected execution mode.
- * - `runProcess` diagnostics report `name=<basename(command)>` — i.e. the whole
- * command line — for shell-mode calls (the underlying process is the shell
- * wrapping the command). Accepted and noted in the card report.
+ * The prompt reflects the selected execution mode. In shell mode,
+ * `runProcess` diagnostics report `name=<basename(command)>` for the shell
+ * process that wraps the command.
  */
 
 /** Default per-call timeout in seconds (`BashTool.DefaultTimeoutSeconds`). */
@@ -156,9 +154,7 @@ export function createBashTool(baseDirectory: string, options?: BashToolOptions)
       } catch (error) {
         return errorObservation(`error: 路径参数非法: ${messageOf(error)}`);
       }
-      // Async stat (never sync IO on the tool path, tools-and-platform.md); a
-      // A missing directory or a path that points to a file is rejected.
-      // — is the documented "工作目录不存在" observation (Directory.Exists).
+      // Check the working directory asynchronously; reject missing paths and files.
       try {
         const dir = await stat(workingDir);
         if (!dir.isDirectory()) {

@@ -14,7 +14,7 @@
  * (`toText`), so a whole segment can be smart-decoded once (UTF-8 first, OEM
  * fallback). Per-chunk streaming decode would lock the encoding at the first
  * chunk and garble a stream where cmd built-ins write OEM bytes while.NET CLI
- * writes UTF-8 (tools-and-platform.md §"Windows OEM/GBK 与 UTF-8 输出"). Used
+ * writes UTF-8 (see `docs/modules/tools.md`). Used
  * by the one-shot process runner.
  */
 

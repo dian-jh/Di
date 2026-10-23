@@ -20,8 +20,7 @@ import { runRpcMode } from "../modes/rpc-mode.ts";
 import type { TuiLauncherContext } from "../modes/tui-launcher.ts";
 
 /*
- * CLI dispatch shell (Pi's main.ts counterpart; at current implementation
- * ): parse args → validate → resolve mode → build host → dispatch. It
+ * CLI dispatch shell: parse args → validate → resolve mode → build host → dispatch. It
  * never touches the console — input/output streams and TTY detection are injected
  * — so the shell is replayable in any host and testable with in-memory streams.
  *
@@ -34,7 +33,7 @@ import type { TuiLauncherContext } from "../modes/tui-launcher.ts";
  * dispatched from here: REPL / TUI (interactive), single JSON doc (json), text
  * single shot (print), NDJSON (rpc).
  *
- * Output contract (docs/cli.md §3.4/§4): data → stdout, diagnostics/errors →
+ * Output contract (see `docs/cli.md`): data → stdout, diagnostics/errors →
  * stderr, exit code 0 = success / 1 = usage or runtime error, ANSI only when
  * `stdoutTty && !noAnsi`. Internal camelCase never leaks to the wire: the
  * JSON/RPC wire shapes are produced by the mode bodies.

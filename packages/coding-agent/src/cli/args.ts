@@ -1,7 +1,6 @@
 /*
- * CLI argument parsing — pure data mapping (string[] → CliArgs + diagnostics).
- * (the language-neutral
- * contract part of the CLI shell, see docs/cli.md §3.2). The parser does no I/O
+ * CLI argument parsing — pure data mapping (`string[]` → `CliArgs` + diagnostics).
+ * See `docs/cli.md` for the command-line contract. The parser does no I/O
  * and touches no console; the result is handed to `CliMode.resolve` to decide
  * the running mode. Rules:
  * - everything after `--` is positional (no flag parsing);

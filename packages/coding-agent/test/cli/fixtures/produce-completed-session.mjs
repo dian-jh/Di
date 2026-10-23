@@ -26,8 +26,8 @@
 //   - exits 0
 //
 // Why this lives in test/cli/fixtures/ instead of test/child-test-host/: it is
-// the scenario-C producer for THIS card (crash-resume through the real CLI), and
-// keeping it beside test/cli/crash-resume.test.ts keeps the card's inputs local;
+// the crash-resume scenario producer. Keeping it beside
+// test/cli/crash-resume.test.ts keeps its inputs local;
 
 // an .mjs (not .mts) so `node` runs it directly with zero type-stripping setup,
 // exactly like host.mjs does.

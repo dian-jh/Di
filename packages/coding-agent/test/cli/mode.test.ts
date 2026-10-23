@@ -100,7 +100,7 @@ test("Resolve_SkillEval_PriorityOverPrompt", () => {
   assert.equal(CliMode.resolve(args({ skillEval: "cases.json", positionals: ["prompt"] }), TTY, TTY), AppMode.SkillEval);
 });
 
-// ---- --resume precedence (validation-and-release.md §分层测试计划) ----
+// ---- --resume precedence ----
 
 test("Resolve_ResumeNoModeNoPositionals_Interactive", () => {
   // `--resume` with no explicit --mode and no positional prompt enters a simple

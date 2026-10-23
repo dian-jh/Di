@@ -4,8 +4,7 @@ import type { ISkillMatcher } from "./skill-matcher.ts";
 /*
  * Shared skill activation computation — the ONE pure function every mode
  * (REPL / print / JSON / RPC) uses to turn a message + the available skills into
- * the turn's active set. at current implementation
- * (`SkillActivation.Compute`): pinned skills come first, auto-matched
+ * the turn's active set: pinned skills come first, auto-matched
  * skills are appended after them (deduped against the pinned set by name), and
  * the whole set is recomputed per turn — never accumulated.
  */
@@ -22,7 +21,7 @@ export interface SkillActivationResult {
  * Compute the activation set for a user message. Pure and deterministic: the
  * same (message, allSkills, pinned, matcher) always yields the same result, and
  * no state carries across calls — every turn recomputes from scratch. The host
- * injects `result.active` at the turn boundary (`AgentRunner.ActiveSkills`);
+ * injects `result.active` at the turn boundary;
  * `AgentSession.setActiveSkills` is already a turn-boundary read that keeps the
  * body in the volatile request tail.
  */

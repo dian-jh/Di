@@ -50,16 +50,26 @@ TypeScript 入口通过当前 Node 可执行文件启动；显式 `DI_BIN` 会�
 
 ```
 src/
-├── main.ts           # 入口：解析 di → spawn --mode rpc → 装配视图 → 事件循环
+├── main.ts           # 独立入口：选择 TypeScript 后端并通过 RPC 启动
+├── interactive.ts    # 共用 TUI 生命周期：terminal、视图、输入与退出
+├── runner/
+│   ├── port.ts       # 同进程与 RPC runner 共用的接口
+│   └── rpc-port.ts   # RpcClient 到 RunnerPort 的适配
 ├── rpc/
 │   ├── protocol.ts   # 协议类型定义（与 docs/tui-rpc.md 逐字段对应）
 │   ├── codec.ts      # NDJSON 编解码：行帧、parse+validate、FIFO 队列、编码
 │   └── client.ts     # 子进程管理：spawn、ready 握手、请求方法、事件订阅、退出清理
 └── app/
-    ├── state.ts      # 回合状态机（idle/running/cancelling）+ 视图模型
+    ├── state.ts      # 回合状态机（idle/running/cancelling）与视图模型
     ├── chat-view.ts  # 聊天视口：transcript + 状态行 + 提示输入
     ├── message.ts    # 用户 / 助手消息组件（流式追加）
-    └── tool-call.ts  # 工具调用组件（标题行 + 结果）
+    ├── tool-call.ts  # 工具调用组件（标题行 + 结果）
+    ├── commands.ts   # 命令解析
+    ├── terminal-mode.ts # terminal 初始化与清理
+    ├── chat-layout.ts   # 聊天视图布局
+    ├── badge.ts / rule.ts # 状态徽标与分隔线
+    ├── colors.ts / spacing.ts # 样式与间距辅助
+    └── fold-navigation.ts # 折叠内容导航
 test/                 # node --test 单元 / 集成测试（不依赖终端）
 ```
 

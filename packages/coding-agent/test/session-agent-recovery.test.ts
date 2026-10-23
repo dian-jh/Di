@@ -10,9 +10,8 @@ import type { ToolExecutor, ToolObservation } from "@di/agent";
 import { AgentSession, loadRecovery, SessionStore } from "@di/coding-agent";
 
 /**
- *
- * `ResetHistory` / `_recoveryBlockedReason`).
- *
+ * Session recovery preserves completed results and fails closed for uncertain
+ * tool outcomes.
  * - after a model error the same host reloads the durable checkpoint into memory
  *   and the next turn continues WITHOUT re-executing tools (completed results are
  *   reused);

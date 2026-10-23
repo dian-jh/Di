@@ -7,15 +7,11 @@ import { join } from "node:path";
 import { ShellSession } from "@di/coding-agent";
 
 /**
- *
- * through stdin/stdout where cwd, environment variables and virtual-env state
+ * Commands run through stdin/stdout, where cwd, environment variables and virtual-env state
  * survive across calls. Per the contract (tools-and-platform.md §"持久 shell
  * 会话协议"): lazy spawn, random nonce marker round-trip, stdin encoding, bounded
  * stdout/stderr drain, an async mutex serializing commands, and kill/recreate on
  * timeout / user `exit` / cancel.
- *
- * Every case here is red by ASSERTION: the module does not exist yet, so this
- * file fails to load (SyntaxError) — that is the red gate for the card.
  *
  * Platform-aware commands: the acceptance platform is Windows (cmd session), so
  * the Windows branches run here; POSIX branches (`sleep` / `printf`) are written

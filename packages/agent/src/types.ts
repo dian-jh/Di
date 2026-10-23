@@ -91,14 +91,14 @@ export interface LoopCheckpoint {
   toolCompleted(result: ToolResultMessage): void | Promise<void>;
 }
 
-/** Everything the loop needs injected (loop-and-state.md §"建议公开的最小 loop types"). */
+/** Everything the loop needs injected; see `docs/modules/agent-loop.md`. */
 export interface AgentDependencies {
   model: ChatModel;
   toolExecutor: ToolExecutor;
   /** Pure or injected estimate helper; never a Node Buffer API. */
   estimateRequestTokens: (request: ModelRequest) => number;
   toolValidator?: ToolValidator;
-  /** Observer only; exceptions are isolated and diagnosed (later card). */
+  /** Observer only; exceptions are isolated and diagnosed. */
   events?: (event: AgentEvent) => void | Promise<void>;
   /** Ordered diagnostic side channel; its own errors are swallowed. */
   onObserverError?: (error: unknown, event: AgentEvent) => void | Promise<void>;

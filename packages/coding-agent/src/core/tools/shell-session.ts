@@ -17,7 +17,7 @@ import { killProcessTree, PROCESS_KILL_BUDGET_MS, ProcessResult } from "./proces
  * one long-lived shell process driven through stdin/stdout where cwd, environment
  * variables and virtual-env state survive across calls. Every command is followed
  * by a random per-session marker + exit-code line that bounds its output and
- * reports its exit code. Per tools-and-platform.md §"持久 shell 会话协议":
+ * reports its exit code. See `docs/modules/tools.md` for shell behavior:
  * lazy spawn on first use, random nonce marker round-trip, stdin encoding, bounded
  * stdout/stderr drain, an async mutex serializing commands, and kill/recreate on
  * timeout / user `exit` / cancel (the session is a tree — `killProcessTree`).

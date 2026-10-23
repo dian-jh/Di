@@ -2,8 +2,7 @@ import type { AgentEvent } from "@di/agent";
 import { isAgentEvent, type LogEvent } from "./log-events.ts";
 
 /*
- * In-memory AgentLoopEvent bus (the +
- * counterpart ): the mode bodies (REPL /
+ * In-memory agent event bus: the mode bodies (REPL /
  * print / rpc) create a consumer BEFORE running a turn, the session's `events`
  * callback (or a test fake runner) publishes to the bus, and a concurrent render
  * task drains the consumer in real time. Single-threaded push/close semantics;

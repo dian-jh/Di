@@ -8,9 +8,8 @@ import { AclError, createAclAdapter, CredentialStore } from "@di/coding-agent";
 import { mockLockProvider, noopAcl } from "./test-doubles.ts";
 
 /**
- *
- * Windows: set + read back the current-user-only DACL via `icacls` subprocess
- * (probe §3b proved readback works; Node stat.mode on NTFS always reads 0o100666
+ * Windows: set and read back the current-user-only DACL via `icacls` subprocess
+ * (Node `stat.mode` on NTFS is not a valid verification channel and commonly
  * so it is NEVER used as the verification channel). POSIX: chmod 0700 dir /
  * 0600 file with stat.mode readback (valid on real POSIX). Any failure to apply
  * or verify → AclError → the store refuses the token write (fail closed, old
@@ -76,7 +75,7 @@ test("POSIX mode readback mismatch fails closed with AclError", async () => {
 });
 
 test("win32 secureFile grants the current-user-only DACL via icacls and verifies by readback", async () => {
-  // Real icacls on this Windows host (probe §3b: readback works). Skipped on POSIX.
+  // Exercise real icacls on Windows. Skipped on POSIX.
   if (process.platform !== "win32") return;
   const dir = await tempDir();
   try {

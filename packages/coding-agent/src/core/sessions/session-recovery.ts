@@ -1,12 +1,9 @@
 /*
- * Recovery reader / validation + resume state machine.
- *
- * 状态机与错误处理"; `Load` plus
- * the migration-mandated corrections:
+ * Recovery reader, validation, and resume state machine:
  * - unknown top-level / checkpoint record types are REJECTED with the line number
- * (the silently ignored them; a record may be completion evidence),
+ * (a record may be completion evidence),
  * - all field access failures normalize to line-numbered `SessionDataError`
- * (never the 's raw `GetProperty` exceptions),
+ * (rather than exposing parser exceptions),
  * - unknown content block types are rejected (`unknown-block`), never dropped.
  *
  * Only a torn FINAL line (no LF) is silently dropped. Any complete LF line that

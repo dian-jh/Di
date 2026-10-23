@@ -277,7 +277,7 @@ function drain(consumer: EventConsumer, stdout: TextWriter, seq: SeqCounter): vo
 }
 
 /**
- * `command` request (docs/tui-rpc.md §3): `list` lists the registry; `run` runs a
+ * `command` request (see `docs/tui-rpc.md`): `list` lists the registry; `run` runs a
  * synchronous command. A turn-type command (result carries a TurnMessage, e.g.
  * /skill with args, user commands) → `command_error: turn_not_supported` with the
  * turn message — RPC has no turn executor, the TUI runs it through its own prompt

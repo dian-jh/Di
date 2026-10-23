@@ -1,6 +1,6 @@
 /*
- * Minimal text I/O seams for the CLI dispatch shell (`TextReader` / `TextWriter`
- * counterparts ). `CliApp` never touches the console: input,
+ * Minimal text I/O interfaces for the CLI dispatch shell. `CliApp` never
+ * touches the console: input,
  * output and TTY detection are injected, so the shell is replayable in any host
  * and testable without real stdio. `StringTextWriter` / `LineTextReader` /
  * `nullTextReader` are the in-memory implementations the tests (and simple hosts)

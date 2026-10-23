@@ -6,10 +6,9 @@ function isToolCallBlock(block: ContentBlock): block is ToolCall {
 }
 
 /*
- * Cross-turn history helpers (pure; * `TrimHistoryByTokens` / `TrimHistory` / `DropOldestTurns` / `SanitizeHistory`).
+ * Pure helpers for cross-turn history trimming and sanitization.
  * All operate on the persisted memory only — the loop's result trajectory is
- * never rewritten by these functions (loop-and-state.md §"逐单元红绿实施与验收
- * 边界" history/recovery row: 结果 trajectory 不改写，持久 history 良构).
+ * never rewritten by these functions (see `docs/modules/sessions.md`).
  */
 
 /** Count user messages (whole-turn boundaries) in a history. */

@@ -6,9 +6,7 @@ import { ModelSelectionError } from "../model-selection.ts";
 
 /*
  * Builtin slash commands (mode-agnostic: they reach capabilities ONLY through
- * {@link CommandContext}; REPL and RPC share the same set). Behavior is ported
- * line-by-line from the old `Repl.RunCommandAsync` switch, mirrored by
- *.
+ * {@link CommandContext}; REPL and RPC share the same set).
  */
 export function createBuiltinRegistry(): SlashCommandRegistry {
   const registry = new SlashCommandRegistry();

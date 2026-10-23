@@ -1,20 +1,14 @@
 #!/usr/bin/env node
 /*
- * CLI bin entry (/): the production executable main the `"bin"` field
- * points at — `di-ts` → `packages/coding-agent/dist/cli/main.js` (architecture.md
- * §7 / §141-147). The TS command never occupies the plain `di` name, so the
- * installed `di` stays the system default until migration completion. Also the
- * entry the TS TUI spawns as `process.execPath <this entry> --mode rpc`
- * (-tui-launcher-seam / RPC launcher). Parses argv, wraps the real stdio
- * into the injected `TextReader` / `TextWriter` seams, and dispatches
- * `CliApp.runAsync`.
+ * Production executable registered as `di-ts` in this package's `bin` field.
+ * The TUI also starts this entry with `--mode rpc`. It parses argv, wraps the
+ * process stdio in the injected `TextReader` / `TextWriter` interfaces, and
+ * dispatches to `CliApp.runAsync`.
  *
- * The dispatch shell never touches the console itself (
- * counterpart): TTY detection comes from the live stdio streams, data → stdout,
+ * TTY detection comes from the live stdio streams, data goes to stdout,
  * diagnostics → stderr, exit code 0/1. After the mode body the stdin reader is
  * closed so a clean RPC shutdown / EOF exits naturally (no lingering readline
- * handle); the host's dispose chain (`di exiting`) has already run inside
- * `runAsync`.
+ * handle); the host's dispose chain has already run inside `runAsync`.
  */
 
 import { CliApp } from "./cli-app.ts";

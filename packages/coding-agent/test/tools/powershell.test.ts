@@ -8,7 +8,6 @@ import { spawnSync } from "node:child_process";
 import { createPowerShellTool, ShellSession, powershellSessionShell } from "@di/coding-agent";
 
 /**
- *
  * - persistent-session mode (a `ShellSession` with the PowerShell shell is
  *   injected): cd / variables / env persist across calls; `working_dir` is not
  *   in the schema.
@@ -19,8 +18,6 @@ import { createPowerShellTool, ShellSession, powershellSessionShell } from "@di/
  * errors), timeout (default + per-call override), working directory, argument /
  * JSON errors, long-output truncation, and no CLIXML pollution.
  *
- * Every case is red by ASSERTION: the exports do not exist yet, so this file
- * fails to load (SyntaxError) — that is the red gate for the card.
  */
 
 const base = mkdtempSync(join(tmpdir(), "di-ps-"));

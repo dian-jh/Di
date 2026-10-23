@@ -1,9 +1,8 @@
 /**
- * TUI 入口（旧 RPC launcher）：决策后端启动器 → `RpcClientPort`（spawn `--mode rpc`）
+ * 独立启动时的 TUI 入口：决策后端启动器 → `RpcClientPort`（spawn `--mode rpc`）
  * → `runInteractive(port)`（terminal / state / view / 输入键盘 / stop 生命周期）。
  *
- * 外部 RPC 路径保持原行为：`runInteractive` 的 connect 失败 / 后端退出 / 优雅关闭
- * 语义与旧 main.ts 的 RpcClient 直连一致；本文件只留下后端启动器决策与入口退出。
+ * `runInteractive` 处理连接失败、后端退出和优雅关闭；本文件负责后端启动器决策与入口退出。
  * 生产 CLI 的同进程 local runner 由 coding-agent 的 adapter 走同一 `runInteractive`。
  */
 

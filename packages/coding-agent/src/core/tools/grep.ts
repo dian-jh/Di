@@ -51,9 +51,8 @@ export interface GrepToolOptions {
 }
 
 /*
- * grep: regex search over enumerated file contents, returning `rel:line: text`
- * matches. Ported from with the worker
- * safety boundary mandated by + tools-and-platform.md: every
+ * Regex search over enumerated file contents, returning `rel:line: text`
+ * matches. Every
  * bounded regex job runs in a worker_threads Worker so a catastrophic pattern is
  * terminated via `worker.terminate` instead of hanging the loop; abort also
  * terminates the worker and rejects with AbortError.
@@ -62,16 +61,16 @@ export interface GrepToolOptions {
  * first (BOM stripped), then the system OEM code page; files that decode
  * neither are skipped and reported, never silently mojibake'd.
  *
- *.NET -> JS regex bridging (probe §推荐结论): the `u` flag is always set so
+ * .NET-to-JavaScript regex compatibility: the `u` flag is always set so
  * `\p{…}` works and identity escapes like `\A`/`\z`/`\Z` never silently match as
  * literals; `\A`/`\z`/`\Z` are translated to `^`/`$` (equivalent per line, since
  * a line has no newlines); `.NET`-only syntax that JS rejects (single-quote
  * named groups, balanced/conditional groups, `\p{IsScript}`…) becomes an
  * explicit `error:` observation, never a silent empty result. The Unicode
- * shorthand classes are bridged to.NET CultureInvariant semantics (this card):
+ * shorthand classes are bridged to .NET CultureInvariant semantics:
  * `\w`/`\d`/`\b` and their negations (`\W`/`\D`/`\B`, incl. inside character
- * classes) are rewritten to Unicode-aware JS equivalents by `translateDotNetRegex`
- * ( §对照表 A), so grep matches like the instead of
+ * classes) are rewritten to Unicode-aware JS equivalents by `translateDotNetRegex`,
+ * so grep matches follow .NET Unicode behavior instead of
  * JS's ASCII-only `\w`/`\d`/`\b`.
  */
 export function createGrepTool(baseDirectory: string, options?: GrepToolOptions): CoreTool {
@@ -294,9 +293,9 @@ export function createGrepTool(baseDirectory: string, options?: GrepToolOptions)
 
 /**
  * Compile the effective pattern for matching. `literal` escapes the pattern
- * (Regex.Escape); otherwise.NET anchors and Unicode shorthand classes are
- * bridged via `translateDotNetRegex` (this card: `\w`/`\d`/`\b` + negations to
- * Unicode semantics). The `u` flag is always set (P4-regex-probe): `\p{…}` works
+ * (`Regex.Escape`); otherwise .NET anchors and Unicode shorthand classes are
+ * bridged via `translateDotNetRegex` (`\w`/`\d`/`\b` + negations use Unicode
+ * semantics). The `u` flag is always set so `\p{…}` works
  * and .NET identity escapes never silently match as literals. A compile failure
  * (invalid regex, or .NET-only syntax JS rejects) is returned as the tool's
  * `error:` observation.
@@ -387,7 +386,7 @@ function stripBom(bytes: Uint8Array): number {
 /**
  * One worker thread per grep call, reused across files, rebuilt after a
  * timeout/abort termination. Every bounded regex job runs here so a pathological
- * pattern can be killed (P4-regex-probe): `worker.terminate()` is proven to stop
+ * pattern can be killed: `worker.terminate()` stops
  * a catastrophic-backtracking thread within ~5ms without blocking the caller.
  */
 class RegexWorkerPool {

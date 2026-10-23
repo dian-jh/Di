@@ -1,7 +1,7 @@
 /**
  * di-tui（当前 `tui/` workspace）公共入口：只导出 runner 接缝与 wire-shape
- * 契约，绝不导入 @di/agent / @di/coding-agent。`tui/src/main.ts` 只作旧 RPC
- * launcher（外部子进程路径），不是本包的 import 入口。
+ * 契约，绝不导入 @di/agent / @di/coding-agent。`tui/src/main.ts` 是独立运行
+ * 时的外部子进程入口，不是本包的 import 入口。
  *
  * 导出：
  * - {@link runInteractive}(port) —— 把 RunnerPort 接入现有 TUI 组件树；

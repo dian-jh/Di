@@ -1,6 +1,6 @@
 /*
  *.NET -> JS regex bridging for grep's shorthand classes (-regex-unicode-
- * conformance). Used only by grep (grep.ts); see tools-and-platform.md §
+ * conformance). Used only by grep (grep.ts); see `docs/modules/tools.md`.
  * ".NET 与 JavaScript 搜索语义差异" (`\w`/`\b`/大小写忽略 row) and
  * §对照表 A.
  *

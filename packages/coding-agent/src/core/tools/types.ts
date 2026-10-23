@@ -13,7 +13,7 @@ import type { ToolSpec } from "@di/ai";
  * (`ICoreTool.ExecuteAsync(string argumentsJson,...)`). Expected failures
  * return an observation whose `text` starts with "error: " — never thrown to the
  * loop. Hard cancellation propagates as an AbortError rejection, which the loop
- * must not convert into a plain error observation (loop-and-state.md).
+ * must not convert into a plain error observation (see `docs/modules/tools.md`).
  */
 export interface CoreTool {
   /** Model-facing definition (name / description / JSON-Schema parameters). */

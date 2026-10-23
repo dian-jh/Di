@@ -7,11 +7,9 @@ import { join } from "node:path";
 import { createFileTools, createToolExecutor } from "@di/coding-agent";
 
 /**
- *
- * tools-and-platform.md §"工具契约": each tool is a ToolSpec (name/description/
+ * Each tool is a ToolSpec (name/description/
  * JSON-Schema parameters) co-located with its execution function, and the schema
- * set stays consistent with the executor set. This card owns the three file tools;
- *
+ * set stays consistent with the executor set.
  */
 
 const base = mkdtempSync(join(tmpdir(), "di-tools-"));

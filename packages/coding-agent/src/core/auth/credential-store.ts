@@ -14,7 +14,7 @@ import { CHATGPT_DIRECT_SCOPE } from "./constants.ts";
  * exclusive lock → re-read the latest credentials INSIDE the lock → apply the
  * change (refresh / login / logout) → validate → atomic replace. The lock covers
  * read, network refresh and commit, so two processes can never consume a
- * one-time refresh token (models-and-auth.md line ~153-156).
+ * one-time refresh token (see `docs/modules/chatgpt.md`).
  *
  * Atomic replace: a unique temp file in the same directory → write → `fh.sync` →
  * close → `rename` overwrite. On failure the old file is preserved and the orphan
@@ -28,7 +28,7 @@ import { CHATGPT_DIRECT_SCOPE } from "./constants.ts";
  *
  * Reading tolerates the legacy shape (`Accounts` + `ActiveClientId`, PascalCase
  * fields, ISO dates) and migrates it atomically while preserving the active
- * credential (models-and-auth.md line ~165). The canonical write format is
+ * credential. The canonical write format is
  * camelCase JSON with epoch-millis timestamps.
  */
 

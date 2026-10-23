@@ -6,8 +6,7 @@ import type { CliHost } from "../cli/cli-host.ts";
 import type { TextReader, TextWriter } from "../cli/io.ts";
 
 /*
- * Shared headless-mode helpers (the private helpers
- * ): prompt resolution (positionals, else stdin to EOF), the
+ * Shared headless-mode helpers: prompt resolution (positionals, else stdin to EOF), the
  * best-effort session log (start / append / failure — a disk error only warns,
  * never changes the exit code; `--no-session` skips the whole path), and the
  * headless skill auto-activation (same shared computation as the REPL).

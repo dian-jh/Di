@@ -7,8 +7,7 @@ import { userInfo } from "node:os";
  * Owner-only ACL adapter.
  *
  * Windows: set + read back a current-user-only DACL via the `icacls` subprocess
- * ( §3b proved readback works). Node `stat.mode` on NTFS is
- * NEVER used as the verification channel — the probe (§3a/§3b) proved it always
+ * Node `stat.mode` on NTFS is NEVER used as the verification channel — it does
  * reads `0o100666` regardless of the real DACL, so it cannot distinguish a
  * restricted file from an open one.
  *
@@ -97,7 +96,7 @@ export function createAclAdapter(options: AclAdapterOptions = {}): AclAdapter {
     if (win32) {
       // Grant: current-user-only inheriting FullControl, replacing any inherited ACEs.
       await runIcacls(path, ["/inheritance:r", "/grant:r", `${winUser}:(OI)(CI)F`]);
-      // Read back and verify the ACE list (probe §3b: readback proves the DACL).
+      // Read back and verify the ACE list to confirm the DACL.
       verifyReadback(path, "(OI)(CI)F", await runIcacls(path, []));
     } else {
       await chmod(path, 0o700);

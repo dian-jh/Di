@@ -32,14 +32,13 @@ import { loadRecovery } from "./sessions/session-recovery.ts";
 import { SessionDataError } from "./sessions/errors.ts";
 
 /*
- * AgentSession — the Node host that owns cross-turn state (loop-and-state.md
- * §"所有权与接口草案"): durable in-memory history, the current model, active
+ * AgentSession — the Node host that owns cross-turn state (see
+ * `docs/modules/sessions.md`): durable in-memory history, the current model, active
  * skills, the budget tracker, checkpoint/recovery and the soft-stop controller
  * live ONLY here. `runAgentLoop` (@di/agent) stays a pure loop that never
  * persists next-turn history.
  *
- * -card behavior (`RunAsync`) plus
- * model switching:
+ * Model switching and turn behavior:
  * - `runTurn` is the only session-turn entry; one session serializes turns
  * (concurrent prompt or `resetHistory` while a turn is running → busy).
  * - each turn merges the full loop trajectory into cross-turn memory, trims
@@ -80,7 +79,7 @@ export class SessionBusyError extends Error {
 
 /*
  * The session is blocked from further turns because a started tool outcome is
- * unknown (`AgentRunner._recoveryBlockedReason`). Replay is forbidden: the
+ * unknown. Replay is forbidden: the
  * caller must inspect the side effects and call `resetHistory` (or start a new
  * session) before the same host may continue.
  */
@@ -94,7 +93,7 @@ export class SessionRecoveryBlockedError extends Error {
 }
 
 /*
- * Model/provider resolution failure at the turn boundary (* `ILlmService.ResolveModelAsync` rejection / `LlmRuntime.RequireAdapter`).
+ * Model/provider resolution failure at the turn boundary.
  * Rejects the turn with an explicit error — never a silent fallback, never an
  * invented token window — and leaves committed cross-turn history untouched.
  */
@@ -118,8 +117,7 @@ export interface AgentSessionConfig {
   /** Stable system prompt injected first in every model request (loop prefix). */
   readonly systemPrompt: string;
   /*
- * Optional turn-boundary model resolver (`AgentRunner._modelFactory` /
- * `ILlmService.ResolveModelAsync`). When provided, `runTurn` awaits it at the
+ * Optional turn-boundary model resolver. When provided, `runTurn` awaits it at the
  * turn boundary with the current model reference and uses the returned
  * `ChatModel` for THAT turn. A throwing / rejecting resolver (or one returning
  * no model) rejects the turn with `SessionModelError` — no silent fallback, no
@@ -276,8 +274,8 @@ export class AgentSession {
 
   /**
    * Clear all cross-turn memory. Only allowed when no turn is running — the
-   * in-use array is never cleared concurrently (loop-and-state.md §"中断、取消与
-   * 并发生命周期"). Mirrors  (snapshot marker and
+   * in-use array is never cleared concurrently (see `docs/interrupt.md`). The
+   * snapshot marker and
    * budget tracker holder are reset too so the snapshot is re-injected next turn).
    */
   resetHistory(): void {

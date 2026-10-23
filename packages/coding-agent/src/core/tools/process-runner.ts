@@ -32,17 +32,17 @@ import { ProcessDiagnostics } from "../logging/process-diagnostics.ts";
 
 /** Drain budget after a natural exit, ms (`DrainTimeoutMs`). */
 export const PROCESS_DRAIN_BUDGET_MS = 1000;
-/** Budget to await the process `close` after a tree kill, ms ( §2: 5s). */
+/** Budget to await the process `close` after a tree kill, ms (5s). */
 export const PROCESS_KILL_BUDGET_MS = 5000;
 /** POSIX SIGTERM grace before SIGKILL when killing the process group. */
 const POSIX_KILL_GRACE_MS = 1500;
 
 /*
- * Process-diagnostics knobs ( closing the emission seam; * ): the runner emits bypass
+ * Process-diagnostics options control the runner's
  * `proc: start / start_failed / running / timeout / exited` lines through the
  * static {@link ProcessDiagnostics} hook. The heartbeat cadence and the
- * slow-success threshold are injectable so tests observe them without a
- * multi-second run (production defaults mirror ).
+ * slow-success threshold are injectable so tests can observe them without a
+ * multi-second run.
  */
 export interface ProcessDiagnosticsOptions {
   /** Heartbeat cadence, ms (5000); `proc: running` lines emitted while the process lives. */
@@ -343,13 +343,12 @@ async function drainStream(stream: NodeJS.ReadableStream | null, buffer: Bounded
 
 /**
  * Kill the process tree: Windows `taskkill /PID <pid> /T /F`; POSIX group
- * SIGTERM -> short grace -> SIGKILL (P4-win-process-probe conclusions). Shared by
+ * SIGTERM -> short grace -> SIGKILL. Shared by
  * the one-shot runner and the persistent ShellSession (which kills its whole
  * session tree on timeout / user exit / cancel).
  */
 export async function killProcessTree(child: ChildProcess): Promise<void> {
-  // Already exited naturally (benign race): nothing to kill (probe §4: taskkill
-  // on a dead PID returns 128 — skip it).
+  // Already exited naturally (benign race): nothing to kill.
   if (child.exitCode !== null || child.signalCode !== null) return;
   const pid = child.pid;
   if (pid === undefined) return;
@@ -360,7 +359,7 @@ export async function killProcessTree(child: ChildProcess): Promise<void> {
   }
 }
 
-/** Windows tree kill: `taskkill /PID <pid> /T /F`, argv form (probe §7.1). */
+/** Windows tree kill: `taskkill /PID <pid> /T /F`, passed as argv. */
 function taskkillTree(pid: number): Promise<void> {
   return new Promise((resolve) => {
     let killer: ChildProcess;
@@ -385,7 +384,7 @@ function taskkillTree(pid: number): Promise<void> {
   });
 }
 
-/** POSIX group kill: SIGTERM, short grace, then SIGKILL (probe §7.6). */
+/** POSIX group kill: SIGTERM, short grace, then SIGKILL. */
 async function posixKillGroup(pid: number): Promise<void> {
   try {
     process.kill(-pid, "SIGTERM");

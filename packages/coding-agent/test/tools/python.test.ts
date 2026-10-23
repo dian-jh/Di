@@ -8,14 +8,11 @@ import { spawnSync } from "node:child_process";
 import { createPythonTool, ProcessDiagnostics } from "@di/coding-agent";
 
 /**
- *
- * working directory is the system temp dir (process-level isolation only — NOT
+ * The working directory is the system temp dir (process-level isolation only — NOT
  * an OS sandbox, no filesystem/network restriction claimed). stdin starts at EOF
  * (redirected then closed), timeout force-kills the tree, output is forced to
  * UTF-8 (PYTHONIOENCODING=utf-8 pinned + UTF-8 decode).
  *
- * Every case is red by ASSERTION: the exports do not exist yet, so this file
- * fails to load (SyntaxError) — that is the red gate for the card.
  */
 
 const base = mkdtempSync(join(tmpdir(), "di-py-"));

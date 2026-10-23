@@ -2,7 +2,7 @@
   "id": "recovery-unknown-tool-outcome",
   "kind": "host-recovery",
   "scenario": "recovery",
-  "description": "Host recovery boundary (P5): a previous turn checkpointed a tool intent but its outcome is unknown (crash or cancel before the result was written). Auto-continuation of the same session must be blocked fail-closed until history reset or manual review; no model call and no tool side effect may start. This is a host-level (AgentSession) contract, not a pure-loop run.",
+  "description": "Host recovery boundary: a previous turn checkpointed a tool intent but its outcome is unknown (crash or cancel before the result was written). Auto-continuation of the same session must be blocked fail-closed until history reset or manual review; no model call and no tool side effect may start. This is a host-level (AgentSession) contract, not a pure-loop run.",
   "source": {
     "tests": [
       "packages/coding-agent/test/session-agent-recovery.test.ts"

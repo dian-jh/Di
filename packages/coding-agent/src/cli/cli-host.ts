@@ -25,11 +25,11 @@ import { createCliHost } from "./cli-host-compose.ts";
  * root bridges it through {@link createSessionRunner}.
  */
 export interface TurnRunner {
-  /** Current model label (`runner.CurrentModel`; `ModelSelection` reads/writes it). */
+  /** Current model label; `ModelSelection` reads and writes it. */
   readonly currentModel: string;
-  /** Commit a model label ( bridges the label to the session's ChatModel). */
+  /** Commit a model label; the host resolves it to the session's ChatModel. */
   setCurrentModel(model: string): void;
-  /** Clear screen + conversation memory (`runner.ResetHistory`). */
+  /** Clear screen and conversation memory. */
   resetHistory(): void;
   /** Replace the active skill set (translates to the session's volatile request tail). */
   setActiveSkills(skills: readonly Skill[]): void;
