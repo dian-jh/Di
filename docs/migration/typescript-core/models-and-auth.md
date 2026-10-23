@@ -226,7 +226,8 @@ Streams、`node:crypto` 和小型自有 DTO。Pi 包可作为对照源码，不�
    通过 `ProxyAgent` 路由当前用户静态 HTTP/HTTPS 代理；本机 Node 24.16 loopback 已验证 CONNECT、
    成功响应、代理错误和取消。Internet Settings 与 `Connections\\DefaultConnectionSettings` flags
    由只读 `reg.exe query` 读取；PAC/WPAD 经 Windows PowerShell 的系统代理解析器处理，支持取消及 15 秒超时，未知 flags/解析错误 fail closed；真实 PAC/WPAD 网络环境尚待验收。WinHTTP Koffi 输出指针
-   探针在本机曾异常退出，生产路径不使用该未验证 FFI。POSIX 环境代理支持 HTTP/HTTPS/SOCKS5，
+   探针在本机曾异常退出，生产路径不使用该未验证 FFI。POSIX 环境代理支持 HTTP/HTTPS/SOCKS4/4a/5；
+   macOS 无代理环境配置时支持静态系统设置发现，PAC/WPAD 自动解析仍失败关闭。
    ChatGPT 与显式启用系统代理的 DeepSeek 共用路由器；支持边界及环境变量规则见
    [`DeepSeek 模块文档`](../../modules/deepseek.md#usesystemproxy-in-the-typescript-host)。
 7. 最后才接 `@di/coding-agent`。停止条件：任一 provider fixture、跨进程竞争、权限拒绝、retry 安全门失败，
