@@ -163,6 +163,74 @@ test("Socks5ProxyAgent connects through a loopback SOCKS5 proxy to an HTTP origi
   }
 });
 
+test("SOCKS5 proxy keeps requests isolated across different HTTP origins", async () => {
+  const makeOrigin = (body: string) => createServer((_request, response) => { response.writeHead(200, { "content-length": String(body.length) }); response.end(body); });
+  const firstOrigin = makeOrigin("first-origin");
+  const secondOrigin = makeOrigin("second-origin");
+  await Promise.all([
+    new Promise<void>((resolve) => firstOrigin.listen(0, "127.0.0.1", resolve)),
+    new Promise<void>((resolve) => secondOrigin.listen(0, "127.0.0.1", resolve)),
+  ]);
+  const firstAddress = firstOrigin.address();
+  const secondAddress = secondOrigin.address();
+  assert.ok(firstAddress !== null && typeof firstAddress !== "string");
+  assert.ok(secondAddress !== null && typeof secondAddress !== "string");
+
+  const sockets = new Set<import("node:net").Socket>();
+  const destinations: number[] = [];
+  const server = createNetServer();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+    let buffer = Buffer.alloc(0);
+    let stage: "greeting" | "request" | "connected" = "greeting";
+    socket.on("data", (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (stage === "greeting") {
+        if (buffer.length < 2 || buffer.length < 2 + buffer[1]!) return;
+        buffer = buffer.subarray(2 + buffer[1]!);
+        socket.write(Buffer.from([5, 0]));
+        stage = "request";
+      }
+      if (stage === "request") {
+        if (buffer.length < 10) return;
+        assert.equal(buffer[0], 5);
+        assert.equal(buffer[1], 1);
+        const port = buffer.readUInt16BE(8);
+        destinations.push(port);
+        const remaining = buffer.subarray(10);
+        buffer = Buffer.alloc(0);
+        stage = "connected";
+        const upstream = connectSocket(port, "127.0.0.1", () => {
+          socket.write(Buffer.from([5, 0, 0, 1, 127, 0, 0, 1, 0, 0]));
+          socket.pipe(upstream);
+          upstream.pipe(socket);
+          if (remaining.length > 0) upstream.write(remaining);
+        });
+        socket.once("close", () => upstream.destroy());
+      }
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const proxyAddress = server.address();
+  assert.ok(proxyAddress !== null && typeof proxyAddress !== "string");
+  const fetch = createSystemProxyFetch({ platform: "linux", environment: { ALL_PROXY: `socks5://127.0.0.1:${proxyAddress.port}` } });
+  try {
+    const first = await fetch(`http://127.0.0.1:${firstAddress.port}/first`, { signal: AbortSignal.timeout(5_000) });
+    const second = await fetch(`http://127.0.0.1:${secondAddress.port}/second`, { signal: AbortSignal.timeout(5_000) });
+    assert.equal(await first.text(), "first-origin");
+    assert.equal(await second.text(), "second-origin");
+    assert.deepEqual(destinations, [firstAddress.port, secondAddress.port]);
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await Promise.all([
+      new Promise<void>((resolve) => firstOrigin.close(() => resolve())),
+      new Promise<void>((resolve) => secondOrigin.close(() => resolve())),
+    ]);
+  }
+});
+
 test("SOCKS5 environment proxy without a port preserves .NET's default port 80", async () => {
   let selected = "";
   const fetch = createSystemProxyFetch({
