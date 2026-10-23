@@ -28,7 +28,14 @@ test("soak home must be a child of the artifact run root and outside protected r
     });
     assert.throws(() => validateSoakPaths({ ...valid, diHome: join(base, "outside-home") }), /inside.*artifact/i);
     assert.throws(() => validateSoakPaths({ ...valid, diHome: homedir(), out: join(dirname(homedir()), "artifacts"), home: homedir() }), /protected|profile/i);
-    assert.throws(() => validateSoakPaths({ ...valid, diHome: join(homedir(), ".di"), out: join(homedir(), "artifacts"), home: homedir() }), /protected|profile/i);
+    assert.throws(() => validateSoakPaths({ ...valid, diHome: join(homedir(), ".di"), out: join(homedir(), "artifacts"), home: homedir() }), /protected|profile|user data/i);
+    assert.throws(() => validateSoakPaths({
+      ...valid, diHome: join(homedir(), ".di", "auth"), out: join(homedir(), ".di", "artifacts"), home: homedir(),
+    }), /protected|profile|user data/i);
+    assert.doesNotThrow(() => validateSoakPaths({
+      ...valid, diHome: join(homedir(), "AppData", "Local", "Temp", "soak-home"),
+      out: join(homedir(), "AppData", "Local", "Temp", "artifacts"), home: homedir(),
+    }), "TEMP under the profile is allowed when DI_HOME is neither the profile nor its ancestor");
     assert.throws(() => validateSoakPaths({ ...valid, diHome: repo }), /inside.*artifact|protected/i);
     assert.throws(() => validateSoakPaths({ ...valid, diHome: dirname(repo), out: join(dirname(repo), "artifacts") }), /inside.*artifact|protected/i);
     const protectedWorkspace = join(base, "project");

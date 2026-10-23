@@ -34,11 +34,12 @@ export function validateSoakPaths({ mode, diHome, out, workspace, repo, home = h
   }
 
   const resolvedProfile = resolve(home);
-  const protectedPaths = [resolvedProfile, resolve(home, ".di")];
-  for (const protectedPath of protectedPaths) {
-    if (samePath(resolvedHome, protectedPath) || isWithin(resolvedHome, protectedPath)) {
-      throw new Error(`--di-home overlaps a protected profile path (${protectedPath}): ${resolvedHome}`);
-    }
+  if (samePath(resolvedHome, resolvedProfile) || isWithin(resolvedHome, resolvedProfile)) {
+    throw new Error(`--di-home overlaps a protected profile path (${resolvedProfile}): ${resolvedHome}`);
+  }
+  const defaultDiHome = resolve(home, ".di");
+  if (pathsOverlap(resolvedHome, defaultDiHome)) {
+    throw new Error(`--di-home overlaps the default user data path (${defaultDiHome}): ${resolvedHome}`);
   }
   for (const protectedPath of [resolvedRepo, resolvedWorkspace]) {
     if (pathsOverlap(resolvedHome, protectedPath)) {
