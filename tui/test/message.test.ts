@@ -15,6 +15,10 @@ import { SpacedBlock } from "../src/app/spacing.ts";
 // #373737 to xterm color 237 when truecolor is unavailable.
 const grayBackground = /\x1b\[48;(?:2;55;55;55|5;237)m/;
 const lightForeground = /\x1b\[38;(?:2;242;242;242|5;255)m/;
+const mutedForeground = /\x1b\[38;(?:2;128;128;128|5;244)m/;
+function assertMutedStyle(rendered: string, message: string): void {
+  assert.match(rendered, mutedForeground, message);
+}
 
 describe("UserMessage：整行灰底", () => {
 	it("使用 > 前缀、可读前景和填满宽度的灰底", () => {
@@ -81,7 +85,12 @@ describe("ToolCallView：默认折叠与键盘切换", () => {
     const collapsed = stripTerminalSequences(view.component.render(80).join("\n"));
     assert.ok(!collapsed.includes("contents"));
     view.component.handleInput?.("\r");
-    assert.match(stripTerminalSequences(view.component.render(80).join("\n")), /contents/);
+    const expanded = view.component.render(80).join("\n");
+    assert.match(stripTerminalSequences(expanded), /contents/);
+    assertMutedStyle(expanded, "tool details should use a subdued explicit gray foreground");
+    for (const line of expanded.split("\n").filter((line) => /read|args|contents/.test(stripTerminalSequences(line)))) {
+      assertMutedStyle(line, "tool title, arguments, and result should all use the subdued foreground");
+    }
     view.component.handleInput?.("\r");
     assert.ok(!stripTerminalSequences(view.component.render(80).join("\n")).includes("contents"));
   });
@@ -126,8 +135,11 @@ describe("SpacedBlock：只为可见块留一个普通空行", () => {
     assert.equal(group.render(30).length, 1);
     assistant.setReasoning("reason");
     const thinking = group.render(30).map(stripTerminalSequences);
+    assertMutedStyle(group.render(30).join("\n"), "Thinking label should use subdued gray");
     assert.ok(thinking.includes(""), "用户灰条与思考标题之间应留普通背景空行");
     assistant.setAnswer("answer");
+    const answerLine = group.render(30).find((line) => stripTerminalSequences(line).includes("answer"))!;
+    assert.ok(!answerLine.includes("\x1b[38;2;128;128;128m") && !answerLine.includes("\x1b[38;5;244m"), "assistant answer should keep its normal foreground");
     const answer = group.render(30).map(stripTerminalSequences);
     const answerIndex = answer.findIndex((line) => line.includes("answer"));
     assert.ok(answerIndex > 0 && answer[answerIndex - 1] === "", "思考展开内容与答案之间应留空行");
@@ -177,6 +189,7 @@ describe("Thinking 折叠", () => {
     group.handleMouse(gesture("release", 2));
     group.handleMouse(gesture("click", 2));
     assert.ok(fold.render(80).join("\n").includes("reasoning text"));
+    assertMutedStyle(fold.render(80).join("\n"), "expanded reasoning should use subdued gray");
 
     group.handleMouse(gesture("press", 2));
     group.handleMouse(gesture("release", 2));
@@ -184,6 +197,15 @@ describe("Thinking 折叠", () => {
     assert.ok(!fold.render(80).join("\\n").includes("reasoning text"));
 
     assert.equal(group.handleMouse(gesture("press", 2, "right")), undefined, "right click must not capture a fold gesture");
+  });
+
+  it("reasoning foreground is restored after embedded ANSI resets", () => {
+    const assistant = new AssistantMessage();
+    assistant.setReasoning("before\x1b[0mafter");
+    const fold = assistant.children[0]!;
+    fold.handleInput?.("\r");
+    const rendered = fold.render(80).join("\n");
+    assert.match(rendered, new RegExp(`\\x1b\\[(?:0|39)?m${mutedForeground.source}[^\\n]*after`));
   });
 
   it("完成后折叠和展开保留冻结耗时", () => {

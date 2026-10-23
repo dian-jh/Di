@@ -6,6 +6,7 @@
 import { Text, type Component, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import type { ToolCallEntry } from "./state.ts";
 import { registerFoldItem } from "./fold-navigation.ts";
+import { mutedText } from "./colors.ts";
 
 const STATUS_MARK: Record<ToolCallEntry["status"], string> = {
   pending: "⏳",
@@ -45,7 +46,7 @@ export class ToolCallView implements Component {
 
   constructor() {
     latestToolCall = this;
-    this.text = new Text("", 1, 0);
+    this.text = new Text("", 1, 0, mutedText);
     this.component = new ToolCallComponent(this);
     registerFoldItem({ toggle: () => this.toggle(), select: (selected) => { if (this.entry) this.refresh(selected); } });
   }

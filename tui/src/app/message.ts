@@ -12,6 +12,7 @@ import { ToolCallView } from "./tool-call.ts";
 import type { ToolCallEntry } from "./state.ts";
 import { registerFoldItem } from "./fold-navigation.ts";
 import { SpacedBlock } from "./spacing.ts";
+import { mutedText } from "./colors.ts";
 
 let latestReasoningFold: FoldableText | undefined;
 const turnGroups: TurnGroup[] = [];
@@ -143,7 +144,7 @@ class FoldableText implements Component {
   private finishedAt: number | undefined;
   constructor(content: Text, label: string) {
     this.content = content;
-    this.label = new Text(`› ${label}`, 1, 0);
+    this.label = new Text(`› ${label}`, 1, 0, mutedText);
     latestReasoningFold = this;
     registerFoldItem({ toggle: () => this.toggle(), select: (selected) => this.label.setText(`${selected ? "● " : " "}${this.expanded ? "⌄" : "›"} ${label}`) });
   }
@@ -181,7 +182,7 @@ export class AssistantMessage extends Container {
 
   constructor() {
     super();
-    this.reasoning = new Text("", 1, 0);
+    this.reasoning = new Text("", 1, 0, mutedText);
     this.reasoningFold = new FoldableText(this.reasoning, "思考过程");
     this.answer = new Markdown("", 1, 0, markdownTheme);
     this.addChild(new SpacedBlock(this.answer)); // 答案始终是最后一个 child；空答案不占间距
