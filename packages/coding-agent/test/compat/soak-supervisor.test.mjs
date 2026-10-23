@@ -30,4 +30,13 @@ test("soak supervisor records immutable run provenance, memory samples, and chil
   assert.equal(typeof parent.gitSha, "string");
   assert.equal(typeof sample.external_bytes, "number");
   assert.equal(typeof sample.array_buffers_bytes, "number");
+  assert.equal(typeof sample.js_handle_count, "number");
+  assert.ok(Object.hasOwn(sample, "os_handle_count"));
+  assert.ok(Object.hasOwn(sample, "working_set_bytes"));
+  assert.ok(Object.hasOwn(sample, "peak_working_set_bytes"));
+  assert.ok(Object.hasOwn(sample, "private_bytes"));
+  assert.equal(typeof sample.v8_total_heap_size_bytes, "number");
+  assert.equal(typeof sample.v8_total_physical_size_bytes, "number");
+  assert.equal(typeof sample.v8_malloced_memory_bytes, "number");
+  assert.equal(typeof sample.v8_peak_malloced_memory_bytes, "number");
 });

@@ -43,6 +43,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createCliHost, DiHome } from "@di/coding-agent";
+import { sampleProcessMetrics } from "./process-metrics.mjs";
 
 const HERE_FILE = fileURLToPath(import.meta.url);
 const HERE_DIR = dirname(HERE_FILE);
@@ -368,13 +369,14 @@ async function runPhase(args) {
   if (!existsSync(csvPath)) {
     writeFileSync(
       csvPath,
-      "ts_utc,uptime_ms,rss_bytes,heap_used,external_bytes,array_buffers_bytes,handle_count,active_children,children_created,children_exited,turns_done,turn_ok,turn_fail,iterations,checkpoint_bytes,checkpoint_lines,last_resume_ms,cleared\n",
+      "ts_utc,uptime_ms,rss_bytes,heap_used,external_bytes,array_buffers_bytes,handle_count,js_handle_count,os_handle_count,working_set_bytes,peak_working_set_bytes,private_bytes,native_metrics_error,v8_total_heap_size_bytes,v8_total_physical_size_bytes,v8_malloced_memory_bytes,v8_peak_malloced_memory_bytes,active_children,children_created,children_exited,turns_done,turn_ok,turn_fail,iterations,checkpoint_bytes,checkpoint_lines,last_resume_ms,cleared\n",
     );
   }
 
   const tracker = makeCheckpointTracker();
   const sample = () => {
     const now = Date.now();
+    const processMetrics = sampleProcessMetrics();
     const mem = process.memoryUsage();
     const handles = typeof process._getActiveHandles === "function" ? process._getActiveHandles().length : -1;
     const cp = tracker(ctx.checkpointPath);
@@ -386,6 +388,7 @@ async function runPhase(args) {
       external_bytes: mem.external,
       array_buffers_bytes: mem.arrayBuffers,
       handle_count: handles,
+      ...processMetrics,
       active_children: activeChildren(),
       children_created: childState.created,
       children_exited: childState.exited,
@@ -407,6 +410,16 @@ async function runPhase(args) {
       row.external_bytes,
       row.array_buffers_bytes,
       row.handle_count,
+      row.js_handle_count,
+      row.os_handle_count,
+      row.working_set_bytes,
+      row.peak_working_set_bytes,
+      row.private_bytes,
+      row.native_metrics_error ?? "",
+      row.v8_total_heap_size_bytes,
+      row.v8_total_physical_size_bytes,
+      row.v8_malloced_memory_bytes,
+      row.v8_peak_malloced_memory_bytes,
       row.active_children,
       row.children_created,
       row.children_exited,
@@ -423,7 +436,9 @@ async function runPhase(args) {
     appendFileSync(ctx.jsonl, JSON.stringify(row) + "\n");
     process.stderr.write(
       `[soak ${row.ts_utc}] rss=${(row.rss_bytes / 1048576).toFixed(1)}MB heap=${(row.heap_used / 1048576).toFixed(1)}MB ` +
-        `handles=${row.handle_count} children=${row.active_children}(${row.children_created}/${row.children_exited}) ` +
+        `handles=${row.handle_count}/js:${row.js_handle_count}/os:${row.os_handle_count ?? "null"} ` +
+        `workingSet=${row.working_set_bytes ?? "null"} private=${row.private_bytes ?? "null"} ` +
+        `children=${row.active_children}(${row.children_created}/${row.children_exited}) ` +
         `turns=${row.turns_done} ok=${row.turn_ok} fail=${row.turn_fail} iter=${row.iterations} ` +
         `cp=${row.checkpoint_bytes}B/${row.checkpoint_lines}L resume=${row.last_resume_ms ?? "-"} cleared=${row.cleared}\n`,
     );

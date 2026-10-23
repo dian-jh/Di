@@ -11,7 +11,8 @@
  * Gates (each threshold frozen in the manifest after the >=30-min warm-up):
  *   rss_max_delta_bytes   max(rss_bytes) - baseline rss <= delta
  *   rss_monotonic         max(rss over last 2h) - max(rss over first 2h) <= delta
- *   handle_max_delta      last handle_count - baseline handle_count <= delta
+ *   handle_max_delta      max(handle_count) - baseline handle_count <= delta
+ *   os_handle_max_delta   optional: max(os_handle_count) - baseline <= delta; missing samples fail
  *   child_process_max     max(active_children) per sample <= this
  *   child_sustained_max   no 2 consecutive samples above this sustained level
  *   resume_p95_max_ms     p95(resume_parent_ms) <= this
@@ -60,8 +61,22 @@ const baseline = samples[0];
 const rssMax = Math.max(...samples.map((s) => s.rss_bytes));
 const rssMaxDelta = rssMax - (baseline.rss_bytes ?? 0);
 const handleBaseline = baseline.handle_count ?? 0;
-const handleLast = samples[samples.length - 1].handle_count ?? 0;
-const handleDelta = handleLast - handleBaseline;
+const handleMax = Math.max(...samples.map((s) => s.handle_count ?? 0));
+const handleDelta = handleMax - handleBaseline;
+const osHandleGate = Object.hasOwn(manifest.thresholds, "os_handle_max_delta")
+  ? (() => {
+      const counts = samples.map((s) => s.os_handle_count);
+      const threshold = manifest.thresholds.os_handle_max_delta;
+      if (!Number.isFinite(threshold) || counts.some((n) => !Number.isInteger(n) || n < 0)) {
+        return { threshold, observed: "unknown (OS handle samples missing)", pass: false };
+      }
+      return {
+        threshold,
+        observed: Math.max(...counts) - counts[0],
+        pass: Math.max(...counts) - counts[0] <= threshold,
+      };
+    })()
+  : null;
 const childMax = Math.max(...samples.map((s) => s.active_children ?? 0));
 const sustained = new Set([...new Set(samples.map((s) => s.active_children ?? 0))]);
 const resumeMs = samples.filter((s) => typeof s.last_resume_ms === "number").map((s) => s.last_resume_ms);
@@ -80,7 +95,8 @@ const turnFail = status.turnFail ?? samples[samples.length - 1].turn_fail ?? 0;
 const resumeCountsAvailable =
   Number.isInteger(status.resumeSpawns) && Number.isInteger(status.resumeOk) && status.resumeOk <= status.resumeSpawns;
 const resumeFail = resumeCountsAvailable ? status.resumeSpawns - status.resumeOk : undefined;
-const wallMin = Number.isFinite(status.wallClockMs) ? Math.round(status.wallClockMs / 60000) : undefined;
+const wallClockMs = Number.isFinite(status.wallClockMs) ? status.wallClockMs : undefined;
+const wallClockThresholdMs = manifest.thresholds.wall_clock_min * 60_000;
 
 const results = [
   {
@@ -101,6 +117,12 @@ const results = [
     observed: handleDelta,
     pass: handleDelta <= manifest.thresholds.handle_max_delta,
   },
+  ...(osHandleGate === null ? [] : [{
+    gate: "os_handle_max_delta",
+    threshold: osHandleGate.threshold,
+    observed: osHandleGate.observed,
+    pass: osHandleGate.pass,
+  }]),
   {
     gate: "child_process_max",
     threshold: manifest.thresholds.child_process_max,
@@ -144,9 +166,9 @@ const results = [
   },
   {
     gate: "wall_clock_min",
-    threshold: manifest.thresholds.wall_clock_min,
-    observed: wallMin === undefined ? "unknown (status wallClockMs missing)" : wallMin,
-    pass: wallMin !== undefined && wallMin >= manifest.thresholds.wall_clock_min,
+    threshold: `${wallClockThresholdMs}ms`,
+    observed: wallClockMs === undefined ? "unknown (status wallClockMs missing)" : `${wallClockMs}ms`,
+    pass: wallClockMs !== undefined && Number.isFinite(wallClockThresholdMs) && wallClockMs >= wallClockThresholdMs,
   },
 ];
 
