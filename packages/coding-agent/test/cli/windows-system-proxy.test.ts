@@ -242,19 +242,197 @@ test("SOCKS5 environment proxy without a port preserves .NET's default port 80",
   assert.equal(selected, "socks5://proxy.example.test:80");
 });
 
-test("explicit SOCKS4 environment proxy fails clearly instead of falling back", async () => {
+test("SOCKS4 environment proxy selection preserves credentials and never selects an alternate route", async () => {
   let proxyCalls = 0;
+  let selected = "";
   const fetch = createSystemProxyFetch({
     platform: "linux",
     environment: { https_proxy: "socks4://user:secret@proxy.example.test:1080", HTTPS_PROXY: "http://upper-proxy.example.test:8080" },
-    proxyFetch: async () => { proxyCalls++; return new Response("unexpected"); },
+    proxyFetch: async (_url, _init, proxy) => { proxyCalls++; selected = proxy; return new Response("proxy"); },
   });
-  await assert.rejects(fetch("https://target.invalid"), (error: unknown) => {
-    assert.match(String(error), /protocol is unsupported/);
-    assert.doesNotMatch(String(error), /secret|proxy\.example\.test/);
-    return true;
+  assert.equal(await (await fetch("https://target.invalid")).text(), "proxy");
+  assert.equal(selected, "socks4://user:secret@proxy.example.test:1080");
+  assert.equal(proxyCalls, 1);
+});
+
+test("SOCKS4 environment proxy connects to an IPv4 origin with user ID", async () => {
+  const origin = createServer((_request, response) => response.end("socks4-ok"));
+  await new Promise<void>((resolve) => origin.listen(0, "127.0.0.1", resolve));
+  const originAddress = origin.address();
+  assert.ok(originAddress !== null && typeof originAddress !== "string");
+  const sockets = new Set<import("node:net").Socket>();
+  let userId = "";
+  let destination = "";
+  const server = createNetServer((socket) => {
+    sockets.add(socket); socket.once("close", () => sockets.delete(socket));
+    let buffer = Buffer.alloc(0);
+    let tunneled = false;
+    socket.on("data", (chunk) => {
+      if (tunneled) return;
+      buffer = Buffer.concat([buffer, chunk]);
+      const end = buffer.indexOf(0, 8);
+      if (end < 0) return;
+      tunneled = true;
+      userId = buffer.subarray(8, end).toString();
+      const port = buffer.readUInt16BE(2);
+      destination = [...buffer.subarray(4, 8)].join(".");
+      const upstream = connectSocket(port, destination, () => {
+        socket.write(Buffer.from([0, 90, 0, 0, 0, 0, 0, 0]));
+        socket.pipe(upstream); upstream.pipe(socket);
+      });
+      socket.once("close", () => upstream.destroy());
+    });
   });
-  assert.equal(proxyCalls, 0);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const proxyAddress = server.address();
+  assert.ok(proxyAddress !== null && typeof proxyAddress !== "string");
+  const fetch = createSystemProxyFetch({ platform: "linux", environment: { ALL_PROXY: `socks4://alice:secret@127.0.0.1:${proxyAddress.port}` } });
+  try {
+    const response = await fetch(`http://127.0.0.1:${originAddress.port}/probe`, { signal: AbortSignal.timeout(5_000) });
+    assert.equal(await response.text(), "socks4-ok");
+    assert.equal(userId, "alice");
+    assert.equal(destination, "127.0.0.1");
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await new Promise<void>((resolve) => origin.close(() => resolve()));
+  }
+});
+
+test("SOCKS4a sends the target hostname to the proxy for remote DNS", async () => {
+  const origin = createServer((_request, response) => response.end("socks4a-ok"));
+  await new Promise<void>((resolve) => origin.listen(0, "127.0.0.1", resolve));
+  const originAddress = origin.address();
+  assert.ok(originAddress !== null && typeof originAddress !== "string");
+  const sockets = new Set<import("node:net").Socket>();
+  let receivedHost = "";
+  const server = createNetServer((socket) => {
+    sockets.add(socket); socket.once("close", () => sockets.delete(socket));
+    let buffer = Buffer.alloc(0);
+    let tunneled = false;
+    socket.on("data", (chunk) => {
+      if (tunneled) return;
+      buffer = Buffer.concat([buffer, chunk]);
+      const userEnd = buffer.indexOf(0, 8);
+      if (userEnd < 0) return;
+      const hostEnd = buffer.indexOf(0, userEnd + 1);
+      if (hostEnd < 0) return;
+      tunneled = true;
+      receivedHost = buffer.subarray(userEnd + 1, hostEnd).toString();
+      const port = buffer.readUInt16BE(2);
+      const upstream = connectSocket(port, "127.0.0.1", () => {
+        socket.write(Buffer.from([0, 90, 0, 0, 0, 0, 0, 0]));
+        socket.pipe(upstream); upstream.pipe(socket);
+      });
+      socket.once("close", () => upstream.destroy());
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const proxyAddress = server.address();
+  assert.ok(proxyAddress !== null && typeof proxyAddress !== "string");
+  const fetch = createSystemProxyFetch({ platform: "linux", environment: { ALL_PROXY: `socks4a://127.0.0.1:${proxyAddress.port}` } });
+  try {
+    const response = await fetch(`http://synthetic.invalid:${originAddress.port}/probe`, { signal: AbortSignal.timeout(5_000) });
+    assert.equal(await response.text(), "socks4a-ok");
+    assert.equal(receivedHost, "synthetic.invalid");
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await new Promise<void>((resolve) => origin.close(() => resolve()));
+  }
+});
+
+test("SOCKS4 proxy rejection and request cancellation never use the direct route", async () => {
+  for (const mode of ["reject", "cancel"] as const) {
+    const sockets = new Set<import("node:net").Socket>();
+    const controller = new AbortController();
+    let onSocketClosed!: () => void;
+    const socketClosed = new Promise<void>((resolve) => { onSocketClosed = resolve; });
+    let requestedPort = 0;
+    let handshakeReceived = false;
+    const server = createNetServer((socket) => {
+      sockets.add(socket); socket.once("close", () => { sockets.delete(socket); onSocketClosed(); }); socket.once("end", onSocketClosed);
+      socket.once("data", (request) => {
+        handshakeReceived = true;
+        requestedPort = request.readUInt16BE(2);
+        if (mode === "reject") socket.end(Buffer.from([0, 91, 0, 0, 0, 0, 0, 0]));
+        else controller.abort();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address !== null && typeof address !== "string");
+    let directCalls = 0;
+    const fetch = createSystemProxyFetch({
+      platform: "linux",
+      environment: { ALL_PROXY: `socks4://127.0.0.1:${address.port}` },
+      directFetch: async () => { directCalls++; return new Response("must-not-go-direct"); },
+    });
+    try {
+      await assert.rejects(fetch("http://127.0.0.1/probe", { signal: mode === "reject" ? AbortSignal.timeout(5_000) : controller.signal }), (error: unknown) => {
+        if (mode === "cancel") assert.equal((error as Error).name, "AbortError");
+        else assert.match(String((error as Error).cause), /SOCKS4 proxy rejected the connection/);
+        return true;
+      });
+      assert.equal(handshakeReceived, true);
+      if (mode === "cancel") {
+        assert.equal(controller.signal.aborted, true);
+        assert.equal(handshakeReceived, true);
+        assert.equal(requestedPort, 80);
+        await Promise.race([socketClosed, new Promise((_, reject) => setTimeout(() => reject(new Error("SOCKS4 socket was not closed after cancellation.")), 1_000))]);
+      }
+      assert.equal(directCalls, 0);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }
+});
+
+test("cancelling one SOCKS4 request leaves a concurrent request through the same proxy alive", async () => {
+  const origin = createServer((_request, response) => response.end("still-alive"));
+  await new Promise<void>((resolve) => origin.listen(0, "127.0.0.1", resolve));
+  const originAddress = origin.address();
+  assert.ok(originAddress !== null && typeof originAddress !== "string");
+  const controller = new AbortController();
+  const sockets = new Set<import("node:net").Socket>();
+  let connections = 0;
+  const server = createNetServer((socket) => {
+    sockets.add(socket); socket.once("close", () => sockets.delete(socket));
+    const index = ++connections;
+    let buffer = Buffer.alloc(0);
+    socket.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length < 9 || buffer[8] !== 0) return;
+      socket.removeAllListeners("data");
+      if (index === 1) { controller.abort(); return; }
+      const port = buffer.readUInt16BE(2);
+      const upstream = connectSocket(port, "127.0.0.1", () => {
+        socket.write(Buffer.from([0, 90, 0, 0, 0, 0, 0, 0]));
+        socket.pipe(upstream); upstream.pipe(socket);
+      });
+      socket.once("close", () => upstream.destroy());
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const proxyAddress = server.address();
+  assert.ok(proxyAddress !== null && typeof proxyAddress !== "string");
+  const fetch = createSystemProxyFetch({ platform: "linux", environment: { ALL_PROXY: `socks4://127.0.0.1:${proxyAddress.port}` } });
+  try {
+    const results = await Promise.allSettled([
+      fetch(`http://127.0.0.1:${originAddress.port}/cancel`, { signal: controller.signal }),
+      fetch(`http://127.0.0.1:${originAddress.port}/continue`, { signal: AbortSignal.timeout(5_000) }),
+    ]);
+    assert.equal(results[0]?.status, "rejected");
+    assert.equal((results[0] as PromiseRejectedResult).reason.name, "AbortError");
+    assert.equal(results[1]?.status, "fulfilled");
+    assert.equal(await (results[1] as PromiseFulfilledResult<Response>).value.text(), "still-alive");
+    assert.equal(connections, 2);
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await new Promise<void>((resolve) => origin.close(() => resolve()));
+  }
 });
 
 test("SOCKS5 proxy failure and cancellation never fall back to direct networking", async () => {

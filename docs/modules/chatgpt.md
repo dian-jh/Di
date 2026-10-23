@@ -27,7 +27,7 @@ Windows 使用当前用户目录 ACL；Unix 为目录 0700、文件 0600。`Cred
 `NativeOsLockProvider` 用 Windows `LockFileEx` 或 POSIX `flock` 覆盖读取、网络刷新和原子替换，避免跨进程
 重复使用轮换令牌。Windows、Linux、macOS 的 CI 已通过合成双进程竞争、持锁进程强杀释放和并发刷新一次验证；真实账户 smoke 的现有证据来自 Windows。
 
-TS CLI 的认证与模型请求通过 `packages/coding-agent/src/cli/windows-system-proxy.ts` 的 `createSystemProxyFetch` 选择代理：Windows 读取当前用户系统设置；POSIX 读取 HTTP/HTTPS 环境代理与 NO_PROXY，具体规则和支持边界见 [DeepSeek 代理说明](deepseek.md#usesystemproxy-in-the-typescript-host)。静态代理由 `undici` 转发，Windows PAC/WPAD 由 `resolveWindowsSystemProxy` 通过 Windows PowerShell 调用系统解析器，15 秒超时并支持取消；代理错误不会触发隐式直连。注入测试 fetch 时不会读取真实代理设置。真实 PAC/WPAD 网络环境尚待验收。
+TS CLI 的认证与模型请求通过 `packages/coding-agent/src/cli/windows-system-proxy.ts` 的 `createSystemProxyFetch` 选择代理：Windows 读取当前用户系统设置；POSIX 支持 HTTP/HTTPS/SOCKS 环境代理与 NO_PROXY；macOS 无代理环境配置时读取静态系统设置，具体规则和支持边界见 [DeepSeek 代理说明](deepseek.md#usesystemproxy-in-the-typescript-host)。静态代理由 `undici` 转发，Windows PAC/WPAD 由 `resolveWindowsSystemProxy` 通过 Windows PowerShell 调用系统解析器，15 秒超时并支持取消；macOS PAC/WPAD 当前明确报不支持。代理错误不会触发隐式直连。注入测试 fetch 时不会读取真实代理设置。真实 PAC/WPAD 网络环境尚待验收。
 旧格式升级时保留原先 active credential。状态检查只读本地凭据；实际请求或刷新目录时
 才刷新即将过期的 token。临时网络错误保留凭据，终态 refresh 错误清空令牌并要求重新登录。
 

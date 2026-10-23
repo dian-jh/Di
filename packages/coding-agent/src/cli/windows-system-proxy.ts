@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
+import { createSocks4Dispatcher } from "./socks4-proxy.ts";
+import { createMacOSSystemProxyFetch } from "./macos-system-proxy.ts";
 
 /** Windows current-user Internet Settings relevant to static proxy selection. */
 export interface WindowsInternetProxySettings {
@@ -24,6 +26,7 @@ export interface SystemProxyFetchOptions {
   readonly platform?: string;
   readonly environment?: NodeJS.ProcessEnv;
   readonly windowsProxyFetch?: (input: string, init?: RequestInit) => Promise<Response>;
+  readonly macOSProxyFetch?: (input: string, init?: RequestInit) => Promise<Response>;
   readonly directFetch?: (input: string, init?: RequestInit) => Promise<Response>;
   readonly proxyFetch?: (input: string, init: RequestInit | undefined, proxy: string) => Promise<Response>;
 }
@@ -128,17 +131,25 @@ export function resolveWindowsSystemProxy(input: string, signal?: AbortSignal): 
   });
 }
 
-/** Match ChatGPT's default HttpClient system-proxy behavior on Windows. */
+/** Route through Windows settings, POSIX proxy variables or macOS static settings. */
 export function createSystemProxyFetch(options: SystemProxyFetchOptions = {}): (input: string, init?: RequestInit) => Promise<Response> {
   const platform = options.platform ?? process.platform;
   const directFetch = options.directFetch ?? ((input, init) => globalThis.fetch(input, init));
   const windowsProxyFetch = options.windowsProxyFetch ?? createWindowsSystemProxyFetch({ platform });
   const environment = options.environment ?? process.env;
   const proxyFetch = options.proxyFetch ?? fetchThroughUndiciProxy;
+  const macOSProxyFetch = options.macOSProxyFetch ?? createMacOSSystemProxyFetch({ platform, directFetch, proxyFetch });
   return async (input, init) => {
     if (platform === "win32") return windowsProxyFetch(input, init);
+    if (platform === "darwin" && !hasEnvironmentProxy(environment)) return macOSProxyFetch(input, init);
     return fetchThroughEnvironmentProxy(input, init, environment, directFetch, proxyFetch);
   };
+}
+
+function hasEnvironmentProxy(environment: NodeJS.ProcessEnv): boolean {
+  const names = ["http_proxy", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"];
+  if (environment.GATEWAY_INTERFACE === undefined) names.push("HTTP_PROXY");
+  return names.some((name) => (environment[name]?.trim().length ?? 0) > 0);
 }
 
 /** POSIX .NET HttpEnvironmentProxy-compatible routing for environment variables. */
@@ -200,13 +211,13 @@ function parseEnvironmentProxy(value: string): string {
   } catch {
     throw new Error("The configured environment proxy endpoint is invalid.");
   }
-  if (uri.protocol === "socks4:" || uri.protocol === "socks4a:") throw new UnsupportedEnvironmentProxyProtocolError();
-  if ((uri.protocol !== "http:" && uri.protocol !== "https:" && uri.protocol !== "socks5:") || uri.hostname === "") {
+  if ((uri.protocol !== "http:" && uri.protocol !== "https:" && uri.protocol !== "socks5:" && uri.protocol !== "socks4:" && uri.protocol !== "socks4a:") || uri.hostname === "") {
     throw new UnsupportedEnvironmentProxyProtocolError();
   }
   // .NET 10's Unix environment proxy parser defaults an unqualified proxy port to 80.
   // Undici's Socks5ProxyAgent defaults to 1080, so preserve the source runtime's value explicitly.
   if (uri.protocol === "socks5:" && uri.port === "") uri.port = "80";
+  if ((uri.protocol === "socks4:" || uri.protocol === "socks4a:") && uri.port === "") uri.port = "80";
   return uri.toString();
 }
 
@@ -304,12 +315,27 @@ interface UndiciProxyApi {
 }
 
 async function fetchThroughUndiciProxy(input: string, init: RequestInit | undefined, proxy: string): Promise<Response> {
+  if (new URL(proxy).protocol === "socks4:" || new URL(proxy).protocol === "socks4a:") {
+    let undici: UndiciProxyApi;
+    try { undici = require("undici") as UndiciProxyApi; }
+    catch (error) { throw new Error("DeepSeek:UseSystemProxy requires the bundled undici dependency.", { cause: error }); }
+    const dispatcher = createSocks4Dispatcher(new URL(proxy), init?.signal ?? undefined);
+    try {
+      const response = await undici.fetch(input, { ...init, dispatcher: dispatcher.dispatcher });
+      void dispatcher.close().catch(() => {});
+      return response;
+    } catch (error) {
+      void dispatcher.destroy(new Error("SOCKS4 request failed.")).catch(() => {});
+      throw error;
+    }
+  }
   let dispatcher = proxyAgents.get(proxy);
   if (dispatcher === undefined) {
     let undici: UndiciProxyApi;
     try { undici = require("undici") as UndiciProxyApi; }
     catch (error) { throw new Error("DeepSeek:UseSystemProxy requires the bundled undici dependency.", { cause: error }); }
-    dispatcher = new URL(proxy).protocol === "socks5:"
+    const protocol = new URL(proxy).protocol;
+    dispatcher = protocol === "socks5:"
       ? new undici.Socks5ProxyAgent(proxy)
       : new undici.ProxyAgent(proxy);
     proxyAgents.set(proxy, dispatcher);
