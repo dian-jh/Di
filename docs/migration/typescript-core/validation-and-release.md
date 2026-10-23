@@ -48,9 +48,11 @@ P7/P9 的真实 CLI gate 另用已启动的 production `di-ts --resume <fixture>
 
 10 小时是实际墙钟 soak gate，不是快速 fake loop 的等价次数。使用隔离机器、临时 `DI_HOME`、本地确定性 fake model 和 fake tool；执行至少 10 小时并记录实际起止 UTC。每次模型响应与工具执行可按稳定节奏加入真实延时，但不从延时间隔推导最低完成轮数。不得接真实 provider。循环中让模型/工具有限产生并结束子进程，定期真实 resume/reload 子进程，并记录 checkpoint 文件 bytes/lines、成功/失败 turn、内存 RSS、打开文件/句柄数、子进程数量和重启耗时。保留 machine/OS/Node 版本、采样 CSV、JSONL、退出码及异常日志作为 gate artifact。
 
+当前 [soak runner](../../../packages/coding-agent/test/soak/soak-runner.mjs) 保留 `handle_count` 字段供既有 checker 读取；它来自 Node `process._getActiveHandles()`，只代表 JS 活跃句柄，不能当作 OS handle 数。旁边的 [process sampler](../../../packages/coding-agent/test/soak/process-metrics.mjs) 记录 `js_handle_count`、`os_handle_count`、working set、peak working set、private bytes，以及 V8 `total_heap_size` / `total_physical_size` / `malloced_memory` / `peak_malloced_memory`。Windows 使用 `GetProcessMemoryInfo` / `GetProcessHandleCount`，Linux 使用 `/proc`，macOS 使用 `/usr/lib/libproc.dylib` 的 `proc_pidinfo` 读取文件描述符数和 `pti_resident_size`，不推测 macOS peak/private 值。Apple [`libproc.h`](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.h) 将接口标为可能变化的 private interface；[`proc_info.h`](https://github.com/apple/darwin-xnu/blob/main/bsd/sys/proc_info.h) 定义 flavor 和结构布局。调用失败时记录 `null` 和不含环境细节的错误标记，不用 JS 句柄数代替 OS 数值。Windows 的 `private_bytes` 来自 `PROCESS_MEMORY_COUNTERS_EX.PrivateUsage`（进程私有提交量），Linux 来自 `smaps_rollup` 的私有常驻页；两种口径不可直接横向比较。对应覆盖见 `packages/coding-agent/test/compat/soak-process-metrics.test.mjs` 与 `packages/coding-agent/test/compat/soak-supervisor.test.mjs`。
+
 soak 使用现有有限 context/token budget 配置，避免测试因为无界历史输入而要求无界内存；按已有 `ContextLimit` 语义安排暂停和扩预算续跑，另按已有 reset/clear 接口周期性验证 clear 后 history 快照行为。不要新增自动摘要、隐式清理或别的产品功能来让 soak 变绿。session 文件随持久化事件增长是预期；常驻 runner memory 应按配置预算和当前 pause task 解释，不能要求它在无限历史下固定不变。子进程/句柄在每轮收尾后应回到稳定基线附近。
 
-资源阈值必须在 soak 开始前冻结到测试 manifest：先在同一 OS/Node/机器等级跑至少 30 分钟 warm-up，选定并记录 `rss_max_delta_bytes`、`handle_max_delta`、`child_process_max`、`resume_p95_max_ms` 和采样间隔；阈值与 baseline JSON/CSV 一同提交或作为不可变 CI artifact 引用，跑完后不得按结果回调阈值。若 10 小时中 RSS 超限、多个采样窗口单调增长、句柄数不回落、子进程残留、失败/恢复错误递增或 resume 延迟超限，gate 失败并保留数据定位。阈值用于发现回归，不证明零泄漏或零风险；最终报告附实际曲线和偏差。soak 不属于每次 PR 快测，可由夜间/发布候选运行，但 P9 完成证据必须引用真实墙钟至少 10 小时结果；快速循环只补充状态覆盖，不能替代 soak，也不以轮数推算时长。
+资源阈值必须在 soak 开始前冻结到测试 manifest：先在同一 OS/Node/机器等级跑至少 30 分钟 warm-up，选定并记录 `rss_max_delta_bytes`、`handle_max_delta`、`child_process_max`、`resume_p95_max_ms` 和采样间隔；若 manifest 明确提供 `os_handle_max_delta`，checker 还会验证全程 `os_handle_count` 峰值增长，任何缺失或 `null` 样本均失败；旧 manifest 未配置该阈值时不报告该 gate 通过。阈值与 baseline JSON/CSV 一同提交或作为不可变 CI artifact 引用，跑完后不得按结果回调阈值。若 10 小时中 RSS 超限、多个采样窗口单调增长、句柄数不回落、子进程残留、失败/恢复错误递增或 resume 延迟超限，gate 失败并保留数据定位。阈值用于发现回归，不证明零泄漏或零风险；最终报告附实际曲线和偏差。soak 不属于每次 PR 快测，可由夜间/发布候选运行，但 P9 完成证据必须引用真实墙钟至少 10 小时结果；快速循环只补充状态覆盖，不能替代 soak，也不以轮数推算时长。
 
 至少在每个受支持 OS 各运行一次完整 10 小时 soak。测试期间记录实际起止 UTC，不从迭代数估算时长；若资源曲线越过预先冻结阈值，需定位、修复并用新 run id 重跑，不得只以机器差异豁免。
 
@@ -103,7 +105,7 @@ dotnet run --project <temp-harness>/Reference.csproj -- read <ts-writer-session.
 
 `packages/coding-agent/package.json` 的单测命令设置 `--test-timeout=120000`，使挂起的测试在两分钟后报告失败。该 Node 选项不能单独清理残留句柄，因此 `tools/run-ci-unit-tests.mjs` 的 `runCiUnitTests` 另设八分钟总体上限，超时终止测试进程树并返回失败，以保留日志和后续兼容测试机会。`packages/coding-agent/test/compat/csharp-session-interop.mjs` 解包固定 C# 基线时以目标目录作为子进程 `cwd`，不向 GNU tar 传入 Windows 绝对路径 `-C`；Windows CI 的 Git Bash 与本地系统 tar 都需要支持。
 
-所有自动用例使用合成凭据、临时目录与 loopback 服务。真实 provider smoke、35 分钟预热及 10 小时长测、向用户目录安装、部署和默认 `di` 入口切换不在该 workflow 中。compat 中的 soak supervisor 测试仅验证启动、状态和来源记录，不等于完成 10 小时稳定性验收。
+所有自动用例使用合成凭据、临时目录与 loopback 服务。unit 包括三平台的隔离安装与显式入口切换/回退；真实 provider smoke、35 分钟预热及 10 小时长测、向真实用户目录安装、部署和真实用户默认 `di` 入口切换不在该 workflow 中。compat 中的 soak supervisor 测试仅验证启动、状态和来源记录，不等于完成 10 小时稳定性验收。
 
 工具链版本以 workspace manifests 与根锁文件为准。Action pin 使用已核实的发布 SHA，依赖更新需重跑三平台矩阵并检查 SSE/crash fixtures 未改变语义。
 
@@ -118,6 +120,10 @@ dotnet run --project <temp-harness>/Reference.csproj -- read <ts-writer-session.
 建议迁移分支/工作区与基线分开：`migration/typescript-core` worktree 是可变的实现现场，只用于当前工作；review 基线始终用 pinned SHA 的 `git show` 或独立只读 worktree。切换失败时保留新 session 数据，启动旧 C# branch/worktree 继续工作；不要尝试用旧二进制恢复新 schema，除非双向测试明确证明该具体记录子集兼容。若转换工具后续出现，应先写新文件、完整校验并保留源文件，禁止原地覆写。
 
 发布关卡采用逐步升级：先 CI 通过和本地隔离验收；再以新命令并行试用；完成 session/配置兼容和回退证据后再切换默认入口。`install.ps1` 当前安装并行命令 `di-ts`，保留既有 C# `di`；CI 不自动安装到用户目录或切换默认入口。
+
+`install.ps1` 使用当前平台的 npm，POSIX 需 `pwsh`，会为 `di-ts` 设置执行权限、实际运行该 shim 的 `--info`，并打印 PATH 指令而不修改 shell profile。smoke 的临时 `DI_HOME` 和 API 环境变量结束后恢复原值。`packages/coding-agent/test/cli/install-runtime.test.ts` 验证安装的私有运行时、原生依赖和既有用户文件字节保留。
+
+已并行安装 TS 和旧 C# 启动器时，可显式使用 `tools/select-cli.ps1 -Runtime typescript|csharp -DiHome <目录>` 验证切换。工具仅管理显式目录的 `bin`，将原 C# 启动器保留在同目录的 `di-csharp.exe` / `di-csharp`，以 `.di-cli-selection.json` 的 SHA256 检查拥有的 shim 和备份；回退恢复原始文件并保留 `di-ts`。备份冲突、优先级启动器冲突、内容变动或未归属 shim 均拒绝覆盖。此工具不替代发布门槛，也不处理 shell 函数/alias 或其他 PATH 目录中的同名命令。隔离测试见 `packages/coding-agent/test/cli/select-cli.test.ts`；现有 Windows 单文件 C# 发行物已做复制、改名运行、TS 调用及恢复后的真实进程演练，其他 apphost 布局需独立验证。
 
 ## 文档与实现交付条件
 

@@ -1,16 +1,23 @@
 # Di
 
-Di 是本地编程助手，当前提供 TypeScript CLI（`di-ts`）和现有 C# CLI（`di`）。迁移发布门槛完成前，两者并行安装。
+Di 是本地编程助手，后续开发以 TypeScript 为主线，CLI 命令为 `di-ts`。C# 分支保留作为行为参考和回退；迁移发布门槛完成前，`di-ts` 与既有 C# 命令 `di` 并行安装。
 
 ## Install the TypeScript CLI
 
-需要 Node.js 22.19 或更新版本以及 npm。在仓库根目录运行：
+需要 Node.js 22.19 或更新版本以及 npm。在仓库根目录运行（Windows）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-安装脚本会构建 TypeScript workspace，将私有运行时安装到 `~/.di/ts-cli`，并在 `~/.di/bin` 创建 `di-ts` 启动器。它会保留已有的 `~/.di/bin/di` 或 `di.exe`，不会迁移或改写配置、会话、skills、commands 或凭据。默认会将 `~/.di/bin` 加入用户 PATH，之后请打开新终端。使用 `-SkipPathUpdate` 可保持 PATH 不变。
+macOS/Linux 安装脚本需要 PowerShell 7（`pwsh`）：
+
+```sh
+pwsh -NoProfile -File ./install.ps1
+export PATH="$HOME/.di/bin:$PATH"
+```
+
+安装脚本会构建 TypeScript workspace，将私有运行时安装到 `~/.di/ts-cli`，并在 `~/.di/bin` 创建 `di-ts` 启动器。它会保留已有的 `~/.di/bin/di` 或 `di.exe`，不会迁移或改写配置、会话、skills、commands 或凭据。Windows 默认将 `~/.di/bin` 加入用户 PATH，之后请打开新终端；使用 `-SkipPathUpdate` 可保持 PATH 不变。POSIX 设置启动器执行权限并打印 PATH 指令，不改写 shell profile。
 
 只构建而不安装：
 
@@ -21,6 +28,8 @@ node .\packages\coding-agent\dist\cli\main.js --info
 ```
 
 使用 `di-ts` 启动 TypeScript CLI。迁移发布门槛完成前，普通 `di` 命令仍指向现有 C# CLI。
+
+已有 C# `di` 且 TS 已并行安装时，显式入口切换和回退工具为 `tools/select-cli.ps1 -Runtime typescript|csharp -DiHome <目录>`。它保留原启动器并校验备份；正式切换前请核对[发布验收状态](docs/migration/typescript-core/progress.md)。安装脚本不会自动选择默认实现，详细行为见[安装与回退](docs/migration/typescript-core/validation-and-release.md#安装切换用户数据与回退)。
 
 ## Use
 
@@ -44,7 +53,16 @@ TypeScript CLI 按默认值、`~/.di/config.json`、`<workspace>/.di/config.json
 }
 ```
 
-不要将 API 密钥提交到仓库。由于尚未启用跨进程 OS advisory lock，TypeScript 的 ChatGPT 凭据存储当前会安全失败关闭；生产模型路由也尚未接入 ChatGPT。因此此 CLI 暂不支持 ChatGPT 登录或调用。配置与数据目录见 [`docs/di-home.md`](docs/di-home.md)。
+不要将 API 密钥提交到仓库。TypeScript CLI 已接入 ChatGPT OAuth 登录、令牌刷新和生产模型调用：
+
+```text
+di-ts auth chatgpt login
+di-ts auth chatgpt status
+di-ts auth chatgpt models
+di-ts --provider chatgpt --model <返回的slug> "检查项目"
+```
+
+凭据更新使用跨进程原生锁保护。认证行为见 [`docs/modules/chatgpt.md`](docs/modules/chatgpt.md)，配置与数据目录见 [`docs/di-home.md`](docs/di-home.md)。
 
 ## Sessions and reference implementation
 
