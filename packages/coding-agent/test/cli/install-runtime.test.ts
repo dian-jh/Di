@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,18 +9,26 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const repoRoot = resolve(fileURLToPath(new URL("../../../..", import.meta.url)));
 const installer = join(repoRoot, "install.ps1");
 
-test("isolated install copies all CLI runtime dependencies and preserves user files", { skip: process.platform !== "win32" }, (t) => {
+test("isolated install copies runtime dependencies, launches di-ts, and preserves user files", (t) => {
   const tempRoot = mkdtempSync(join(tmpdir(), "di-install-runtime-"));
   const diHome = join(tempRoot, "di-home");
   const bin = join(diHome, "bin");
   mkdirSync(bin, { recursive: true });
 
-  const csharpMarker = join(bin, "di.exe");
+  const csharpMarker = join(bin, process.platform === "win32" ? "di.exe" : "di");
   const configFile = join(diHome, "config.json");
+  const sessionFile = join(diHome, "sessions", "session.jsonl");
+  const credentialFile = join(diHome, "auth", "chatgpt", "credentials.json");
   const markerContents = Buffer.from("existing C# launcher marker\n", "utf8");
   const configContents = Buffer.from('{"user-setting":"preserve-me"}\n', "utf8");
   writeFileSync(csharpMarker, markerContents);
   writeFileSync(configFile, configContents);
+  mkdirSync(dirname(sessionFile), { recursive: true });
+  mkdirSync(dirname(credentialFile), { recursive: true });
+  const sessionContents = Buffer.from('{"type":"session","id":"keep"}\n', "utf8");
+  const credentialContents = Buffer.from('{"access_token":"keep-secret"}\n', "utf8");
+  writeFileSync(sessionFile, sessionContents);
+  writeFileSync(credentialFile, credentialContents);
 
   t.after(() => {
     const resolvedTemp = resolve(tempRoot);
@@ -29,24 +37,39 @@ test("isolated install copies all CLI runtime dependencies and preserves user fi
     rmSync(resolvedTemp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
+  const shell = process.env.DI_TEST_POWERSHELL ?? (process.platform === "win32" ? "powershell.exe" : "pwsh");
+  const shellArgs = process.platform === "win32" && process.env.DI_TEST_POWERSHELL === undefined
+    ? ["-NoProfile", "-ExecutionPolicy", "Bypass"]
+    : ["-NoProfile"];
+  const pathArgs = process.platform === "win32" ? ["-SkipPathUpdate"] : [];
   const install = spawnSync(
-    "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", installer, "-DiHome", diHome, "-SkipBuild", "-SkipPathUpdate"],
+    shell,
+    [...shellArgs, "-File", installer, "-DiHome", diHome, "-SkipBuild", ...pathArgs],
     { cwd: repoRoot, encoding: "utf8", windowsHide: true, timeout: 120_000 },
   );
   assert.equal(install.error, undefined, `PowerShell installer could not start: ${install.error?.message ?? ""}`);
   assert.equal(install.status, 0, `isolated installer failed (exit ${install.status})\n${install.stdout}\n${install.stderr}`);
-  assert.deepEqual(readFileSync(csharpMarker), markerContents, "existing C# di.exe must remain byte-identical");
+  assert.deepEqual(readFileSync(csharpMarker), markerContents, "existing C# di launcher must remain byte-identical");
   assert.deepEqual(readFileSync(configFile), configContents, "user config.json must remain byte-identical");
+  assert.deepEqual(readFileSync(sessionFile), sessionContents, "existing sessions must remain byte-identical");
+  assert.deepEqual(readFileSync(credentialFile), credentialContents, "existing credentials must remain byte-identical");
 
   const installedEntry = join(diHome, "ts-cli", "node_modules", "@di", "coding-agent", "dist", "cli", "main.js");
-  const cli = spawnSync(process.execPath, [installedEntry, "--info"], {
-    cwd: tempRoot,
-    encoding: "utf8",
-    windowsHide: true,
-    timeout: 30_000,
-    env: { ...process.env, DI_HOME: diHome, DEEPSEEK_API_KEY: "" },
-  });
+  const launcher = join(bin, process.platform === "win32" ? "di-ts.cmd" : "di-ts");
+  if (process.platform !== "win32") {
+    assert.notEqual(statSync(launcher).mode & 0o111, 0, "POSIX di-ts launcher must be executable");
+  }
+  const cli = spawnSync(
+    process.platform === "win32" ? (process.env.DI_TEST_POWERSHELL ?? "powershell.exe") : launcher,
+    process.platform === "win32" ? ["-NoProfile", "-Command", `& '${launcher.replaceAll("'", "''")}' --info`] : ["--info"],
+    {
+      cwd: tempRoot,
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 30_000,
+      env: { ...process.env, DI_HOME: diHome, DEEPSEEK_API_KEY: "" },
+    },
+  );
   assert.equal(cli.error, undefined, `installed CLI could not start: ${cli.error?.message ?? ""}`);
   assert.equal(cli.status, 0, `installed CLI --info failed (exit ${cli.status})\n${cli.stdout}\n${cli.stderr}`);
 
@@ -55,8 +78,6 @@ test("isolated install copies all CLI runtime dependencies and preserves user fi
   assert.ok(existsSync(join(installedModules, "safer-buffer", "package.json")), "safer-buffer must be present in the private installed runtime");
   const koffiRoot = join(installedModules, "koffi");
   assert.ok(existsSync(join(koffiRoot, "package.json")), "koffi must be present in the private installed runtime");
-  assert.ok(existsSync(join(koffiRoot, "build", "koffi", "win32_x64", "koffi.node")), "prebuilt Windows x64 Koffi binary must be copied");
-
   const koffiImport = spawnSync(
     process.execPath,
     ["--input-type=module", "-e", "const koffi = await import(process.argv[1]); if (!(koffi.version || koffi.default?.version)) process.exit(3)", pathToFileURL(join(koffiRoot, "index.js")).href],
