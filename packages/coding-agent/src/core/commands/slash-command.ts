@@ -1,9 +1,9 @@
 import type { CommandContext } from "./command-context.ts";
 
-/**
+/*
  * Slash command vocabulary: the handler delegate, the contribution record and
- * the execution result. Mirrors `Di.Cli/Commands/SlashCommand.cs` and
- * `Di.Cli/Commands/CommandResult.cs` at baseline 09f4e08 — builtin and user
+ * the execution result. and
+ * — builtin and user
  * commands (`~/.di/commands/<name>.md`) are registered into one
  * {@link SlashCommandRegistry}, and both frontends (REPL and RPC/TUI) share the
  * same registry and handlers (Pi's `SlashCommandContribution`: name /
@@ -24,7 +24,7 @@ export interface SlashCommand {
   readonly handler: SlashCommandHandler;
 }
 
-/**
+/*
  * Command execution result (Pi's `AgentOperationResponse` semantics): whether the
  * command produced a turn — a synchronous reply (`HANDLED` / `QUIT`) or a
  * request for the host to run one turn (`turnCommand`). The host (REPL / RPC)

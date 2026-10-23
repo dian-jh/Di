@@ -1,11 +1,8 @@
 import { readFileSync } from "node:fs";
 
 /**
- * CLI display metadata: the global command name and the --help text. Mirrors
- * `Di.Cli/cli/CliInfo.cs` at baseline 09f4e08. The version is read from the
- * package.json `version` field (the C# analog reads AssemblyInformationalVersion
- * from the built assembly) instead of being hardcoded, so the shipped version
- * cannot drift from the packaging metadata.
+ * CLI command name and help text. Read the version from package.json so the
+ * displayed version matches the installed package metadata.
  */
 
 /** Global command name (also the product artifact name). */
@@ -14,7 +11,7 @@ export const CLI_NAME = "di";
 /** Version read from package.json at load; falls back to "0.0.0" if unreadable. */
 export const CLI_VERSION: string = readPackageVersion();
 
-/** Full usage text for --help (kept as a single template like the C# raw string). */
+/** Full usage text for --help. */
 export const HELP_TEXT = `di —— 简洁的 ReAct 编码助手（harness）
 
 用法: di [选项] [提示词...]
@@ -61,7 +58,7 @@ ChatGPT（官方 OAuth，无需 API Key）：
 配置: ~/.di/config.json 与 <workspace>/.di/config.json（JSON，覆盖 appsettings 默认值）。
 `;
 
-/** Convenience object grouping the three metadata pieces (C# `CliInfo` static class). */
+/** Convenience object grouping the three metadata pieces (`CliInfo` static class). */
 export const CliInfo = {
   name: CLI_NAME,
   version: CLI_VERSION,

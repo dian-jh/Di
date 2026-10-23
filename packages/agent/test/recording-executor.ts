@@ -10,7 +10,6 @@ export interface ToolExecutionRecord {
 }
 
 /**
- * Recording fake executor (P1.2 test helper).
  *
  * Implements the @di/agent ToolExecutor contract: it records every invocation
  * (call id / name / raw arguments / execution order) and returns canned results

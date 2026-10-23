@@ -8,13 +8,11 @@ import { createGlobTool, GLOB_DEFAULT_LIMIT } from "@di/coding-agent";
 import { enumerateFiles } from "../src/core/tools/enumerate.ts";
 
 /**
- * P4.2 card 2: glob tool (recursive file enumeration).
  *
- * Ports Di.Tests/Tools/GlobToolTests.cs at baseline 09f4e08 and adds the red
  * cases from tools-and-platform.md §"文件 IO": ignore-dir rules (.git, bin, obj,
  * node_modules, AppData, Temp, cache…), recursion depth, path/separator
  * handling, missing/invalid args, and a truly async cancellable scan
- * (execution-plan P4 gate: a sync scan wrapped in a Promise is not acceptable).
+ *
  */
 
 const base = mkdtempSync(join(tmpdir(), "di-glob-"));
@@ -152,7 +150,7 @@ test("limit option stops early with a continuation notice", async () => {
   assert.ok(obs.text.includes("limit=4"));
 });
 
-test("limit of zero clamps to one result (C# Math.Max(1, limit))", async () => {
+test("limit of zero clamps to one result)", async () => {
   write("a.txt");
   write("b.txt");
 
@@ -284,7 +282,7 @@ test("deep recursion is handled", async () => {
   assert.ok(obs.text.includes("a/b/c/d/e/f/g/h/i/j/k.cs"));
 });
 
-test("path argument that is not a string is ignored (C# TryGetOptionalString)", async () => {
+test("path argument that is not a string is ignored", async () => {
   write("a.cs");
   const obs = await run({ pattern: "*.cs", path: 42 });
   assert.equal(obs.isError, false);

@@ -2,8 +2,7 @@
  * 子进程 RPC 客户端：spawn 后端（`--mode rpc`），走 NDJSON over stdin/stdout 协议。
  *
  * - 启动器可注入：`launcher: { bin, args }` 完整描述如何 spawn（如 `process.execPath` +
- *   编译后 TS 入口参数，绕开 Windows npm `.cmd` shim）；缺省回退到 `bin` + `args`
- *   （二进制解析顺序：env DI_BIN → PATH 上的 `di` → `~/.di/bin/di.exe`（win32））。
+ *   编译后 TS 入口参数，绕开 Windows npm `.cmd` shim）；也可显式提供 `bin` + `args`。
  * - 等待 `ready` 握手后才允许发请求。
  * - 请求带单调递增 id；无逐请求回执，`prompt` 的"回执"是事件流 + 一个 `result`（终态恰好一次）。
  * - 回合进行中（busy）拒绝新 prompt，避免 result 串台。
@@ -11,8 +10,6 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { encodeMessage, LineBuffer, parseMessage, ProtocolError } from "./codec.ts";
 import type {
   AgentEvent,
@@ -94,41 +91,6 @@ export interface RpcClientOptions {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isFile(p: string): boolean {
-  try {
-    return fs.statSync(p).isFile();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * 解析 `di` 可执行文件路径。
- * 顺序：`DI_BIN` 环境变量 → PATH 上的 `di`（win32 含 .exe/.cmd/.bat）→ `~/.di/bin/di.exe`。
- * 找不到返回 undefined。
- */
-export function resolveDiBin(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  if (env.DI_BIN) {
-    return env.DI_BIN;
-  }
-  const isWin = process.platform === "win32";
-  const exts = isWin ? ["", ".exe", ".cmd", ".bat"] : [""];
-  const pathVar = env.PATH ?? "";
-  for (const dir of pathVar.split(path.delimiter)) {
-    if (!dir) continue;
-    for (const ext of exts) {
-      const candidate = path.join(dir, `di${ext}`);
-      if (isFile(candidate)) return candidate;
-    }
-  }
-  const home = env.USERPROFILE ?? env.HOME;
-  if (home) {
-    const candidate = path.join(home, ".di", "bin", isWin ? "di.exe" : "di");
-    if (isFile(candidate)) return candidate;
-  }
-  return undefined;
 }
 
 export class RpcClient {

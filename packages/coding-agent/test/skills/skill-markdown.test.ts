@@ -9,8 +9,7 @@ import {
 } from "@di/coding-agent";
 
 /**
- * P6.2a unit 1 — frontmatter. Mirrors `Di.Tests/Skills/SkillMarkdownTests.cs` and
- * `Core/Skills/SkillMarkdown.cs` at baseline 09f4e08. The C# baseline parses
+ *
  * frontmatter with a hand-rolled single-line / single-level parser (NOT a YAML
  * library), so the TS port must pin exactly the same accepted / ignored /
  * rejected format set — "supported formats must not silently change because the
@@ -23,7 +22,7 @@ test("parse extracts name, description and instructions", () => {
       "name: backend-tests\n" +
       "description: 运行并修复后端测试\n" +
       "---\n" +
-      "运行 dotnet test 的工作流：改代码后先 build 再 test。",
+      "运行 npm test 的工作流：改代码后先 build 再 test。",
     "backend-tests",
   );
   assert.equal(skill.name, "backend-tests");
@@ -100,10 +99,10 @@ test("comments in frontmatter are ignored", () => {
   assert.equal(skill.name, "x");
 });
 
-test("inline-flow metadata is NOT parsed (pins the C# single-level parser boundary)", () => {
-  // A YAML library would parse `metadata: {author: contoso}` into a map; the C#
+test("inline-flow metadata is NOT parsed (pins the single-level parser boundary)", () => {
+
   // baseline treats the non-empty value as an unknown field and ignores it. The
-  // TS port pins the C# boundary so supported formats do not silently change.
+
   const skill = parseSkillMarkdown("---\nname: x\ndescription: y\nmetadata: {author: contoso}\n---\nbody");
   assert.equal(Object.keys(skill.metadata).length, 0);
 });

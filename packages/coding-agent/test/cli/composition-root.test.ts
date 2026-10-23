@@ -28,14 +28,10 @@ import {
 import { makeArgs } from "../modes/test-host.ts";
 
 /**
- * P7a card — the real composition root (C# `Di.Cli/CliHost.Create` at baseline
- * 09f4e08): replace the fail-closed `defaultCliHostFactory` stub with a host that
- * composes AgentSession + tools (P4.x) + skills (P6.2) + sessionStore (P5) +
- * DiLog (P6.4) + createSessionRunner, wires `--resume` via loadRecovery →
+ *
  * restoreHistory, injects ProcessDiagnostics.log into DiLog.log, and resolves the
  * current-model LABEL to the session's ChatModel.
  *
- * The P6.4 emission seams are closed HERE, host-side, without touching
  * packages/agent/: `runStarted` is published by the composition root before each
  * `session.runTurn`; `modelCallStarted` is published by a host-side model wrapper
  * on each model call — so `run: started` and `llm: call_started` /
@@ -83,7 +79,7 @@ class ScriptedModel implements ChatModel {
     };
     return (async function* (): AsyncGenerator<ModelEvent> {
       // Stream the assistant text as a delta so the mode renderers see it
-      // (C#/the FakeRunner publish TextDelta; a completed-only stream would not
+
       // render the answer in print mode's streaming UI).
       if (step.text.length > 0) yield { type: "textDelta", delta: step.text };
       yield { type: "completed", response };
@@ -198,7 +194,7 @@ test("composition root: runStarted + modelCallStarted emitted around each turn; 
     const log = readLog(diHome);
     assert.ok(log.includes("run: started user_input=hi there"), "run: started log line");
     assert.ok(log.includes("llm: call_started iteration=1"), "llm: call_started log line");
-    // The P6.4 DiLog format appends duration_ms at the END of the completed line
+
     // (after finish=), so assert both markers on the same line.
     assert.ok(
       log.includes("llm: call_completed iteration=1") && log.includes("duration_ms="),

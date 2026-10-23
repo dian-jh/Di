@@ -19,9 +19,9 @@ import { runPrintMode } from "../modes/print-mode.ts";
 import { runRpcMode } from "../modes/rpc-mode.ts";
 import type { TuiLauncherContext } from "../modes/tui-launcher.ts";
 
-/**
- * CLI dispatch shell (Pi's main.ts counterpart; C# `Di.Cli/CliApp.cs` at baseline
- * 09f4e08): parse args → validate → resolve mode → build host → dispatch. It
+/*
+ * CLI dispatch shell (Pi's main.ts counterpart; at current implementation
+ * ): parse args → validate → resolve mode → build host → dispatch. It
  * never touches the console — input/output streams and TTY detection are injected
  * — so the shell is replayable in any host and testable with in-memory streams.
  *
@@ -30,7 +30,7 @@ import type { TuiLauncherContext } from "../modes/tui-launcher.ts";
  * interactive / print / json / rpc) go through the injected {@link CliHostFactory};
  * a throwing factory becomes the documented host-failure output (json mode → a
  * single error doc on stdout, text modes → stderr) — the `--resume` recovery
- * failure rides this envelope (`session_resume`). The mode BODIES (P6.3c) are
+ * failure rides this envelope (`session_resume`). The mode BODIES are
  * dispatched from here: REPL / TUI (interactive), single JSON doc (json), text
  * single shot (print), NDJSON (rpc).
  *
@@ -40,7 +40,7 @@ import type { TuiLauncherContext } from "../modes/tui-launcher.ts";
  * JSON/RPC wire shapes are produced by the mode bodies.
  */
 
-/** Fallback effective-config values mirror the C# `AgentLoopOptions` / `ModelOptions` defaults. */
+/** Fallback effective-config values mirror the `AgentLoopOptions` / `ModelOptions` defaults. */
 const AGENT_LOOP_DEFAULTS = { maxIterations: 0, historyBudgetRatio: 0.5 };
 const MODEL_DEFAULTS = { provider: "deepseek", defaultModel: "deepseek-flash" };
 
@@ -92,7 +92,7 @@ export class CliApp {
         return stats(cliArgs.stats, stdout, stderr);
 
       default: {
-        // Host-required paths: build the composition root (P7a real host; the
+        // Host-required paths: build the composition root ( real host; the
         // factory is async — layered config load), then dispatch. The dispose
         // chain (DiLog `di exiting` etc.) runs after the mode body.
         let host: CliHost;
@@ -277,14 +277,14 @@ function platformShellName(): string {
   return process.platform === "win32" ? "cmd" : "bash";
 }
 
-/** Ordinal (UTF-16 code-unit) comparison — C# `StringComparer.Ordinal`, NOT locale. */
+/** Ordinal (UTF-16 code-unit) comparison —, NOT locale. */
 function ordinalCompare(a: string, b: string): number {
   if (a < b) return -1;
   if (a > b) return 1;
   return 0;
 }
 
-/** .NET `P1` percent format: `0.9 → "90.0%"`; null → "" (C# `double?.ToString("P1")`). */
+/**.NET `P1` percent format: `0.9 → "90.0%"`; null → "". */
 function formatP1(rate: number | undefined): string {
   if (rate === undefined) return "";
   return `${(rate * 100).toFixed(1)}%`;

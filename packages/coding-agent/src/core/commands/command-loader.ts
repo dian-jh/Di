@@ -4,10 +4,10 @@ import type { SlashCommandRegistry } from "./slash-command-registry.ts";
 import { CommandFormatException, parseCommandMarkdown } from "./command-markdown.ts";
 import { turnCommand } from "./slash-command.ts";
 
-/**
+/*
  * Load user slash commands from `~/.di/commands/*.md` (flat files; command name
- * = file name). Mirrors `Di.Cli/Commands/CommandLoader.cs` at baseline 09f4e08
- * — mirrors the skills "bad file never blocks startup" rule: invalid files warn
+ * = file name).
+ * — the skills "bad file never blocks startup" rule: invalid files warn
  * and skip; name collisions with existing commands warn and skip (first
  * registered wins). User commands are turn-based: the body template + the
  * invocation args ask the host to run a full turn (MVP does no `$1` placeholder
@@ -61,7 +61,7 @@ function composeMessage(body: string, args: string): string {
   return args.length === 0 ? body : `${body}\n\n${args}`;
 }
 
-/** `<dir>` exists and is a directory (C# `Directory.Exists` returns false for files). */
+/** `<dir>` exists and is a directory ( returns false for files). */
 function isDirectory(dir: string): boolean {
   try {
     return statSync(dir).isDirectory();
@@ -70,12 +70,12 @@ function isDirectory(dir: string): boolean {
   }
 }
 
-/** Windows `.md` suffix is case-insensitive (mirrors C# `EnumerateFiles("*.md")`). */
+/** Windows `.md` suffix is case-insensitive (mirrors ). */
 function isMarkdownFile(name: string): boolean {
   return process.platform === "win32" ? /\.md$/i.test(name) : name.endsWith(".md");
 }
 
-/** Skip range mirrors C#: CommandFormatException + filesystem errors (IOException/UnauthorizedAccess). */
+/** Skip range mirrors: CommandFormatException + filesystem errors (IOException/UnauthorizedAccess). */
 function isSkippableError(error: unknown): boolean {
   if (error instanceof CommandFormatException) return true;
   return (

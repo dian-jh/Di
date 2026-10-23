@@ -1,8 +1,8 @@
-/**
- * Host-side ChatGPT auth failure (C# `LlmException` / `InvalidDataException`
- * semantics, P8b). `code` mirrors the C# `LlmErrorCodes` vocabulary where
+/*
+ * Host-side ChatGPT auth failure (`LlmException` / `InvalidDataException`
+ * semantics, ). `code` the `LlmErrorCodes` vocabulary where
  * applicable (`connection`, `timeout`, `bad-response`) plus the passthrough
- * provider error codes (`invalid_grant`, `server_error`, ...) and local
+ * provider error codes (`invalid_grant`, `server_error`,...) and local
  * validation codes (`invalid-data`, `auth-failed`).
  */
 export class ChatGptAuthError extends Error {

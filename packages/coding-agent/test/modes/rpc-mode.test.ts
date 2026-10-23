@@ -26,13 +26,12 @@ import {
 import type { BuildHostOptions } from "./test-host.ts";
 
 /**
- * P6.3c card — rpc mode (--mode rpc, NDJSON over stdin/stdout), port of C#
- * `Di.Cli.Tests/modes/RpcModeTests.cs` at baseline 09f4e08 against docs/tui-rpc.md:
+ *
  * ready handshake, prompt event stream + result, interrupt → cancelled, soft-stop →
  * interrupted, set_model / set_skills / clear_history / ping, the command system
  * (list / run / turn_not_supported / pinned persistence), failure-is-a-message
  * (parse_error / invalid_request / run_failed→result error), session log best-effort,
- * plus the P6.3c busy envelope (set_model and command model/thinking while a turn
+ *
  * is running → busy).
  */
 
@@ -75,7 +74,7 @@ test("Rpc_Ready_EmitsModelEffortSkillsModels", async () => {
   const { code, stdout } = await runRpc(
     {},
     '{"type":"request","id":1,"method":"shutdown","params":{}}',
-    { service, skills: [skill("backend-tests", "跑后端测试", "dotnet test")], reasoningEffort: "high" },
+    { service, skills: [skill("backend-tests", "跑后端测试", "npm test")], reasoningEffort: "high" },
   );
 
   assert.equal(code, 0);
@@ -257,7 +256,7 @@ test("Rpc_SetSkills_ResolvesNamesToKnownSkills", async () => {
 {"type":"request","id":1,"method":"set_skills","params":{"names":["backend-tests","不存在"]}}
 {"type":"request","id":2,"method":"shutdown","params":{}}
 `,
-    { skills: [skill("backend-tests", "跑后端测试", "dotnet test")] },
+    { skills: [skill("backend-tests", "跑后端测试", "npm test")] },
   );
 
   assert.equal(code, 0);
@@ -477,7 +476,7 @@ test("Rpc_Command_TurnCommand_EmitsTurnNotSupported", async () => {
 {"type":"request","id":1,"method":"command","params":{"name":"skill","args":"backend-tests 补测试"}}
 {"type":"request","id":2,"method":"shutdown","params":{}}
 `,
-    { skills: [skill("backend-tests", "跑后端测试", "dotnet test")] },
+    { skills: [skill("backend-tests", "跑后端测试", "npm test")] },
   );
 
   assert.equal(code, 0);
@@ -497,7 +496,7 @@ test("Rpc_Command_PinnedSkills_PersistAcrossCalls", async () => {
 {"type":"request","id":2,"method":"command","params":{"name":"skills"}}
 {"type":"request","id":3,"method":"shutdown","params":{}}
 `,
-    { skills: [skill("backend-tests", "跑后端测试", "dotnet test")] },
+    { skills: [skill("backend-tests", "跑后端测试", "npm test")] },
   );
 
   assert.equal(code, 0);
@@ -533,7 +532,7 @@ test("Rpc_Prompt_RecomputesAutoSkills_AndPreservesExplicitSkills", async () => {
   assert.deepEqual(runner.skillSnapshots[3]!.map((s) => s.name), ["fixed"]);
 });
 
-// ---- P6.3c busy envelope：回合进行中拒绝模型/强度修改 ----
+
 
 test("Rpc_SetModel_Busy_EmitsErrorBusy", async () => {
   const { code, stdout } = await runRpc(

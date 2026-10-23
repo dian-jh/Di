@@ -3,11 +3,10 @@ import assert from "node:assert/strict";
 import { AppMode, type CliArgs, CliMode } from "@di/coding-agent";
 
 /**
- * P6.3b card — CLI mode resolution (port of C# `Di.Cli.Tests/cli/CliModeTests.cs`
- * at baseline 09f4e08): the pure precedence `CliMode.Resolve(args, stdinTty,
+ *
  * stdoutTty)` — short paths first (version/info/help/list-models/stats/skill-eval),
  * then explicit --mode, then prompt / --resume / --print / TTY derivation. The
- * `--resume` × explicit-mode × positional combinations are added beyond the C#
+ *
  * suite to lock the contract the validation doc demands (resume never defaults
  * into a mode that swallows an explicit choice).
  */
@@ -105,7 +104,7 @@ test("Resolve_SkillEval_PriorityOverPrompt", () => {
 
 test("Resolve_ResumeNoModeNoPositionals_Interactive", () => {
   // `--resume` with no explicit --mode and no positional prompt enters a simple
-  // interactive session (the body itself is P6.3c; the resolution rule belongs here).
+
   assert.equal(CliMode.resolve(args({ resume: "checkpoint.jsonl" }), TTY, TTY), AppMode.Interactive);
   assert.equal(CliMode.resolve(args({ resume: "checkpoint.jsonl" }), NOT_TTY, NOT_TTY), AppMode.Interactive);
 });
@@ -121,7 +120,7 @@ test("Resolve_ResumeWithExplicitMode_ExplicitModeWins", () => {
 });
 
 test("Resolve_ResumeWithPrintFlag_ResumeWinsOverPrint", () => {
-  // C# checks --resume before --print: `--resume file --print` (no mode/positionals)
+
   // still enters interactive; --print only matters when --resume is absent.
   assert.equal(CliMode.resolve(args({ resume: "checkpoint.jsonl", print: true }), TTY, TTY), AppMode.Interactive);
   assert.equal(CliMode.resolve(args({ print: true }), TTY, TTY), AppMode.Print);

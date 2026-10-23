@@ -1,21 +1,19 @@
 /**
- * Model selection for /model, RPC set_model and the model factory: resolve
- * first, check local auth, then commit. Mirrors `Di.Cli/ModelSelection.cs` and
- * `Core/Llm/ModelReference.cs` at baseline 09f4e08. Semantics:
+ * Model selection for /model, RPC set_model, and the model factory: resolve
+ * first, check local auth, then commit. The selection follows these rules:
  * - provider/model resolution: unique ID, unique prefix/substring match,
- *   ambiguity error, explicit provider route allows IDs absent from the
- *   advisory catalog;
+ * ambiguity error, explicit provider route allows IDs absent from the
+ * advisory catalog;
  * - refresh failure keeps the last catalog snapshot (errors are returned, never
- *   thrown; the previous advisory list stays);
+ * thrown; the previous advisory list stays);
  * - a failed switch (ambiguous / not-found / missing auth) never changes the
- *   current model;
+ * current model;
  * - a successful cross-provider switch resets the reasoning tier;
  * - a busy session (a turn is running) rejects switching.
  *
- * The {@link ModelService} is an advisory model catalog / provider seam (the
- * C# `ILlmService` subset ModelSelection uses); the actual LlmRuntime wiring is
- * a later phase. {@link ModelSelectionHost} mirrors C# `IAgentRunner.CurrentModel`
- * plus the reasoning-changed callback; the mode wiring (P6.3b) bridges it to
+ * The {@link ModelService} supplies advisory model catalog data and provider
+ * operations. {@link ModelSelectionHost} provides the current model and a
+ * reasoning-change callback; mode wiring bridges selection to
  * `AgentSession.setModel`.
  */
 
@@ -27,7 +25,7 @@ export type ModelSelectionErrorCode =
   | "unsupported-reasoning"
   | "busy";
 
-/** A model-selection failure (the C# `ArgumentException` / `LlmException` contract, code-tagged). */
+/** A model-selection failure (the `ArgumentException` / `LlmException` contract, code-tagged). */
 export class ModelSelectionError extends Error {
   readonly code: ModelSelectionErrorCode;
 
@@ -38,26 +36,26 @@ export class ModelSelectionError extends Error {
   }
 }
 
-/** One ordered opaque reasoning-effort ID a provider/model exposes (C# `ReasoningEffort`). */
+/** One ordered opaque reasoning-effort ID a provider/model exposes (`ReasoningEffort`). */
 export interface ReasoningEffortInfo {
   readonly id: string;
   readonly name: string;
   readonly description?: string;
 }
 
-/** The reasoning capability of one exact provider/model route (C# `LlmModelReasoningInfo`). */
+/** The reasoning capability of one exact provider/model route (`LlmModelReasoningInfo`). */
 export interface ModelReasoningInfo {
   readonly efforts: readonly ReasoningEffortInfo[];
   readonly defaultEffort?: string;
 }
 
-/** A provider route's display metadata (C# `LlmProviderInfo`). */
+/** A provider route's display metadata (`LlmProviderInfo`). */
 export interface ProviderInfo {
   readonly id: string;
   readonly name: string;
 }
 
-/** One advisory model record (C# `LlmModelInfo`). */
+/** One advisory model record (`LlmModelInfo`). */
 export interface ModelInfo {
   readonly provider: string;
   readonly id: string;
@@ -68,7 +66,7 @@ export interface ModelInfo {
   readonly reasoning?: ModelReasoningInfo;
 }
 
-/** Exact model metadata (C# `LlmResolvedModelInfo`). */
+/** Exact model metadata (`LlmResolvedModelInfo`). */
 export interface ResolvedModelInfo {
   readonly provider: string;
   readonly id: string;
@@ -77,7 +75,7 @@ export interface ResolvedModelInfo {
   readonly reasoning?: ModelReasoningInfo;
 }
 
-/** Advisory model service seam (the C# `ILlmService` subset used by ModelSelection). */
+/** Advisory model service seam (the `ILlmService` subset used by ModelSelection). */
 export interface ModelService {
   listProviders(): readonly ProviderInfo[];
   listModels(provider?: string): readonly ModelInfo[];
@@ -86,14 +84,14 @@ export interface ModelService {
   resolveModel(provider: string, model: string, signal?: AbortSignal): Promise<ResolvedModelInfo>;
 }
 
-/** Host seam (C# `IAgentRunner.CurrentModel` + the reasoning-changed callback). */
+/** Host seam for the current model and the reasoning-changed callback. */
 export interface ModelSelectionHost {
   readonly currentModel: string;
   /** Whether a turn is currently running (busy policy rejects switching mid-turn). */
   isBusy(): boolean;
-  /** Commit a model switch (C# `runner.CurrentModel = ...`). */
+  /** Commit a model switch (`runner.CurrentModel =...`). */
   setCurrentModel(model: string): void;
-  /** Called when the reasoning tier changes (C# `onReasoningChanged`). */
+  /** Called when the reasoning tier changes (`onReasoningChanged`). */
   onReasoningChanged?(effort: string | null): void;
 }
 
@@ -106,9 +104,9 @@ export interface ModelSelectionOptions {
 
 const CHATGPT_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-/**
+/*
  * A provider route and its opaque model ID. Only known provider prefixes are
- * split (C# `Core/Llm/ModelReference.cs`).
+ * split.
  */
 export class ModelReference {
   readonly provider: string;
@@ -153,7 +151,7 @@ export class ModelReference {
 
 /**
  * Shared by /model, RPC and the model factory: resolve first, check local auth,
- * then commit (C# `Di.Cli/ModelSelection.cs`).
+ * then commit the selection.
  */
 export class ModelSelection {
   private readonly service_: ModelService;
@@ -307,7 +305,7 @@ function equal(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
 
-/** Case-insensitive de-dup preserving first-seen casing (C# `Distinct(OrdinalIgnoreCase)`). */
+/** Case-insensitive de-duplication that preserves the first-seen casing. */
 function dedupeInsensitive(values: Iterable<string>): string[] {
   const seen = new Map<string, string>();
   for (const value of values) {

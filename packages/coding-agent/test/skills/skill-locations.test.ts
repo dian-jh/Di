@@ -11,8 +11,7 @@ import {
 } from "@di/coding-agent";
 
 /**
- * P6.2a unit 2 — source ordering. Mirrors `Core/Skills/SkillLocations.cs` at
- * baseline 09f4e08: user `.agents/skills` → user `.di/skills` → project ancestor
+ *
  * `.agents/skills` far-to-near → current project `.di/skills`; a `.git` file OR
  * directory is a root marker.
  */

@@ -5,9 +5,8 @@ function isToolCallBlock(block: ContentBlock): block is ToolCall {
   return block.type === "tool-call";
 }
 
-/**
- * Cross-turn history helpers (pure; mirrors `Core/AgentLoop/AgentRunner.cs`
- * `TrimHistoryByTokens` / `TrimHistory` / `DropOldestTurns` / `SanitizeHistory`).
+/*
+ * Cross-turn history helpers (pure; * `TrimHistoryByTokens` / `TrimHistory` / `DropOldestTurns` / `SanitizeHistory`).
  * All operate on the persisted memory only — the loop's result trajectory is
  * never rewritten by these functions (loop-and-state.md §"逐单元红绿实施与验收
  * 边界" history/recovery row: 结果 trajectory 不改写，持久 history 良构).
@@ -37,7 +36,7 @@ export function dropOldestTurns(
   return messages;
 }
 
-/**
+/*
  * Trim oldest whole user-turns until the estimated memory fits `tokenBudget`,
  * always keeping the most recent turn (a single over-budget turn is retained).
  * A null/non-positive budget returns the input unchanged (the caller then falls
@@ -57,7 +56,7 @@ export function trimHistoryByTokens(
   return dropOldestTurns(trajectory, userCount - 1);
 }
 
-/**
+/*
  * Explicit whole-turn fallback used only when no token budget exists: keep the
  * most recent `maxTurns` whole user-turns. `maxTurns <= 0` (default) disables
  * the cap and returns the input unchanged — never clears history and never
@@ -73,7 +72,7 @@ export function trimHistoryByTurns(
   return dropOldestTurns(trajectory, userCount - maxTurns);
 }
 
-/**
+/*
  * Make persisted cross-turn memory tool-well-formed: an assistant's tool calls
  * must be followed by their tool results. Capped (`max_iterations`) or final-output
  * turns end with unexecuted tool calls — an unpaired group would make the next

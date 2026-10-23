@@ -5,8 +5,7 @@ import type { Skill } from "@di/coding-agent";
 import { buildAdvertisement, buildSkillSystemContext, estimateSkillTokens } from "@di/coding-agent";
 
 /**
- * P6.2b unit 6 — disclosure (advertise phase). Mirrors `Core/Skills/SkillContext.cs`
- * at baseline 09f4e08 plus the system-context assembly in `AgentRunner.RunAsync`:
+ *
  * the advertisement (one `- name：description` line per available skill) and the
  * activation body (full instructions of the active skills) are SEPARATE; the body
  * is what enters the volatile system context (the request tail) — never

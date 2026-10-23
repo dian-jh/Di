@@ -5,9 +5,7 @@ import type { TokenUsage, UsageCost } from "@di/ai";
 import { costForModel, findModelCostRates } from "@di/ai";
 
 /**
- * P3 card 4 red list — data-driven model cost catalog (Di baseline
- * `Core/Providers/DeepSeek/DeepSeekAdapter.cs` / `ChatGptAdapter.cs` `Catalog`
- * + `Core/Llm/ModelCatalog.cs`; models-and-auth.md §Token 与缓存计量: "未知成本 /
+ *
  * 缓存不伪造为零"): per-provider input/output/cache rates are catalog data (not
  * hardcoded in the loop); a model or provider without known rates yields an
  * absent cost, never a fabricated zero.

@@ -12,8 +12,7 @@ import { buildHost, ErrorRunner, FakeRunner, makeArgs, skill, ThrowingRunner } f
 import type { BuildHostOptions } from "./test-host.ts";
 
 /**
- * P6.3c card — json mode (headless single JSON document), port of the JSON half of C#
- * `Di.Cli.Tests/modes/PrintModeTests.cs` at baseline 09f4e08. No event streaming: exactly one
+ *
  * parseable JSON doc on stdout; `{"error": {"code": ..., "message": ...}}` envelopes exit 1 on
  * usage / model error; nullable keys (cost) are omitted, never written as null.
  */
@@ -69,7 +68,7 @@ test("Json_DoesNotStreamEvents_OnlySingleDoc", async () => {
 });
 
 test("Json_AutoActivatesMatchingSkill_SetsActiveSkills", async () => {
-  const skills = [skill("backend-tests", "运行并修复后端测试（dotnet）。当用户要求运行测试、分析失败或修复测试时使用。")];
+  const skills = [skill("backend-tests", "运行并修复后端测试（TypeScript workspace）。当用户要求运行测试、分析失败或修复测试时使用。")];
   const { code, runner } = await run({ mode: "json", positionals: ["跑一下后端测试"] }, { skills });
 
   assert.equal(code, 0);

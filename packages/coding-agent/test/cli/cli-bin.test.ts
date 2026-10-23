@@ -7,13 +7,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * P7a card (a) — the CLI bin entry smoke test: spawn `process.execPath` + the
+ *
  * compiled entry with `--mode rpc` (the exact way the TS TUI's `Launcher` will
- * spawn it, per P7-tui-launcher-seam), assert the NDJSON ready handshake arrives
+ *
  * on stdout, then drive a clean shutdown and expect exit 0.
  *
  * Independent child process, isolated temp DI_HOME, synthetic credentials only
- * (DEEPSEEK_API_KEY forced empty) — NEVER real API. Mirrors the P5
+ *
  * child-test-host pattern (packages/coding-agent/test/child-test-host/host.mjs).
  */
 

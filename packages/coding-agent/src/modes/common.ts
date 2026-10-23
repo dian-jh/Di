@@ -5,20 +5,20 @@ import type { CliArgs } from "../cli/args.ts";
 import type { CliHost } from "../cli/cli-host.ts";
 import type { TextReader, TextWriter } from "../cli/io.ts";
 
-/**
- * Shared headless-mode helpers (the C# `Di.Cli/modes/PrintMode.cs` private helpers
- * at baseline 09f4e08): prompt resolution (positionals, else stdin to EOF), the
+/*
+ * Shared headless-mode helpers (the private helpers
+ * ): prompt resolution (positionals, else stdin to EOF), the
  * best-effort session log (start / append / failure — a disk error only warns,
  * never changes the exit code; `--no-session` skips the whole path), and the
  * headless skill auto-activation (same shared computation as the REPL).
  */
 
-/** Error-to-message coercion (C# `ex.Message`). */
+/** Error-to-message coercion (`ex.Message`). */
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Prompt: join positionals with a space, else read stdin to EOF and trim (C# `ReadToEndAsync().Trim()`). */
+/** Prompt: join positionals with a space, else read stdin to EOF and trim (`ReadToEndAsync.Trim`). */
 export async function resolvePrompt(
   args: CliArgs,
   stdin: TextReader,

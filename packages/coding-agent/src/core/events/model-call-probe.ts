@@ -1,9 +1,9 @@
 import type { ChatModel, ModelEvent, ModelRequest } from "@di/ai";
 import type { EventBus } from "./event-bus.ts";
 
-/**
+/*
  * Host-side model wrapper that publishes {@link ModelCallStartedEvent} on every
- * model call (C# `ReAct.RunCoreAsync` emits `ModelCallStarted(iterations)` right
+ * model call (`ReAct.RunCoreAsync` emits `ModelCallStarted(iterations)` right
  * before each model await — the TS `@di/agent` loop deliberately emits no
  * call-start, so the composition root wraps the resolved ChatModel here instead
  * of modifying packages/agent/).

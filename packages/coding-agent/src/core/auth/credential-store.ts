@@ -7,8 +7,8 @@ import type { LockProvider } from "./lock-provider.ts";
 import { ChatGptAuthError } from "./errors.ts";
 import { CHATGPT_DIRECT_SCOPE } from "./constants.ts";
 
-/**
- * Atomic owner-only credential storage (C# `ChatGptCredentialStore` @09f4e08).
+/*
+ * Atomic owner-only credential storage (`ChatGptCredentialStore` @).
  *
  * The ONLY write path is {@link CredentialStore.update}: acquire the cross-process
  * exclusive lock → re-read the latest credentials INSIDE the lock → apply the
@@ -16,7 +16,7 @@ import { CHATGPT_DIRECT_SCOPE } from "./constants.ts";
  * read, network refresh and commit, so two processes can never consume a
  * one-time refresh token (models-and-auth.md line ~153-156).
  *
- * Atomic replace: a unique temp file in the same directory → write → `fh.sync()` →
+ * Atomic replace: a unique temp file in the same directory → write → `fh.sync` →
  * close → `rename` overwrite. On failure the old file is preserved and the orphan
  * temp file is cleaned. The ACL adapter protects the directory and the temp file
  * before it is committed; any ACL failure refuses the token write (fail closed).
@@ -26,7 +26,7 @@ import { CHATGPT_DIRECT_SCOPE } from "./constants.ts";
  * `open('wx')` here only names the temp file (a unique random name, never a lock);
  * it is never used as a lock.
  *
- * Reading tolerates the legacy C# shape (`Accounts` + `ActiveClientId`, PascalCase
+ * Reading tolerates the legacy shape (`Accounts` + `ActiveClientId`, PascalCase
  * fields, ISO dates) and migrates it atomically while preserving the active
  * credential (models-and-auth.md line ~165). The canonical write format is
  * camelCase JSON with epoch-millis timestamps.
@@ -42,7 +42,7 @@ export class CredentialDataError extends Error {
   }
 }
 
-/** C# `NeedsRefresh`: within 3 minutes of expiry, gated by earliest-refresh-at (and always when expired). */
+/** `NeedsRefresh`: within 3 minutes of expiry, gated by earliest-refresh-at (and always when expired). */
 export function needsRefresh(
   cred: Pick<ChatGptCredential, "expiresAt" | "earliestRefreshAt">,
   nowMs: number = Date.now(),
@@ -63,8 +63,8 @@ export interface ChatGptCredentialInit {
   readonly earliestRefreshAt?: number;
 }
 
-/**
- * Mutable credential (mirrors the C# class: in-place `clearTokens` / field writes
+/*
+ * Mutable credential (the class: in-place `clearTokens` / field writes
  * are captured by the enclosing store transaction). The ID token is kept only as
  * an opaque authorization hint and is never decoded into a claimed identity.
  */
@@ -99,7 +99,7 @@ export class ChatGptCredential {
     this.scopes = [];
   }
 
-  /** Validate a token response and build a credential (C# `ChatGptCredential.FromToken`). */
+  /** Validate a token response and build a credential (`ChatGptCredential.FromToken`). */
   static fromToken(token: Record<string, unknown>, clientId: string, previous?: ChatGptCredential, nowMs: number = Date.now()): ChatGptCredential {
     const access = tokenString(token, "access_token");
     const refresh = tokenString(token, "refresh_token");
@@ -175,10 +175,10 @@ export class CredentialStore {
     }
   }
 
-  /**
-   * The single write path: login, logout and rotating refresh share this
-   * transaction. The lock is held across re-read → change → atomic replace.
-   */
+  /*
+ * The single write path: login, logout and rotating refresh share this
+ * transaction. The lock is held across re-read → change → atomic replace.
+ */
   async update(change: (data: ChatGptCredentials) => Promise<void> | void, signal?: AbortSignal): Promise<ChatGptCredentials> {
     const handle = await this.lock.acquire(this.lockPath, { signal });
     try {
@@ -257,7 +257,7 @@ function parseCredentials(raw: unknown): ChatGptCredentials {
   if (credentialRaw !== undefined) {
     credential = parseCredential(credentialRaw);
   } else {
-    // Legacy C# upgrade: { Accounts: [...], ActiveClientId: "..." }.
+    // Legacy upgrade: { Accounts: [...], ActiveClientId: "..." }.
     const accounts = pick(obj, "Accounts");
     const activeClientId = pick(obj, "ActiveClientId");
     if (Array.isArray(accounts) && typeof activeClientId === "string") {
@@ -307,7 +307,7 @@ function pickString(obj: Record<string, unknown>, ...keys: string[]): string | u
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
-/** Epoch-millis number, or an ISO date string (legacy C# DateTimeOffset). */
+/** Epoch-millis number, or an ISO date string (legacy DateTimeOffset). */
 function pickEpochMs(obj: Record<string, unknown>, ...keys: string[]): number | undefined {
   const value = pick(obj, ...keys);
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -319,7 +319,7 @@ function pickEpochMs(obj: Record<string, unknown>, ...keys: string[]): number | 
 }
 
 function isoToMs(value: string): number {
-  // JS Date.parse handles at most 3 fractional digits; C# writes 7.
+  // JS Date.parse handles at most 3 fractional digits; writes 7.
   const trimmed = value.replace(/\.(\d{3})\d*/, ".$1");
   return Date.parse(trimmed);
 }

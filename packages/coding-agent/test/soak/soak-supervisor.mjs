@@ -43,13 +43,9 @@ const diHome = join(runRoot, "di-home");
 mkdirSync(out, { recursive: true });
 mkdirSync(diHome, { recursive: true });
 
-let manifestCopy;
-let manifestSha256;
-if (args.manifest) {
-  manifestCopy = join(runRoot, "manifest.json");
-  copyFileSync(resolve(args.manifest), manifestCopy);
-  manifestSha256 = createHash("sha256").update(readFileSync(manifestCopy)).digest("hex");
-}
+const manifestCopy = join(runRoot, "manifest.json");
+copyFileSync(resolve(args.manifest ?? join(repo, "docs", "soak-thresholds.json")), manifestCopy);
+const manifestSha256 = createHash("sha256").update(readFileSync(manifestCopy)).digest("hex");
 
 const childArgs = [runner, "run", "--di-home", diHome, "--workspace", repo, "--out", out,
   "--run-id", runId, "--phase", args.phase ?? "full",
@@ -77,8 +73,8 @@ const supervisorRecord = {
   workspace: repo,
   artifactRoot: runRoot,
   diHome,
-  manifest: manifestCopy ?? null,
-  manifestSha256: manifestSha256 ?? null,
+  manifest: manifestCopy,
+  manifestSha256,
   childExecutable: process.execPath,
   childArgs,
 };

@@ -1,11 +1,11 @@
-/**
- * Minimal text I/O seams for the CLI dispatch shell (C# `TextReader` / `TextWriter`
- * counterparts at baseline 09f4e08). `CliApp` never touches the console: input,
+/*
+ * Minimal text I/O seams for the CLI dispatch shell (`TextReader` / `TextWriter`
+ * counterparts ). `CliApp` never touches the console: input,
  * output and TTY detection are injected, so the shell is replayable in any host
  * and testable without real stdio. `StringTextWriter` / `LineTextReader` /
  * `nullTextReader` are the in-memory implementations the tests (and simple hosts)
  * use; {@link createStdinReader} is the real stdin-backed reader the CLI bin
- * entry (P7a) uses.
+ * entry uses.
  */
 
 import { createInterface } from "node:readline";
@@ -43,7 +43,7 @@ export class StringTextWriter implements TextWriter {
   }
 }
 
-/** A reader over a fixed line list (mirrors C# `StringReader`). */
+/** A reader over a fixed line list (`StringReader`). */
 export class LineTextReader implements TextReader {
   private readonly lines: readonly string[];
   private index = 0;
@@ -60,17 +60,17 @@ export class LineTextReader implements TextReader {
   }
 }
 
-/** A reader that is immediately at EOF (C# `TextReader.Null`). */
+/** A reader that is immediately at EOF (`TextReader.Null`). */
 export const nullTextReader: TextReader = {
   async readLine(): Promise<string | null> {
     return null;
   },
 };
 
-/**
+/*
  * A real line reader over a Node readable stream (the CLI bin's stdin): lines are
  * buffered until read, `\r\n` / `\n` both terminate, EOF resolves `null`. The
- * returned `close()` releases the readline interface so a CLI process can exit
+ * returned `close` releases the readline interface so a CLI process can exit
  * naturally after a clean shutdown (RPC `shutdown` / EOF without a lingering
  * handle).
  */

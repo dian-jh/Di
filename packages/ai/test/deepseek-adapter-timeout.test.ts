@@ -5,8 +5,7 @@ import type { ModelRequest } from "@di/ai";
 import { DeepSeekAdapter, DeepSeekError } from "@di/ai";
 
 /**
- * P3 card 5 red list — DeepSeek adapter transport timeouts and connection
- * mapping (Di baseline `Core/Providers/DeepSeek/DeepSeekAdapter.cs` `SendAsync` +
+ *
  * `DeepSeekDefaults.RequestTimeoutSeconds`; models-and-auth.md §DeepSeek 协议边界
  * item 4). The header-wait timeout is NOT a total-duration timeout: it only
  * covers the phase before response headers arrive, and caller cancellation

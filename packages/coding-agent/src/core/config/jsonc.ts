@@ -1,11 +1,11 @@
 import { parse, printParseErrorCode } from "jsonc-parser";
 import type { ParseError } from "jsonc-parser";
 
-/**
+/*
  * JSONC parsing for config files.
  *
  * Config sources (user `config.json`, project `.di/config.json`, and the shipped
- * defaults) follow the C# baseline, where files are parsed with .NET's
+ * defaults) follow the, where files are parsed with.NET's
  * JsonConfigurationProvider, which tolerates comments and trailing commas. A pinned
  * JSONC parser (`jsonc-parser` 3.3.1, MIT) is used instead of a regex comment
  * stripper or strict JSON.parse — see operator-guide's new-dependency rule.

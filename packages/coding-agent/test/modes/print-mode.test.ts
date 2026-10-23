@@ -11,8 +11,7 @@ import { buildHost, FakeRunner, ErrorRunner, makeArgs, skill, ThrowingRunner } f
 import type { BuildHostOptions } from "./test-host.ts";
 
 /**
- * P6.3c card — print mode (headless text single shot), port of C# `Di.Cli.Tests/modes/PrintModeTests.cs`
- * at baseline 09f4e08 (the text half; the JSON half lives in json-mode.test.ts). The fake host uses a
+ *
  * real event bus + fake runner: prompt source (positional / stdin), streaming render (working status +
  * reasoning only under a TTY), session log best-effort, and the pessimistic failure paths (empty prompt,
  * runner throw, StopReason.Error).
@@ -167,7 +166,7 @@ test("Print_NoSession_SkipsWritingLog", async () => {
 // ---- skill 自动匹配（headless 与 REPL 同一共享计算） ----
 
 test("Print_AutoActivatesMatchingSkill_SetsActiveSkills", async () => {
-  const skills = [skill("backend-tests", "运行并修复后端测试（dotnet）。当用户要求运行测试、分析失败或修复测试时使用。", "1. dotnet build\n2. dotnet test")];
+  const skills = [skill("backend-tests", "运行并修复后端测试（TypeScript workspace）。当用户要求运行测试、分析失败或修复测试时使用。", "1. npm run build\n2. npm test")];
   const { code, runner } = await run({ positionals: ["跑一下后端测试"] }, nullTextReader, false, { skills });
 
   assert.equal(code, 0);
@@ -175,7 +174,7 @@ test("Print_AutoActivatesMatchingSkill_SetsActiveSkills", async () => {
 });
 
 test("Print_NoMatchingSkill_LeavesActiveSkillsEmpty", async () => {
-  const skills = [skill("backend-tests", "运行并修复后端测试（dotnet）。当用户要求运行测试、分析失败或修复测试时使用。")];
+  const skills = [skill("backend-tests", "运行并修复后端测试（TypeScript workspace）。当用户要求运行测试、分析失败或修复测试时使用。")];
   const { code, runner } = await run({ positionals: ["随便聊聊"] }, nullTextReader, false, { skills });
 
   assert.equal(code, 0);

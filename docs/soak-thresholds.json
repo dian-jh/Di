@@ -1,0 +1,31 @@
+{
+  "id": "P9-soak-manifest",
+  "frozenAtUtc": "2026-10-21T06:21:58Z",
+  "warmupRunId": "soak-2026-10-21T05-44-29-569Z",
+  "warmupWallMinutes": 35,
+  "warmupTurns": 5444,
+  "durationMinutes": 600,
+  "sampleIntervalSeconds": 30,
+  "resumeEveryTurns": 300,
+  "clearEveryTurns": 30,
+  "thresholds": {
+    "rss_max_delta_bytes": 20971520,
+    "handle_max_delta": 8,
+    "child_process_max": 1,
+    "child_sustained_max": 0,
+    "resume_p95_max_ms": 60000,
+    "turn_fail_max": 0,
+    "resume_fail_max": 0,
+    "wall_clock_min": 600
+  },
+  "fixedCandidateFailure": {
+    "sha": "46d58df854b8577f2a7cd239734d525bbe9863b4",
+    "wallClockMs": 36000346,
+    "turns": 98842,
+    "resumeSuccesses": 329,
+    "rssMaxDeltaBytes": 80384000,
+    "firstLastTwoHourPeakDeltaBytes": 76251136,
+    "resumeP95Ms": 9394,
+    "result": "failed: RSS limits exceeded; thresholds unchanged"
+  }
+}

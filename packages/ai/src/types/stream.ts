@@ -1,11 +1,11 @@
 import type { ModelResponse } from "./model.ts";
 
-/**
+/*
  * High-level model stream events emitted by `ChatModel.stream`
- * (from Di baseline `Core/Llm/IChatModel.cs` `ModelEvent`).
+ * (from `ModelEvent`).
  *
  * The low-level provider chunk vocabulary (`ProviderChunk`, `ProviderBlockStart`)
- * is added in the P3 stream-assembler unit per architecture.md; it never leaks
+ * is added in the stream-assembler unit per architecture.md; it never leaks
  * to the loop. `completed` is emitted exactly once per model call and carries
  * the full assembled {@link ModelResponse}.
  */

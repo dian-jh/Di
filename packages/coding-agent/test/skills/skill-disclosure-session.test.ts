@@ -7,7 +7,7 @@ import type { Skill } from "@di/coding-agent";
 import { AgentSession, LexicalSkillMatcher, computeSkillActivation } from "@di/coding-agent";
 
 /**
- * P6.2b disclosure gate — body injection reuses `AgentSession`'s volatile
+ *
  * request tail (turn-boundary read): the activation body reaches the model as a
  * volatile tail system message and NEVER enters persistent cross-turn history.
  * The activation-set computation is a pure function of (message, available
@@ -18,7 +18,7 @@ import { AgentSession, LexicalSkillMatcher, computeSkillActivation } from "@di/c
 const backendTests: Skill = {
   name: "backend-tests",
   description: "运行并修复后端测试。当用户要求运行测试、分析失败或修复测试时使用。",
-  instructions: "1. dotnet build\n2. dotnet test",
+  instructions: "1. npm run build\n2. npm test",
   metadata: {},
   allowedTools: [],
   disableModelInvocation: false,
@@ -69,7 +69,7 @@ test("computed activation body enters the volatile system context, never history
   const tail = request.messages[request.messages.length - 1]!;
   if (tail.role === "system") {
     assert.match(tail.text, /【已激活 Skill：backend-tests】/);
-    assert.match(tail.text, /1\. dotnet build/);
+    assert.match(tail.text, /1\. npm run build/);
   } else {
     assert.fail("expected the volatile skill body as the tail system message");
   }
@@ -77,7 +77,7 @@ test("computed activation body enters the volatile system context, never history
   // Persistent history holds only the trajectory (user + assistant): the volatile
   // skill body is never persisted across turns.
   assert.ok(
-    !session.history.some((m) => m.role === "system" && m.text.includes("dotnet build")),
+    !session.history.some((m) => m.role === "system" && m.text.includes("npm run build")),
     "skill instructions must not pollute persistent history",
   );
 });

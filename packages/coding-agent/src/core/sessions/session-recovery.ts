@@ -1,14 +1,13 @@
-/**
- * Recovery reader / validation + resume state machine (P5).
+/*
+ * Recovery reader / validation + resume state machine.
  *
- * docs/migration/typescript-core/sessions-and-compatibility.md §"原子性、恢复
- * 状态机与错误处理"; C# baseline `Core/Sessions/SessionRecovery.cs` `Load` plus
+ * 状态机与错误处理"; `Load` plus
  * the migration-mandated corrections:
- *  - unknown top-level / checkpoint record types are REJECTED with the line number
- *    (the C# baseline silently ignored them; a record may be completion evidence),
- *  - all field access failures normalize to line-numbered `SessionDataError`
- *    (never the C# baseline's raw `GetProperty` exceptions),
- *  - unknown content block types are rejected (`unknown-block`), never dropped.
+ * - unknown top-level / checkpoint record types are REJECTED with the line number
+ * (the silently ignored them; a record may be completion evidence),
+ * - all field access failures normalize to line-numbered `SessionDataError`
+ * (never the 's raw `GetProperty` exceptions),
+ * - unknown content block types are rejected (`unknown-block`), never dropped.
  *
  * Only a torn FINAL line (no LF) is silently dropped. Any complete LF line that
  * is malformed, out of order, duplicated, orphaned or mismatched rejects the
@@ -27,7 +26,7 @@ import { SessionDataError } from "./errors.ts";
 export const RECOVERY_NOT_EXECUTED_NOTE =
   "Recovery note: this tool call was not executed before the checkpoint. Decide whether it is still needed.";
 
-/**
+/*
  * Load the last recoverable trajectory from a session JSONL file.
  *
  * The whole file is validated; the recovered trajectory is rebuilt from the LAST
@@ -45,7 +44,7 @@ export function loadRecovery(path: string): AgentMessage[] {
   let lineNumber = 0;
 
   for (const line of completeLines(path)) {
-    if (line.trim().length === 0) continue; // blank lines are ignored (C# RemoveEmptyEntries)
+    if (line.trim().length === 0) continue; // blank lines are ignored (RemoveEmptyEntries)
     lineNumber += 1;
     const envelope = parseEnvelopeLine(line, lineNumber);
     const payload = envelope.payload;

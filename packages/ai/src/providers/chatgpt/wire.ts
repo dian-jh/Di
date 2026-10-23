@@ -1,12 +1,10 @@
-/**
- * ChatGPT Responses wire DTOs (Di baseline
- * `Core/Providers/ChatGpt/ChatGptAdapter.cs` + `ChatGptTranslator.cs`).
+/*
+ * ChatGPT Responses wire DTOs.
  *
- * Provider-internal transport objects only — they never leak into the unified
- * vocabulary in `src/types/*`. The request mirrors the C# `JsonObject` field
- * order (`store:false`, `stream:true`, no `previous_response_id`); unset fields
- * are omitted (never `null` / `[]` / `""`), keeping the byte-stable request
- * prefix cacheable (models-and-auth.md §Responses wire 与 SSE).
+ * These provider-internal transport objects are translated into the shared
+ * vocabulary in `src/types/*`. Request fields are serialized in declared order;
+ * unset values are omitted, and the fixed stateless settings (`store:false`,
+ * `stream:true`, no `previous_response_id`) keep the request prefix stable.
  */
 
 /** Streaming Responses request body. Field order is fixed by `serializeRequest`. */
@@ -43,7 +41,7 @@ export interface ChatGptWireTool {
   readonly strict: boolean;
 }
 
-/**
+/*
  * One Responses `input` item. Conversation turns use `role` (developer/user/
  * assistant); function call protocol items use `type`. Replayed raw output items
  * (message/reasoning/…) stay verbatim through the catch-all member — never

@@ -1,5 +1,5 @@
-/**
- * Tool schema vocabulary (from Di baseline `Core/Llm/ChatTool.cs`).
+/*
+ * Tool schema vocabulary.
  *
  * Only the model-facing schema lives here; executors/validators belong to
  * @di/agent. `parameters` is a JSON Schema object carried as data.

@@ -1,10 +1,10 @@
 import type { SlashCommand } from "./slash-command.ts";
 
-/**
+/*
  * Slash command registry (Pi's `SlashCommands` service): register / list /
- * resolve by name. Duplicate registration throws (unique names); `list()`
+ * resolve by name. Duplicate registration throws (unique names); `list`
  * returns the commands sorted by name for /help and the TUI command menu.
- * Mirrors `Di.Cli/Commands/SlashCommandRegistry.cs` at baseline 09f4e08
+ *
  * (`StringComparer.Ordinal` == JS UTF-16 code-unit string ordering).
  */
 export class SlashCommandRegistry {
@@ -57,7 +57,7 @@ export class SlashCommandRegistry {
   }
 }
 
-/** Ordinal (UTF-16 code-unit) comparison — C# `StringComparer.Ordinal`, NOT locale ordering. */
+/** Ordinal (UTF-16 code-unit) comparison —, NOT locale ordering. */
 function ordinalCompare(a: string, b: string): number {
   if (a < b) return -1;
   if (a > b) return 1;

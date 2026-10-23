@@ -23,10 +23,8 @@ import type {
   ChatGptWireUserContentPart,
 } from "./wire.ts";
 
-/**
- * ChatGPT Responses ↔ unified vocabulary translation (Di baseline
- * `Core/Providers/ChatGpt/ChatGptTranslator.cs` + `ChatGptAdapter.cs` wire
- * handling; models-and-auth.md §"Responses wire 与 SSE").
+/*
+ * ChatGPT Responses ↔ unified vocabulary translation.
  *
  * Request side: {@link toWireRequest} maps the internal AgentMessage/ToolSpec
  * history onto the stateless Responses DTO (`store:false`, `stream:true`, full
@@ -34,8 +32,7 @@ import type {
  * Di namespace). Explicitly-unsupported sampling/penalty/max-token/stop options
  * throw `UNSUPPORTED_OPTION` before anything is sent. Terminal `response.output`
  * is preserved as an opaque `chatgpt.output` block and replayed verbatim in
- * later history; legacy histories without raw output follow the C#-compatible
- * replay path (encrypted `chatgpt.reasoning` items first, then normalized
+ * later history; legacy histories without raw output follow the * replay path (encrypted `chatgpt.reasoning` items first, then normalized
  * output_text/function_call items — display blocks are never re-sent).
  *
  * Response side: {@link createChatGptTranslator} is a stateful closure plugged
@@ -51,16 +48,14 @@ import type {
 export const chatgptDefaults = {
   baseUrl: "https://api.openai.com/v1",
   responsesPath: "/responses",
-  /**
-   * Response-header wait timeout in seconds (C# `ChatGptAdapter.SendAsync`
-   * `TimeSpan.FromMinutes(2)`): the server must start responding within this
-   * window or the request fails with a retryable `TIMEOUT`. Not a total-duration
-   * timeout; a long stream is bounded only by `idleTimeoutMs` between SSE frames.
-   */
+  /*
+ * Maximum wait for response headers, in seconds. Once headers arrive, the body
+ * is governed separately by the SSE idle timeout between frames.
+ */
   requestTimeoutSeconds: 120,
 } as const;
 
-/** Stable, machine-readable error codes (mirrors `Core/Llm/LlmErrorCodes.cs`). */
+/** Stable, machine-readable error codes. */
 export const chatgptErrorCodes = {
   missingCredential: "MISSING_CREDENTIAL",
   unsupportedOption: "UNSUPPORTED_OPTION",
@@ -76,7 +71,7 @@ export const chatgptErrorCodes = {
 // Request side
 // ---------------------------------------------------------------------------
 
-/**
+/*
  * Map a unified {@link ModelRequest} onto the ChatGPT Responses wire DTO.
  * `model` is the provider model id bound to the adapter. Unsupported sampling /
  * penalty / max-token / stop options are rejected before sending; unset fields
@@ -101,7 +96,7 @@ export function toWireRequest(
     });
   }
 
-  // "default" means "use the model's default effort" → omit (C# model-selection
+  // "default" means "use the model's default effort" → omit (model-selection
   // strips the explicit override before it reaches the translator).
   const hasTools = request.tools !== undefined && request.tools.length > 0;
   return {
@@ -124,7 +119,7 @@ export function toWireRequest(
               tools: request.tools.map(toWireTool),
             },
           ],
-          // C# `ChatToolChoice.Auto` is the default; `tool_choice` is sent only with tools.
+          // `ChatToolChoice.Auto` is the default; `tool_choice` is sent only with tools.
           toolChoice: "auto",
         }
       : {}),
@@ -278,9 +273,8 @@ function isOpaqueBlock(block: ContentBlock): block is OpaqueBlock {
 }
 
 /**
- * Serialize a wire request to byte-stable JSON in the C# `JsonObject` field
- * order, so unset fields never appear as `null`/`[]` and the request prefix
- * stays cacheable.
+ * Serialize request fields in their declared wire order. Optional fields are
+ * omitted when unset, keeping the JSON prefix stable for cache affinity.
  */
 export function serializeRequest(wire: ChatGptWireRequest): string {
   const body: Record<string, unknown> = {
@@ -321,12 +315,11 @@ function serializeToolNamespace(namespace: ChatGptWireToolNamespace): Record<str
  * one stream. Stateful (blocks open across events) and plugs into the P3.2
  * `TranslateEvent` seam of `sseToModelEvents`.
  *
- * Block index allocation keeps the C# assembler's final content order
- * (reasoning → text → tool calls → opaque): reasoning summary = 0, text = 1,
- * tool call per `output_index` = 2.., opaque blocks are allocated last at the
- * terminal event. All text deltas merge into one text block and all reasoning
- * deltas into one reasoning block (the C# adapter uses a single accumulator for
- * each).
+ * Indices are assigned in first-seen order: one block accumulates text and
+ * refusal deltas, one accumulates reasoning-summary deltas, and each function
+ * call gets a block keyed by `output_index`. At a terminal event, the translator
+ * closes those blocks, appends the full output (or preserved reasoning items)
+ * as opaque content, then emits usage and the finish reason.
  */
 export function createChatGptTranslator(): TranslateEvent {
   let responseIdEmitted = false;
@@ -444,8 +437,7 @@ export function createChatGptTranslator(): TranslateEvent {
         return out;
       }
       case "error": {
-        // In-band error: close any open blocks (C# keeps the accumulated deltas)
-        // and finish with an error — never a success stop.
+        // Close accumulated content before reporting the in-band error finish.
         closeContentBlocks(out);
         out.push({ type: "finish", reason: { type: "error", failure: failureOf(payload) } });
         return out;
@@ -494,12 +486,9 @@ function mapTerminalFinish(type: string, result: ChatGptWireResponse | undefined
 }
 
 /**
- * Map wire usage onto {@link TokenUsage} (C# `ChatGptAdapter.StreamAsync`).
- * Per-field normalization, matching the C# adapter exactly:
- * `input_tokens` and `output_tokens` default to 0, `cached_tokens` defaults to 0
- * (so `cacheReadTokens` is always present), while `cache_write_tokens`,
- * `total_tokens` and `reasoning_tokens` stay nullable — nullable fields are
- * never blanket zero-filled.
+ * Map wire usage onto {@link TokenUsage}. Missing input, output, and cached
+ * counts default to zero; cache-write, total, and reasoning counts stay optional.
+ * Input tokens exclude cached and written counts, with a zero floor.
  */
 export function mapUsage(usage: ChatGptWireUsage): TokenUsage {
   const inputTokens = usage.input_tokens ?? 0;
@@ -517,7 +506,7 @@ export function mapUsage(usage: ChatGptWireUsage): TokenUsage {
   };
 }
 
-/** Build an {@link LlmFailure} from an error/incomplete-details record (C# `Failure`). */
+/** Build an {@link LlmFailure} from a provider error or incomplete-details record. */
 function failureOf(error: unknown): LlmFailure {
   if (isRecord(error)) {
     return {
@@ -606,11 +595,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 /**
- * Map a non-2xx HTTP error onto a structured {@link LlmFailure} (C#
- * `ChatGptAdapter.SendAsync`): preserves the status, the raw body (in the
- * message), the `x-request-id` and Retry-After. The body's `error.code` wins;
- * otherwise the failure is `INVALID_REQUEST`. Retry classification happens in
- * the provider-neutral policy (status 408/429/5xx).
+ * Map a non-2xx HTTP response to a structured {@link LlmFailure}. The message
+ * retains the status, request id, and raw body; `error.code` is used when
+ * present, otherwise the code is `INVALID_REQUEST`. Status and Retry-After are
+ * preserved for provider-neutral retry classification.
  */
 export function mapHttpErrorBody(
   status: number,

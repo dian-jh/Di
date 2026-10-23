@@ -1,8 +1,7 @@
-/**
- * Session format / recovery state-machine failure classes (P5).
+/*
+ * Session format / recovery state-machine failure classes.
  *
- * docs/migration/typescript-core/sessions-and-compatibility.md §"原子性、恢复
- * 状态机与错误处理": the migration must normalize the C# baseline's low-level
+ * 状态机与错误处理": the migration must normalize the 's low-level
  * `GetProperty` exceptions into line-numbered `InvalidData`-style errors, reject
  * unknown top-level/checkpoint records (never skip them as audit noise), and fail
  * closed on any started tool whose outcome is unknown. Codes map 1:1 to the

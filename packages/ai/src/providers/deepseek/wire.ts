@@ -1,12 +1,10 @@
-/**
- * DeepSeek chat/completions wire DTOs (Di baseline
- * `Core/Providers/DeepSeek/DeepSeekChatRequest.cs` + `DeepSeekChatResponse.cs`).
+/*
+ * DeepSeek chat/completions wire DTOs.
  *
- * Provider-internal transport objects only — they never leak into the unified
- * vocabulary in `src/types/*`. The request DTO mirrors the C# serializer's
- * snake_case wire; unset fields are omitted (never `null` / `[]` / `""`), which
- * keeps the byte-stable request prefix cacheable (models-and-auth.md §DeepSeek
- * 协议边界 item 3).
+ * These provider-internal transport objects are translated into the shared
+ * vocabulary in `src/types/*`. Request fields use the provider's snake_case
+ * names and declared wire order; unset values are omitted so the prefix remains
+ * stable for caching.
  */
 
 /** Streaming request body. Field order on the wire is fixed by `serializeRequest`. */

@@ -59,7 +59,7 @@ describe("RpcClient：TS 后端 launcher 注入接缝", () => {
 
   it("launcher 优先于 bin/args（不按 bin spawn）", async () => {
     const client = new RpcClient({
-      bin: "C:\\nonexistent\\di.exe", // 若错误地按 bin spawn，connect 会失败
+      bin: "C:\\nonexistent\\backend", // 若错误地按 bin spawn，connect 会失败
       args: ["--mode", "rpc"],
       launcher: { bin: process.execPath, args: [SCENARIO_BACKEND] },
       env: { ...process.env },

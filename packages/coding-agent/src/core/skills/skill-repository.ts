@@ -3,14 +3,14 @@ import { basename, dirname, join } from "node:path";
 import { parseSkillMarkdown } from "./skill-markdown.ts";
 import { SkillFormatError, type Skill } from "./skill.ts";
 
-/**
+/*
  * Skill 仓库：发现 + 合并。来源按优先级有序：后面的源覆盖前面同名的
  * （具体环境优先，与配置分层同一心智）。单源内同名冲突（目录式 × 扁平式）告警，
  * 不静默覆盖。无效 skill（解析失败 / 读盘失败）跳过并回调告警，绝不让启动失败。
  *
- * 镜像 `Core/Skills/SkillRepository.cs`（baseline 09f4e08）。发现规则：
+ * 镜像 （）。发现规则：
  * <root>/<name>/SKILL.md（MS 规范目录式）或 <root>/<name>.md（扁平式，
- * 对齐 Pi 的 .pi/skills/*.md 惯例）。frontmatter 的 name 必须与父目录名 / 文件
+ * 对齐 Pi 的.pi/skills/*.md 惯例）。frontmatter 的 name 必须与父目录名 / 文件
  * 基名一致，否则该 skill 跳过并告警。目录式先加载、扁平式后加载：同源同名时扁平
  * 覆盖目录式（顺序确定性）；跨源覆盖是设计好的优先级，不告警。
  */
@@ -97,7 +97,7 @@ function addSkill(
 
 /** 枚举顺序确定：目录式与扁平式分组内按名称排序（同名结果不受影响，仅稳定告警顺序）。 */
 
-/** <dir> 存在且是目录（镜像 C# Directory.Exists 对文件路径返回 false）。 */
+/** <dir> 存在且是目录（镜像 Directory.Exists 对文件路径返回 false）。 */
 function isDirectory(dir: string): boolean {
   try {
     return statSync(dir).isDirectory();
@@ -106,12 +106,12 @@ function isDirectory(dir: string): boolean {
   }
 }
 
-/** Windows 上 .md 后缀大小写不敏感（镜像 C# EnumerateFiles("*.md") 的行为）。 */
+/** Windows 上.md 后缀大小写不敏感（镜像 EnumerateFiles("*.md") 的行为）。 */
 function isMarkdownFile(name: string): boolean {
   return process.platform === "win32" ? /\.md$/i.test(name) : name.endsWith(".md");
 }
 
-/** 跳过范围对齐 C#：SkillFormatError + 文件系统错误（IOException/UnauthorizedAccess）。 */
+/** 跳过范围对齐 ：SkillFormatError + 文件系统错误（IOException/UnauthorizedAccess）。 */
 function isSkippableError(err: unknown): boolean {
   if (err instanceof SkillFormatError) return true;
   return (

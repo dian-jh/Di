@@ -100,7 +100,7 @@ rl.on("line", (line) => {
           type: "command_error",
           code: "turn_not_supported",
           message: "回合型命令",
-          turn_message: `【Skill：${skillName}】跑后端测试\n\ndotnet test\n\n${rest.join(" ")}`,
+          turn_message: `【Skill：${skillName}】跑后端测试\n\nnpm test\n\n${rest.join(" ")}`,
         });
       } else if (params.name === "exit") {
         write({ type: "command_ran", name: "exit", lines: [], exit: true });

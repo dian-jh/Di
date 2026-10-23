@@ -9,8 +9,7 @@ import {
 } from "@di/coding-agent";
 
 /**
- * P6.3b card — skill evaluator metrics (port of C# `Di.Tests/Skills/SkillEvaluatorTests.cs`
- * at baseline 09f4e08): precision / recall / no-match rate / average context
+ *
  * tokens over a labeled case set (trigger tests + exclusion tests).
  */
 

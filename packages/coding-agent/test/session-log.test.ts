@@ -8,9 +8,7 @@ import type { AgentResult } from "@di/agent";
 import { SessionStore } from "@di/coding-agent";
 
 /**
- * P5 JSONL checkpoint writer (docs/migration/typescript-core/sessions-and-compatibility.md
- * §"Di 文件布局与逐行 envelope" / §"实时 checkpoint record 与完整示例"; C#
- * baseline `Core/Sessions/SessionLog.cs` `StartSession` / `BeginCheckpointTurn` /
+ *
  * `AppendCheckpointMessage` / `CheckpointToolStarted` / `CheckpointToolCompleted` /
  * `CompleteCheckpointTurn` / `AppendTurn` / `AppendFailure`).
  *
@@ -18,7 +16,7 @@ import { SessionStore } from "@di/coding-agent";
  * turns; Chinese content is written as raw UTF-8 (no replacement char); the
  * checkpoint tool-started record is durable BEFORE any tool can run; the tool
  * result and its completion marker share one atomic JSONL line; the audit turn
- * sequence and the failure sequence mirror the C# writer byte-for-byte in shape.
+ *
  */
 
 interface JsonRecord {

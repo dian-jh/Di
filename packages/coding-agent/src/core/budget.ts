@@ -5,17 +5,17 @@ function isReasoningBlock(block: ContentBlock): block is ReasoningBlock {
   return block.type === "reasoning";
 }
 
-/**
+/*
  * Cross-turn memory / budget estimation helpers (pure; no Node Buffer or file API).
  *
- * Mirrors the Di baseline `Core/AgentLoop/AgentRunner.cs` `EstimateTokens` +
- * `Core/Llm/TokenEstimator.cs`: a rough ~4 characters/token estimate over each
+ * the `EstimateTokens` +
+ *: a rough ~4 characters/token estimate over each
  * message's visible text (plus assistant reasoning). This feeds the budget
  * tracker and history trimming — it is an approximate heuristic, never a provider
  * tokenizer's exact count (loop-and-state.md §AgentSession 历史与恢复).
  */
 
-/** Rough token estimate for one text (C# `TokenEstimator.Estimate`): ceil(len / 4). */
+/** Rough token estimate for one text (`TokenEstimator.Estimate`): ceil(len / 4). */
 export function estimateTokenCount(text: string): number {
   return text === "" ? 0 : Math.ceil(text.length / 4);
 }
@@ -36,8 +36,8 @@ export function estimateMemoryTokens(messages: readonly AgentMessage[]): number 
   return total;
 }
 
-/**
- * B_current shared holder (C# `Core/ContextManagement/InputBudgetTracker.cs`).
+/*
+ * B_current shared holder.
  * The session updates it with ESTIMATED values (never billed usage): before each
  * tool execution with the current turn's accumulated trajectory, and at turn end
  * with the trimmed cross-turn memory. Pure state; no IO.

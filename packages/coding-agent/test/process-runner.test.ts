@@ -7,11 +7,7 @@ import { join } from "node:path";
 import { OUTPUT_MAX_BYTES, runProcess } from "@di/coding-agent";
 
 /**
- * P4.4 card 8: one-shot process execution.
  *
- * Ports the red list from the P4.4 card (docs/migration/typescript-core/progress.md)
- * against `Core/Tools/ProcessRunner.cs` at baseline 09f4e08 and the
- * P4-win-process-probe conclusions: unified AbortSignal + timeout lifecycle,
  * stdout + stderr drained in parallel into one bounded byte ring (head 6000 /
  * tail 18000 with a truncation notice), non-zero exit code is observation text
  * (never a throw), timeout returns `error:` + bounded partial, external abort

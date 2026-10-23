@@ -12,7 +12,7 @@ import {
 import { FakeAdapter, FakeModelService, RecordingHost, testSkill } from "./test-doubles.ts";
 
 /**
- * P6.3a card — builtin commands (port of C# `BuiltinCommandsTests.cs`): the
+ *
  * mode-agnostic handler set (exit/help/clear/model/thinking/usage/skills/skill)
  * reached only through the {@link CommandContext} — REPL and RPC share the same
  * registered content.
@@ -171,7 +171,7 @@ test("skill with args runs turn without pinning", async () => {
   assert.equal(result.exit, false);
   assert.ok(result.turnMessage !== undefined);
   assert.ok(result.turnMessage!.includes("【Skill：backend-tests】"));
-  assert.ok(result.turnMessage!.includes("dotnet test"));
+  assert.ok(result.turnMessage!.includes("npm test"));
   assert.ok(result.turnMessage!.includes("帮我补测试"));
   assert.ok(!pinned.includes(testSkill)); // one-shot execution does not pin
   assert.deepEqual(turns, []); // the host executes the turn; the command itself does not

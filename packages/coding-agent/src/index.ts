@@ -1,4 +1,4 @@
-/**
+/*
  * @di/coding-agent — Node host composition root.
  *
  * Public TypeScript host package: AgentSession, tools, skills, session/config/auth
@@ -74,7 +74,7 @@ export type {
   SessionTurnOptions,
 } from "./core/agent-session.ts";
 
-// P5 sessions: JSONL checkpoint codec / writer / recovery / stats.
+// sessions: JSONL checkpoint codec / writer / recovery / stats.
 export { SessionDataError } from "./core/sessions/errors.ts";
 export type { SessionErrorCode } from "./core/sessions/errors.ts";
 export {
@@ -102,9 +102,9 @@ export {
 } from "./core/history.ts";
 export { buildEnvironmentSnapshot } from "./core/environment-snapshot.ts";
 
-// P6.2a + P6.2b skills: SKILL.md frontmatter parsing, repository discovery and
-// same-source conflict resolution (P6.2a); matching, activation, disclosure
-// (advertise + load_skill) and metadata handling (P6.2b).
+// + skills: SKILL.md frontmatter parsing, repository discovery and
+// same-source conflict resolution; matching, activation, disclosure
+// (advertise + load_skill) and metadata handling.
 export {
   MAX_SKILL_DESCRIPTION_LENGTH,
   MAX_SKILL_NAME_LENGTH,
@@ -132,9 +132,9 @@ export {
   renderLoadedSkill,
 } from "./core/skills/skill-tools.ts";
 
-// P6.3b CLI: pure argument parsing, mode resolution, the dispatch shell and the
+// CLI: pure argument parsing, mode resolution, the dispatch shell and the
 // non-interactive modes (version/info/help/list-models/stats/skill-eval), plus the
-// `auth chatgpt` command resolution that fails closed on the P8b platform gate.
+// `auth chatgpt` command resolution that fails closed on the platform gate.
 export {
   CliArgsParser,
 } from "./cli/args.ts";
@@ -152,7 +152,7 @@ export { createDefaultProviderRuntime } from "./cli/provider-runtime.ts";
 export type { DefaultProviderRuntimeOptions } from "./cli/provider-runtime.ts";
 export { AUTH_CHATGPT_NOT_AVAILABLE, AUTH_USAGE, defaultChatGptStore, runAuthCommand } from "./cli/auth-command.ts";
 
-// P8b host ChatGPT auth: OAuth PKCE, the credential store with its fail-closed
+// host ChatGPT auth: OAuth PKCE, the credential store with its fail-closed
 // lock seam, the ACL adapter and the LockProvider interface. The default lock
 // provider fails closed (no approved real OS-advisory-lock adapter yet); the
 // transaction logic (lock → re-read → refresh → validate → atomic replace) is
@@ -177,7 +177,7 @@ export {
   CHATGPT_TOKEN_URL,
 } from "./core/auth/constants.ts";
 
-// P6.3c modes + output contracts: event bus / renderer, the interactive (REPL +
+// modes + output contracts: event bus / renderer, the interactive (REPL +
 // TUI launcher) / print / json / rpc mode bodies, the session-runner seam and the
 // host extension (command registry / AgentSession-backed runner / session store /
 // currentModel + reasoning seams).
@@ -186,7 +186,7 @@ export type { EventHandler } from "./core/events/event-bus.ts";
 export type { LogEvent, ModelCallStartedEvent, RunStartedEvent } from "./core/events/log-events.ts";
 export { ModelCallProbe } from "./core/events/model-call-probe.ts";
 
-// P6.4 run logging: per-day lifecycle log (DiLog + DiLogOptions + LogLevel) and
+// run logging: per-day lifecycle log (DiLog + DiLogOptions + LogLevel) and
 // the ProcessDiagnostics static hook (default no-op; host wires it to DiLog).
 export { DiLog, LogLevel, redactSensitive } from "./core/logging/di-log.ts";
 export type { DiLogOptions } from "./core/logging/di-log.ts";
@@ -202,7 +202,7 @@ export { runRpcMode } from "./modes/rpc-mode.ts";
 export { DEFAULT_REPL_OPTIONS, Repl, runInteractive, runInteractiveLocal, tryLaunchLocalTui } from "./modes/repl.ts";
 export type { ReplOptions } from "./modes/repl.ts";
 
-// P9 in-process TUI runner: the LocalAgentRunnerAdapter converts Core
+// in-process TUI runner: the LocalAgentRunnerAdapter converts Core
 // AgentEvent/AgentResult → protocol wire RpcAgentEvent/RpcAgentResult (the ONLY
 // conversion point; shared with --mode rpc via modes/wire.ts). The adapter
 // implements di-tui's RunnerPort; the CLI interactive mode hands it to
@@ -211,13 +211,13 @@ export { LocalAgentRunnerAdapter } from "./adapters/tui-runner.ts";
 export { TUI_DEFAULT_RELATIVE_ENTRY, tryLaunchTui } from "./modes/tui-launcher.ts";
 export type { TuiDecision, TuiLauncherContext } from "./modes/tui-launcher.ts";
 
-// P6.3b skills: labeled case loader + matcher quality/cost metrics (--skill-eval).
+// skills: labeled case loader + matcher quality/cost metrics (--skill-eval).
 export { loadSkillCases } from "./core/skills/skill-case-loader.ts";
 export type { SkillTestCase } from "./core/skills/skill-case-loader.ts";
 export { evaluateSkillSet } from "./core/skills/skill-evaluator.ts";
 export type { SkillMetrics } from "./core/skills/skill-evaluator.ts";
 
-// P6.3a commands: builtin slash command registry, user command Markdown/loader
+// commands: builtin slash command registry, user command Markdown/loader
 // and model selection (provider/model resolution + reasoning tier).
 export {
   MAX_COMMAND_DESCRIPTION_LENGTH,

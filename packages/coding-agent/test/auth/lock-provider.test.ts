@@ -8,11 +8,10 @@ import { CredentialStore, FAIL_CLOSED_LOCK_PROVIDER, LockUnavailableError, type 
 import { mockLockProvider, noopAcl } from "./test-doubles.ts";
 
 /**
- * P8b — LockProvider seam.
  *
  * The migration contract (models-and-auth.md §OAuth PKCE、轮换与原子凭据写入) mandates a
  * real OS advisory lock (Windows LockFileEx / POSIX flock) held across read →
- * refresh → atomic replace. The P8-auth-storage probe proved no pure-JS
+ *
  * cross-platform adapter is acceptable (proper-lockfile/lockfile are mkdir/TTL —
  * forbidden; fs-ext needs a native node-gyp build, not distributed), so the
  * CONTRACT-MANDATED default is FAIL CLOSED: acquire() rejects with a recoverable
@@ -96,7 +95,7 @@ test("the mock lock serializes concurrent acquisitions (cross-process stand-in)"
     handles.push(h);
     acquired.push(1);
   });
-  // p2 must not resolve until p1 releases.
+
   const p2 = lock.acquire("x").then((h) => {
     handles.push(h);
     acquired.push(2);

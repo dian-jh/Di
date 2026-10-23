@@ -16,18 +16,17 @@ import {
 import { RecordingExecutor } from "./recording-executor.ts";
 
 /**
- * Cross-language fixture tests (P1.2).
  *
  * Every fixture in the repo-root `fixtures/` directory must satisfy the
  * documented schema, and the tool-round-trip fixture must be drivable through
  * the recording executor to prove recording/replay works. Expected values are
- * derived from the C# baseline tests at 09f4e08 — never from generated output.
+ *
  */
 
 const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const FIXTURES_DIR = path.join(REPO_ROOT, "fixtures");
 
-/** Minimal required scenario set per execution-plan.md P1 item 5. */
+
 const REQUIRED_SCENARIOS = [
   "pure-answer",
   "tool-round-trip",

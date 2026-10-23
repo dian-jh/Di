@@ -14,11 +14,9 @@ import {
 const GREP_MAX_BYTES_FOR_TEST = 1 << 20;
 
 /**
- * P4.3 card 3: grep tool (regex search over enumerated files).
  *
- * Ports Di.Tests/Tools/GrepToolTests.cs at baseline 09f4e08 and adds the red
  * cases from tools-and-platform.md §".NET 与 JavaScript 搜索语义差异" + the
- * P4-regex-probe worker findings: every bounded regex job runs in a
+ *
  * worker_threads Worker, a pathological (catastrophic-backtracking) pattern is
  * terminated via worker.terminate() (never a hang), abort terminates the worker
  * and rejects with AbortError, ignore_case/literal/context/glob options, OEM vs
@@ -45,7 +43,7 @@ function run(args: unknown, signal?: AbortSignal, options?: GrepToolOptions) {
   return createGrepTool(base, options).execute(JSON.stringify(args), signal);
 }
 
-// ---- ported C# Di.Tests/Tools/GrepToolTests.cs ----
+
 
 test("matches return file path, line number and content", async () => {
   write("a.txt", "alpha\nbeta\nalpha again");
@@ -395,7 +393,7 @@ test("GBK (OEM 936) encoded content is matched via OEM decode", async () => {
 // ---- edge args ----
 
 test("context windows with close matches do not duplicate lines", async () => {
-  // C# ScanWithContext dedup: hits at lines 3 and 4 with context 2 emit windows
+  // Adjacent hits with context 2 emit deduplicated windows.
   // [1..5] then [6..6]. The second match line (4) is rendered once as a context
   // line of the first window (`a.txt-4-`), never re-emitted with its own `:`.
   write("a.txt", "one\ntwo\nthree\nfour\nfive\nsix\nseven");
@@ -411,7 +409,7 @@ test("context windows with close matches do not duplicate lines", async () => {
   assert.ok(!lines.some((l) => l.startsWith("a.txt-7")), "window should stop at line 6");
 });
 
-test("limit of zero clamps to one result (C# Math.Max(1, limit))", async () => {
+test("limit of zero clamps to one result)", async () => {
   // Scoped so leftover "hit" files from the scan-budget test cannot satisfy the
   // clamp before this file does.
   write("clamp/a.txt", "hit\nhit\nhit\n");

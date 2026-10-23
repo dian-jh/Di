@@ -15,7 +15,7 @@ import {
 import { RecordingHost } from "./test-doubles.ts";
 
 /**
- * P6.3a card — user-command loader (port of C# `CommandLoaderTests.cs`):
+ *
  * `~/.di/commands/*.md → registry`; temp-directory style mirrors
  * `SkillRepositoryTests` (invalid-file warn-skip / duplicate-name warn-skip /
  * missing directory never crashes).

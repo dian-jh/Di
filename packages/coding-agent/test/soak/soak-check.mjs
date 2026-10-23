@@ -1,12 +1,9 @@
 #!/usr/bin/env node
 /**
- * P9-release-install-rollback — soak gate checker.
- *
- * Reads the frozen threshold manifest (docs/migration/typescript-core/probes/
- * P9-soak-manifest.json) plus a run's samples.jsonl and status.json, evaluates
+ * Reads the frozen threshold manifest in docs/soak-thresholds.json and evaluates
  * every gate and prints PASS/FAIL per gate plus an overall verdict with the
  * exact observed numbers. Used at 10h completion; the manifest is frozen BEFORE
- * the soak and is never adjusted by results (validation-and-release.md §47-55).
+ * the soak and is never adjusted by results (docs/typescript-validation.md §47-55).
  *
  * Gates (each threshold frozen in the manifest after the >=30-min warm-up):
  *   rss_max_delta_bytes   max(rss_bytes) - baseline rss <= delta
@@ -15,13 +12,14 @@
  *   os_handle_max_delta   optional: max(os_handle_count) - baseline <= delta; missing samples fail
  *   child_process_max     max(active_children) per sample <= this
  *   child_sustained_max   no 2 consecutive samples above this sustained level
- *   resume_p95_max_ms     p95(resume_parent_ms) <= this
+ *
  *   turn_fail_max         total failed turns == this (0 = none tolerated)
  *   resume_fail_max       total failed resume children == this (0 = none)
  *   wall_clock_min        completed wall-clock >= this (600 for the 10h gate)
  *
  * Usage:
- *   node soak-check.mjs --manifest <P9-soak-manifest.json> \
+ *
+ *   node soak-check.mjs --manifest <docs/soak-thresholds.json> \
  *       --samples <samples.jsonl> --status <status.json>
  */
 
@@ -46,7 +44,8 @@ function readJson(path) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const manifest = readJson(args.manifest);
+const defaultManifest = new URL("../../../../docs/soak-thresholds.json", import.meta.url);
+const manifest = readJson(args.manifest ?? defaultManifest);
 const samples = readFileSync(args.samples, "utf8")
   .trim()
   .split("\n")
@@ -84,7 +83,7 @@ const resumeP95 =
   resumeMs.length > 0
     ? [...resumeMs].sort((a, b) => a - b)[Math.floor(resumeMs.length * 0.95)]
     : 0;
-// Monotonic-growth criterion (validation-and-release.md 53: "多个采样窗口单调增长").
+// Monotonic-growth criterion (docs/typescript-validation.md 53: "多个采样窗口单调增长").
 // Compare max RSS over the first vs last 2h of samples; drift beyond the frozen
 // rss delta is a gate failure even when the absolute max is still under budget.
 const first2hMax = Math.max(...samples.filter((s) => s.uptime_ms <= 2 * 3600_000).map((s) => s.rss_bytes));

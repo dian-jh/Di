@@ -5,8 +5,7 @@ import { join } from "node:path";
 import { DiHome } from "@di/coding-agent";
 
 /**
- * DI_HOME resolution (P6.1 card 1). Mirrors `Core/Configuration/DiHome.cs` at
- * baseline 09f4e08: DI_HOME env wins, blank/whitespace falls back to
+ *
  * <userHome>/.di, non-blank values are used verbatim (no absolute normalization).
  */
 test("DI_HOME blank (undefined/empty/whitespace) falls back to <userHome>/.di", () => {
@@ -23,7 +22,7 @@ test("DI_HOME absolute root is used verbatim", () => {
   assert.equal(home.rootDirectory, root);
 });
 
-test("DI_HOME relative root is preserved (C# does not normalize to absolute)", () => {
+test("DI_HOME relative root is preserved", () => {
   const home = DiHome.fromEnvironment({ DI_HOME: "relative-root" }, join("C:", "Users", "tester"));
   assert.equal(home.rootDirectory, "relative-root");
 });

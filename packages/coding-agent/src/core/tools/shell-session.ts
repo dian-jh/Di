@@ -12,8 +12,8 @@ import {
 import { BoundedByteBuffer } from "./output-buffer.ts";
 import { killProcessTree, PROCESS_KILL_BUDGET_MS, ProcessResult } from "./process-runner.ts";
 
-/**
- * Persistent terminal session (port of `Core/Tools/ShellSession.cs` at 09f4e08):
+/*
+ * Persistent terminal session:
  * one long-lived shell process driven through stdin/stdout where cwd, environment
  * variables and virtual-env state survive across calls. Every command is followed
  * by a random per-session marker + exit-code line that bounds its output and
@@ -22,42 +22,42 @@ import { killProcessTree, PROCESS_KILL_BUDGET_MS, ProcessResult } from "./proces
  * stdout/stderr drain, an async mutex serializing commands, and kill/recreate on
  * timeout / user `exit` / cancel (the session is a tree — `killProcessTree`).
  *
- * Platform differences (recorded divergences vs C#):
+ * Platform differences (recorded divergences vs ):
  * - cmd stdin uses the discovered OEM code page, matching its redirected-input
- *   parser. Inputs that the page cannot represent are rejected before writing.
- *   PowerShell and POSIX stdin remain BOM-free UTF-8.
- * - the prompt tag (`prompt DI_<tag>$G`) is set for cmd only. C# sets it for sh
- *   too, but a pipe-fed sh never echoes input (nothing to strip) and `prompt` is
- *   not an sh builtin — it would only emit "command not found" noise on stderr.
+ * parser. Inputs that the page cannot represent are rejected before writing.
+ * PowerShell and POSIX stdin remain BOM-free UTF-8.
+ * - the prompt tag (`prompt DI_<tag>$G`) is set for cmd only. sets it for sh
+ * too, but a pipe-fed sh never echoes input (nothing to strip) and `prompt` is
+ * not an sh builtin — it would only emit "command not found" noise on stderr.
  *
  * Internally both stdout and stderr are drained continuously into bounded byte
- * queues (so the child never blocks on a full pipe, matching C# BoundedByteBuffer
+ * queues (so the child never blocks on a full pipe, matching BoundedByteBuffer
  * bounded-memory semantics), and each command's reader scans the queue for its
- * marker. This mirrors C#'s ReadAsync + carry scanning without losing bytes that
+ * marker. This 's ReadAsync + carry scanning without losing bytes that
  * arrive in the same pipe chunk as a marker (Node delivers whole chunks).
  */
 export type ShellSessionKind = "cmd" | "sh" | "powershell";
 
-/** Shell command describing the session process (C# `ShellCommand`). */
+/** Shell command describing the session process (`ShellCommand`). */
 export interface ShellCommand {
   readonly file: string;
   readonly prefixArgs: readonly string[];
   readonly sessionKind: ShellSessionKind;
 }
 
-/** Platform default shell for one-shot execution (C# `ShellCommand.Default`). */
+/** Platform default shell for one-shot execution (`ShellCommand.Default`). */
 export const platformDefaultShell: ShellCommand =
   process.platform === "win32"
     ? { file: process.env.COMSPEC ?? "cmd.exe", prefixArgs: ["/c"], sessionKind: "cmd" }
     : { file: "/bin/sh", prefixArgs: ["-c"], sessionKind: "sh" };
 
-/** Platform default shell for a persistent session (C# `ShellCommand.SessionDefault`). */
+/** Platform default shell for a persistent session (`ShellCommand.SessionDefault`). */
 export const platformSessionShell: ShellCommand =
   process.platform === "win32"
     ? { file: process.env.COMSPEC ?? "cmd.exe", prefixArgs: [], sessionKind: "cmd" }
     : { file: "/bin/sh", prefixArgs: [], sessionKind: "sh" };
 
-/** PowerShell persistent session: `-Command -` reads commands from stdin (C# `ShellCommand.PowerShellSession`). */
+/** PowerShell persistent session: `-Command -` reads commands from stdin (`ShellCommand.PowerShellSession`). */
 export const powershellSessionShell: ShellCommand = {
   file: process.platform === "win32" ? "powershell.exe" : "pwsh",
   prefixArgs: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"],
@@ -82,7 +82,7 @@ class ByteQueue {
     this.size_ += bytes.length;
     // Bound idle spill: only safe to drop from the front while nobody is waiting
     // to read (an active reader drains faster than it fills, so the queue never
-    // grows past the cap during a scan). C# bounds idle output with the OS pipe
+    // grows past the cap during a scan). bounds idle output with the OS pipe
     // buffer; here we drain the pipe and drop stale bytes instead, so the child
     // never blocks on a flooded pipe.
     while (this.chunks.length > 1 && this.size_ > ByteQueue.MAX_QUEUED) {
@@ -157,7 +157,7 @@ class ByteQueue {
   }
 }
 
-/** True when `haystack` contains `needle` at any byte offset (C# `IndexOf`). */
+/** True when `haystack` contains `needle` at any byte offset (`IndexOf`). */
 function indexOf(haystack: Uint8Array, needle: Uint8Array): number {
   if (needle.length === 0) return 0;
   const last = haystack.length - needle.length;
@@ -184,10 +184,10 @@ function formatTimeoutSeconds(timeoutMs: number): string {
   return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1);
 }
 
-/** Session-readiness timeout, ms (C# 10s). */
+/** Session-readiness timeout, ms (10s). */
 const INIT_TIMEOUT_MS = 10_000;
 
-/**
+/*
  * Persistent shell session. Lazy-spawns on first execute, serializes commands
  * through an async mutex, and self-heals: timeout, user `exit` or external cancel
  * terminate the session tree and the next call respawns it.
@@ -220,18 +220,18 @@ export class ShellSession {
     this.mutex_ = new PromiseChainMutex();
   }
 
-  /** Whether the session process is still alive (C# `IsAlive`; false once disposed). */
+  /** Whether the session process is still alive (`IsAlive`; false once disposed). */
   get isAlive(): boolean {
     if (this.disposed_) return false;
     const p = this.process_;
     return p !== undefined && p.exitCode === null && p.signalCode === null;
   }
 
-  /**
-   * Execute one command in the session. `timeoutMs` bounds the command; a timeout
-   * or external cancel kills the session TREE and the next call respawns it.
-   * External cancel rejects with AbortError (never an error observation).
-   */
+  /*
+ * Execute one command in the session. `timeoutMs` bounds the command; a timeout
+ * or external cancel kills the session TREE and the next call respawns it.
+ * External cancel rejects with AbortError (never an error observation).
+ */
   execute(command: string, timeoutMs: number, signal?: AbortSignal): Promise<ProcessResult> {
     return this.mutex_.runExclusive(async () => {
       signal?.throwIfAborted();
@@ -338,7 +338,7 @@ export class ShellSession {
     child.stdin?.on("error", () => {});
 
     // Startup detection: 'spawn' = started, 'error' before that = failed startup
-    // (Node reports ENOENT asynchronously, unlike C# Process.Start's throw).
+    // (Node reports ENOENT asynchronously, unlike Process.Start's throw).
     this.spawnResult_ = new Promise<Error | null>((resolve) => {
       child.once("spawn", () => resolve(null));
       child.once("error", (error) => resolve(error));
@@ -373,7 +373,7 @@ export class ShellSession {
   /**
    * Initialize the freshly spawned session: set the unique prompt tag (cmd only),
    * preload the PowerShell progress/LASTEXITCODE prelude, and drain output until
-   * the `echo <ready>` line appears (C# `InitializeAsync`). Consumes the ready
+   * the `echo <ready>` line appears. Consumes the ready
    * line fully, leaving the stream positioned right after it.
    */
   private async initialize_(process: ChildProcess, signal?: AbortSignal): Promise<ProcessResult> {
@@ -403,7 +403,7 @@ export class ShellSession {
         // Suppress PS 5.1's CLIXML progress stream on redirected stdout and zero
         // $LASTEXITCODE (unset is empty, which would break the marker line parse).
         // Deliberately do NOT touch [Console]::OutputEncoding — changing it makes
-        // stdin read as OEM and garbles Chinese commands (C# comment).
+        // stdin read as OEM and garbles Chinese commands (comment).
         await writeStdin(process.stdin, "$ProgressPreference='SilentlyContinue'; $global:LASTEXITCODE=0;\n");
       }
       await writeStdin(process.stdin, `echo ${ready}\n`);
@@ -433,7 +433,7 @@ export class ShellSession {
    * Run one command: write command + marker line to stdin, scan stdout for the
    * exit-code line while stderr drains in parallel, then clean + decode both.
    * Timeout / external cancel kill the session tree and return bounded partial
-   * output (C# `ExecuteAsync` semantics).
+   * output ( semantics).
    */
   private async runCommand_(
     process: ChildProcess,
@@ -498,7 +498,7 @@ export class ShellSession {
       }
 
       // Command completed: stop the stderr drain (data already queued is kept for
-      // the next command, matching C# cancel-after-exit-line) and decode.
+      // the next command, matching cancel-after-exit-line) and decode.
       this.stderrHalted_ = true;
       this.stderrQueue_.halt();
       await stderrDrain;
@@ -583,11 +583,11 @@ export class ShellSession {
         buffer.append(chunk);
       }
     } catch {
-      // destroyed / halted: benign (C# DrainAsync catches OCE + IOException)
+      // destroyed / halted: benign (DrainAsync catches OCE + IOException)
     }
   }
 
-  /** Marker line written after every command (C# `MarkerLine`). */
+  /** Marker line written after every command. */
   private markerLine_(): string {
     switch (this.shell.sessionKind) {
       case "cmd":
@@ -739,7 +739,7 @@ export class ShellSession {
   /**
    * Clean one decoded segment: drop lines starting with the prompt tag, trim
    * leading blank lines, trim trailing whitespace and strip the glued marker
-   * (C# `CleanOutput`).
+   *.
    */
   private cleanOutput_(decoded: string): string {
     const lines = decoded.replace(/\r\n/g, "\n").split("\n");
@@ -792,7 +792,7 @@ function decodeText(
 /** Sentinel for an explicit decode failure (surfaced as an error observation). */
 class OutputDecodeError extends Error {}
 
-/** Strict UTF-8 with the 1–3 byte seam trims (C# SmartDecode's UTF-8 path without OEM). */
+/** Strict UTF-8 with the 1–3 byte seam trims (SmartDecode's UTF-8 path without OEM). */
 function strictUtf8WithSeamTrim(bytes: Uint8Array): string | null {
   const whole = tryStrictUtf8(bytes);
   if (whole !== null) return whole;
@@ -841,7 +841,7 @@ function stripEchoLines(raw: Uint8Array, echoPrefix: Uint8Array): Uint8Array {
   return result;
 }
 
-/** Whether raw[offset .. offset+len) starts with prefix (C# `StartsWith`). */
+/** Whether raw[offset.. offset+len) starts with prefix. */
 function startsWithAt(raw: Uint8Array, offset: number, len: number, prefix: Uint8Array): boolean {
   if (len < prefix.length) return false;
   for (let i = 0; i < prefix.length; i += 1) {
@@ -868,7 +868,7 @@ async function writeStdin(stdin: Writable | null, text: string | Uint8Array): Pr
   });
 }
 
-/** Promise-chain mutex serializing session commands (C# `SemaphoreSlim(1,1)`). */
+/** Promise-chain mutex serializing session commands. */
 class PromiseChainMutex {
   private chain: Promise<unknown> = Promise.resolve();
 

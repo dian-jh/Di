@@ -1,8 +1,8 @@
 import type { ContentBlock } from "./content.ts";
 import { isTextBlock } from "./content.ts";
 
-/**
- * Normalized message vocabulary (from Di baseline `Core/Llm/ChatMessage.cs`).
+/*
+ * Normalized message vocabulary.
  *
  * This is the harness trajectory unit, the session log unit and the shared
  * plugin vocabulary; adapters alone translate provider wire formats to/from it.

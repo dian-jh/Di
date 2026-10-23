@@ -13,14 +13,11 @@ import type {
 import type { ToolExecutor, ToolValidator } from "./tools.ts";
 
 /**
- * @di/agent loop types (P1.2: tool-calling vocabulary + AgentRequest; P2.1:
+ * Public request, result, event, and dependency types for `@di/agent`.
  * AgentResult / AgentEvent / AgentDependencies / LoopCheckpoint / StopReason).
  *
  * Message and tool-schema vocabulary is imported from @di/ai; never redefined
- * here. Loop type shapes are authoritative per
- * docs/migration/typescript-core/loop-and-state.md §"建议公开的最小 loop types".
- * Loop events live here per that section (architecture.md's `events.ts` note is
- * a planning location; types.ts is the documented minimum-loop-types home).
+ * here. These exported interfaces and unions define the public loop contract.
  */
 
 export interface AgentRequest {
@@ -42,7 +39,7 @@ export interface AgentRequest {
   finalOutputTool?: string;
 }
 
-/** Why a loop run stopped (from `Core/AgentLoop/AgentResult.cs` `AgentStopReason`). */
+/** Why a loop run stopped (from `AgentStopReason`). */
 export type StopReason =
   | "answer"
   | "final_output_tool"
@@ -51,7 +48,7 @@ export type StopReason =
   | "interrupted"
   | "context_limit";
 
-/** One observable event emitted by the loop (from `Core/AgentLoop/AgentLoopEvent.cs`). */
+/** One observable event emitted by the loop. */
 export type AgentEvent =
   | { readonly type: "textDelta"; readonly delta: string }
   | { readonly type: "reasoningDelta"; readonly delta: string }
@@ -68,7 +65,7 @@ export type AgentEvent =
   | { readonly type: "runFailed"; readonly failure: LlmFailure }
   | { readonly type: "interrupted" };
 
-/** The loop's outcome for one run (from `Core/AgentLoop/AgentResult.cs`). */
+/** The loop's outcome for one run. */
 export interface AgentResult {
   /** Final visible text (last assistant message; partial or empty on non-answer stops). */
   answer: string;
@@ -101,7 +98,7 @@ export interface AgentDependencies {
   /** Pure or injected estimate helper; never a Node Buffer API. */
   estimateRequestTokens: (request: ModelRequest) => number;
   toolValidator?: ToolValidator;
-  /** Observer only; exceptions are isolated and diagnosed (later P2 card). */
+  /** Observer only; exceptions are isolated and diagnosed (later card). */
   events?: (event: AgentEvent) => void | Promise<void>;
   /** Ordered diagnostic side channel; its own errors are swallowed. */
   onObserverError?: (error: unknown, event: AgentEvent) => void | Promise<void>;

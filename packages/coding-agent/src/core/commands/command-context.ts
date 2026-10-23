@@ -2,7 +2,7 @@ import type { Skill } from "../skills/skill.ts";
 import type { ModelSelection } from "../model-selection.ts";
 import type { SlashCommandRegistry } from "./slash-command-registry.ts";
 
-/**
+/*
  * Command invocation context: capabilities (registry / skills / output / pinned
  * / models) plus host-injected turn executor and display switch. `pinned` is a
  * mutable fixed set owned by the caller (REPL and RPC each hold their own
@@ -11,20 +11,20 @@ import type { SlashCommandRegistry } from "./slash-command-registry.ts";
  * `runTurn` (turn-based commands run through it); RPC passes none and maps a
  * Turn result to `turn_not_supported` (docs/tui-rpc.md §2.5) — never silently
  * opening a second turn.
- * Mirrors `Di.Cli/Commands/CommandContext.cs` at baseline 09f4e08.
+ *.
  */
 
-/** The host capabilities commands need (the C# `IAgentRunner` surface). */
+/** The host capabilities commands need (the `IAgentRunner` surface). */
 export interface CommandHost {
-  /** Current model reference (C# `runner.CurrentModel`). */
+  /** Current model reference (`runner.CurrentModel`). */
   readonly currentModel: string;
-  /** Clear screen + conversation memory (C# `runner.ResetHistory()`). */
+  /** Clear screen + conversation memory (`runner.ResetHistory`). */
   resetHistory(): void;
-  /** Replace the active skill set (C# `runner.ActiveSkills = ...`). */
+  /** Replace the active skill set (`runner.ActiveSkills =...`). */
   setActiveSkills(skills: readonly Skill[]): void;
 }
 
-/** Command output sink (C# `TextWriter`; buffered in tests / mode wiring). */
+/** Command output sink (`TextWriter`; buffered in tests / mode wiring). */
 export interface CommandOutput {
   /** Write raw text without a trailing newline (ANSI clear screen). */
   write(text: string): void;
@@ -32,7 +32,7 @@ export interface CommandOutput {
   writeLine(text?: string): void;
 }
 
-/** Simple in-memory {@link CommandOutput} (C# `StringWriter`). */
+/** Simple in-memory {@link CommandOutput} (`StringWriter`). */
 export class StringCommandOutput implements CommandOutput {
   private buffer_ = "";
 
@@ -58,7 +58,7 @@ export interface CommandContext {
   /** Mutable fixed (pinned) set owned by the caller; persists across commands. */
   readonly pinned: Skill[];
   readonly output: CommandOutput;
-  /** Default true (C# record default); ANSI clear screen is omitted under redirect / RPC. */
+  /** Default true (record default); ANSI clear screen is omitted under redirect / RPC. */
   readonly useAnsi?: boolean;
   /** Host-injected turn executor (REPL). Absent in RPC: a Turn result maps to turn_not_supported. */
   readonly runTurn?: (message: string) => void | Promise<void>;

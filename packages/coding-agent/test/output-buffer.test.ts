@@ -13,15 +13,11 @@ import {
 } from "@di/coding-agent";
 
 /**
- * P4.4 card 8: bounded output accumulation.
  *
- * Ports Di.Tests/Tools/OutputBufferTests.cs (char accumulator) at baseline
- * 09f4e08 and adds focused BoundedByteBuffer cases (byte accumulator, used by
  * the one-shot process runner so the whole segment can be smart-decoded after
  * exit). Core invariant: for any output length the final text stays within the
  * head + tail budget, the dropped middle is replaced by a truncation notice, and
  * head/tail content is preserved — never unbounded concatenation, never
- * collect-then-truncate (C# OutputBuffer/BoundedByteBuffer semantics).
  *
  * The over-budget cases are RED by failed assertions in the scaffold commit:
  * the accumulator keeps everything, so the truncation notice is absent and the

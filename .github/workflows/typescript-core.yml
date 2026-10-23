@@ -21,19 +21,12 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24 action runtime
-        with:
-          fetch-depth: 0 # the C# compatibility harness archives its pinned baseline commit
 
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-
-      - name: Set up .NET 10 SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          dotnet-version: 10.0.x
 
       - name: Install locked dependencies
         run: npm ci
@@ -64,7 +57,7 @@ jobs:
           node --test tools/test/run-ci-unit-tests.test.mjs 2>&1 | tee test-results/ci-runner.log
           node tools/run-ci-unit-tests.mjs 2>&1 | tee test-results/unit.log
 
-      - name: Run C# compatibility tests
+      - name: Run compatibility tests
         id: compat
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: bash
@@ -85,7 +78,7 @@ jobs:
           {
             printf 'Check | Result\n--- | ---\n'
             printf 'Workspace build | %s\nTypecheck | %s\nUnit tests (TUI, agent, ai, coding-agent) | %s\nCompatibility tests | %s\n' "$BUILD_RESULT" "$TYPECHECK_RESULT" "$UNIT_RESULT" "$COMPAT_RESULT"
-            printf '\nCompatibility covers pinned C# session interoperability, local provider SSE/session flows, large-log recovery, and soak harness checks.\n'
+            printf '\nCompatibility covers local provider SSE/session flows, large-log recovery, and soak harness checks.\n'
             printf '\nThis workflow uses synthetic credentials and loopback services. Real model smoke, the 10-hour soak, installation into the user profile, and deployment are outside this workflow.\n'
           } >> "$GITHUB_STEP_SUMMARY"
 

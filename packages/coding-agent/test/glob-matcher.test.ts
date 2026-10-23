@@ -4,9 +4,7 @@ import assert from "node:assert/strict";
 import { globIsMatch } from "@di/coding-agent";
 
 /**
- * P4.2 card 2: glob → regex matcher.
  *
- * Ports Di.Tests/Tools/GlobMatcherTests.cs at baseline 09f4e08 exactly:
  * `*` matches any segment within one directory level, `?` one character,
  * `**` crosses directories, and a trailing slash after `**` matches zero or
  * more directory levels (so the double-star pattern also hits root-level .cs

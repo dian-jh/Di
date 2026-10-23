@@ -17,7 +17,6 @@ import {
 import { mockLockProvider, noopAcl } from "./test-doubles.ts";
 
 /**
- * P8b — host-side ChatGPT OAuth (C# `ChatGptAuth` @09f4e08).
  *
  * OAuth PKCE on a loopback 127.0.0.1 random port with a time-limited callback:
  * callback path + random `state` + authorization code + issued client ID + PKCE
@@ -212,7 +211,7 @@ test("registration: dynamic client, agent hint, host id and PKCE challenge are v
   }
 });
 
-test("registration reuses host and client and validates the PKCE hand-off (C# Registration_ReusesClientAndHostAndValidatesPkce)", async () => {
+test("registration reuses host and client and validates the PKCE hand-off", async () => {
   const f = createFixture();
   try {
     await f.auth.signIn(f.browser);
@@ -228,7 +227,7 @@ test("registration reuses host and client and validates the PKCE hand-off (C# Re
   }
 });
 
-test("consumed code retries with the issued client (C# ConsumedCode_RetriesWithIssuedClient)", async () => {
+test("consumed code retries with the issued client", async () => {
   const f = createFixture({ codeFailuresRemaining: 1 });
   try {
     await f.auth.signIn(f.browser);
@@ -242,7 +241,7 @@ test("consumed code retries with the issued client (C# ConsumedCode_RetriesWithI
   }
 });
 
-test("invalid state callback is rejected with 400 before the valid callback completes (C# Callback_InvalidStateIsRejectedBeforeValidCallback)", async () => {
+test("invalid state callback is rejected with 400 before the valid callback completes", async () => {
   const f = createFixture({}, { sendInvalidState: true });
   try {
     await f.auth.signIn(f.browser);
@@ -252,7 +251,7 @@ test("invalid state callback is rejected with 400 before the valid callback comp
   }
 });
 
-test("declined authorization does not exchange a code (C# Callback_DeclineDoesNotExchangeCode)", async () => {
+test("declined authorization does not exchange a code", async () => {
   const f = createFixture({}, { deny: true });
   try {
     await assert.rejects(f.auth.signIn(f.browser), (e: unknown) => e instanceof ChatGptAuthError && e.code === "auth-failed");
@@ -264,7 +263,7 @@ test("declined authorization does not exchange a code (C# Callback_DeclineDoesNo
 });
 
 for (const clientId of ["", "dynamic_agent_client"]) {
-  test(`missing issued client (${JSON.stringify(clientId)}) is rejected without exchanging (C# Callback_MissingIssuedClientDoesNotExchangeCode)`, async () => {
+  test(`missing issued client (${JSON.stringify(clientId)}) is rejected without exchanging`, async () => {
     const f = createFixture({}, { callbackClientId: clientId });
     try {
       await assert.rejects(f.auth.signIn(f.browser), (e: unknown) => e instanceof ChatGptAuthError && e.code === "invalid-data");
@@ -275,7 +274,7 @@ for (const clientId of ["", "dynamic_agent_client"]) {
   });
 }
 
-test("a changed client preserves the old connection (C# Callback_ChangedClientPreservesConnection)", async () => {
+test("a changed client preserves the old connection", async () => {
   const f = createFixture({});
   try {
     await f.auth.signIn(f.browser);
@@ -299,7 +298,7 @@ test("a changed client preserves the old connection (C# Callback_ChangedClientPr
 });
 
 for (const field of ["access_token", "refresh_token", "scope", "id_token", "expires_in"]) {
-  test(`token contract rejects invalid ${field} (C# TokenContract_RejectsInvalidFields)`, async () => {
+  test(`token contract rejects invalid ${field}`, async () => {
     const f = createFixture({ invalidField: field });
     try {
       await assert.rejects(f.auth.signIn(f.browser), (e: unknown) => e instanceof ChatGptAuthError && e.code === "invalid-data");
@@ -310,7 +309,7 @@ for (const field of ["access_token", "refresh_token", "scope", "id_token", "expi
   });
 }
 
-test("token contract requires the plan/direct scope (C# TokenContract_RequiresPlanPermission)", async () => {
+test("token contract requires the plan/direct scope", async () => {
   const f = createFixture({ grantPlan: false });
   try {
     await assert.rejects(f.auth.signIn(f.browser), (e: unknown) => e instanceof ChatGptAuthError && e.code === "invalid-data");
@@ -320,7 +319,7 @@ test("token contract requires the plan/direct scope (C# TokenContract_RequiresPl
   }
 });
 
-test("check is local and never refreshes (C# AuthCheck_IsLocalAndDoesNotRefresh)", async () => {
+test("check is local and never refreshes", async () => {
   const f = createFixture();
   try {
     assert.equal(await f.auth.check(), false);
@@ -366,7 +365,7 @@ test("model discovery uses a refreshed-or-current synthetic bearer token and vis
   } finally { await rm(f.dir, { recursive: true, force: true }); }
 });
 
-test("refresh rotates exactly once across concurrent instances (C# Refresh_RotatesOnceAcrossInstances)", async () => {
+test("refresh rotates exactly once across concurrent instances", async () => {
   const dir = mkdtempSync(join(tmpdir(), "di-p8b-rot-"));
   try {
     const lock = mockLockProvider();
@@ -402,7 +401,7 @@ test("refresh rotates exactly once across concurrent instances (C# Refresh_Rotat
   }
 });
 
-test("terminal refresh errors clear only the tokens; transient errors retain and throw (C# RefreshErrors_ClearOnlyTerminalCredentials)", async () => {
+test("terminal refresh errors clear only the tokens; transient errors retain and throw", async () => {
   for (const [code, retained] of [
     ["invalid_grant", false],
     ["refresh_token_reused", false],
@@ -440,7 +439,7 @@ test("a bad refresh response must NOT overwrite a valid old credential", async (
   }
 });
 
-test("logout revokes the refresh token and retains the registration (C# Logout_RevokesAndRetainsRegistration)", async () => {
+test("logout revokes the refresh token and retains the registration", async () => {
   const f = createFixture();
   try {
     await f.auth.signIn(f.browser);

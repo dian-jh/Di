@@ -22,12 +22,11 @@ import { FakeAdapter, FakeModelService } from "../commands/test-doubles.ts";
 import { buildHost, FakeRunner } from "../modes/test-host.ts";
 
 /**
- * P6.3b card — CliApp dispatch shell (port of the in-scope half of C#
- * `Di.Cli.Tests/cli/CliAppTests.cs` at baseline 09f4e08). Short paths
+ *
  * (--version / --help / --stats / arg errors) return before any host is built
  * and never touch DI/files; host-requiring paths (--list-models / --skill-eval)
  * go through an injected fake host factory. The interactive / print / json / rpc
- * BODIES are P6.3c, so the host-requiring dispatch seam is locked here with a
+ *
  * fail-closed "not yet implemented" for those modes and with the host-failure
  * envelope contract (json mode → stdout error doc; text modes → stderr).
  */
@@ -42,7 +41,7 @@ function setup(host: CliHost | null = null, tui?: TuiLauncherContext) {
   return { app, stdout, stderr, factory };
 }
 
-/** Fake host: a full P6.3c CliHost (models over a fake service + skills + runner + bus + registry). */
+
 function makeHost(models: FakeModelService, skills: readonly Skill[]): CliHost {
   return buildHost({ service: models, skills }).host;
 }
@@ -231,8 +230,8 @@ test("Stats_FileNotFound_ExitsOne_WithoutHost", async () => {
 
 const BACKEND_TESTS_SKILL: Skill = {
   name: "backend-tests",
-  description: "运行并修复后端测试（dotnet）。当用户要求运行测试、分析失败或修复测试时使用。",
-  instructions: "1. dotnet build\n2. dotnet test",
+  description: "运行并修复后端测试（TypeScript workspace）。当用户要求运行测试、分析失败或修复测试时使用。",
+  instructions: "1. npm run build\n2. npm test",
   metadata: {},
   allowedTools: [],
   disableModelInvocation: false,
@@ -305,9 +304,9 @@ test("HostFactoryFailure_ErrorToStderrInTextMode", async () => {
   assert.equal(factory.calls, 1);
 });
 
-// ---- interactive / resume / rpc dispatch (P6.3c real mode bodies) ----
 
-/** TUI context that forces the C# REPL fallback (interactive tests don't touch real env / fs / processes). */
+
+
 const ReplOnly: TuiLauncherContext = { getEnv: () => "repl" };
 
 test("Resume_UsesReplWithoutTryingTui", async () => {

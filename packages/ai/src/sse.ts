@@ -3,22 +3,22 @@ import type { TokenUsage, UsageCost } from "./types/model.ts";
 import type { ProviderChunk } from "./stream-assembler.ts";
 import { ProviderStreamAssembler } from "./stream-assembler.ts";
 
-/**
- * P3 card 2 HTTP/SSE framing (Di baseline `Core/Providers/DeepSeek/DeepSeekAdapter.cs`
- * SSE parsing + models-and-auth.md §DeepSeek 协议边界 item 1; W3C SSE field syntax).
+/*
+ * HTTP/SSE framing (* SSE parsing + models-and-auth.md §DeepSeek 协议边界 item 1; W3C SSE field syntax).
  *
  * {@link SseEventParser} is the pure line/field state machine: it consumes decoded
  * text and produces SSE events, handling data/event/id fields, multi-line data,
  * comment lines (`:`), CRLF/LF/lone-CR line endings, and arbitrary chunk splits.
  * {@link parseSseStream} decodes a byte {@link ReadableStream} (handling multi-byte
  * UTF-8 split across frames) and yields events with an idle timeout and abort guard.
- * {@link sseToModelEvents} wires a translate callback and the P3.1
- * {@link ProviderStreamAssembler} into an `AsyncIterable<ModelEvent>` suitable for
+ * {@link sseToModelEvents} connects a provider translator to the
+ * {@link ProviderStreamAssembler} and exposes the result as an
+ * `AsyncIterable<ModelEvent>` suitable for
  * `ChatModel.stream`. It yields exactly one `completed` per stream (unless a
  * terminal transport/protocol error is thrown) and never hangs when the underlying
  * stream errors or the caller aborts.
  *
- * DeepSeek wire translation, usage/cost and retry are later P3 cards; they only
+ * DeepSeek wire translation, usage/cost and retry are later cards; they only
  * plug in through the {@link TranslateEvent} callback.
  */
 
@@ -32,7 +32,7 @@ export interface SseEvent {
   readonly id?: string;
 }
 
-/**
+/*
  * Structured transport/protocol error thrown out of {@link parseSseStream} and
  * {@link sseToModelEvents}. `code` is a stable discriminator: `"connection"`
  * (stream read failed or EOF without a terminal finish), `"timeout"` (idle
@@ -52,7 +52,7 @@ export class SseStreamError extends Error {
   }
 }
 
-/**
+/*
  * Streaming SSE event parser. Feed decoded text with {@link push}; a pending
  * event is dispatched when a blank line arrives (or via {@link end} at EOF).
  * The parser is byte/decoder-agnostic and split-safe: a CRLF pair, a field, or a
@@ -160,16 +160,16 @@ export class SseEventParser {
 export interface ParseSseStreamOptions {
   /** Abort reading (and cancel the reader) when the caller's signal fires. */
   readonly signal?: AbortSignal;
-  /**
-   * Idle deadline between byte reads. If no byte arrives within this many
-   * milliseconds the stream throws an `"timeout"` {@link SseStreamError}. Omitted
-   * or non-positive disables the timer. Each read arms a timer that is always
-   * cleared on settle, so no timer outlives the stream.
-   */
+  /*
+ * Idle deadline between byte reads. If no byte arrives within this many
+ * milliseconds the stream throws an `"timeout"` {@link SseStreamError}. Omitted
+ * or non-positive disables the timer. Each read arms a timer that is always
+ * cleared on settle, so no timer outlives the stream.
+ */
   readonly idleTimeoutMs?: number;
 }
 
-/**
+/*
  * Read one byte chunk from the underlying stream, racing it against the idle
  * timeout and the caller's abort signal. The timer is created per read and
  * cleared on settle/abort, so it never leaks. The `reader` lock is released by
@@ -239,8 +239,8 @@ function classifyReadError(error: unknown, signal: AbortSignal | undefined): Sse
  * completes. Handles multi-byte UTF-8 sequences split across chunks
  * (`TextDecoder` in streaming mode), CRLF/LF/lone-CR line endings, and events
  * split across arbitrary chunk boundaries. On clean EOF any pending event is
- * dispatched (the final partial line is honored, matching the C# baseline's
- * line-oriented reader). A stalled stream throws `"timeout"`; a failing stream
+ * dispatched after the final partial line is processed. A stalled stream throws
+ * `"timeout"`; a failing stream
  * throws `"connection"`; an aborted signal throws `"aborted"` — all as
  * {@link SseStreamError}, never hanging.
  */

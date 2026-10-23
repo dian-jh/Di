@@ -31,41 +31,41 @@ import type { SessionStore } from "./sessions/session-log.ts";
 import { loadRecovery } from "./sessions/session-recovery.ts";
 import { SessionDataError } from "./sessions/errors.ts";
 
-/**
+/*
  * AgentSession — the Node host that owns cross-turn state (loop-and-state.md
  * §"所有权与接口草案"): durable in-memory history, the current model, active
  * skills, the budget tracker, checkpoint/recovery and the soft-stop controller
  * live ONLY here. `runAgentLoop` (@di/agent) stays a pure loop that never
  * persists next-turn history.
  *
- * P2.6-card behavior (mirrors `Core/AgentLoop/AgentRunner.cs` `RunAsync`) plus
- * P2.7 model switching:
+ * -card behavior (`RunAsync`) plus
+ * model switching:
  * - `runTurn` is the only session-turn entry; one session serializes turns
- *   (concurrent prompt or `resetHistory` while a turn is running → busy).
+ * (concurrent prompt or `resetHistory` while a turn is running → busy).
  * - each turn merges the full loop trajectory into cross-turn memory, trims
- *   oldest whole user-turns by the estimated budget (keeping the most recent
- *   turn), then sanitizes only the tail (`SanitizeHistory`) before persisting —
- *   the returned result trajectory is never rewritten;
+ * oldest whole user-turns by the estimated budget (keeping the most recent
+ * turn), then sanitizes only the tail (`SanitizeHistory`) before persisting —
+ * the returned result trajectory is never rewritten;
  * - a `context_limit` stop sets `preserveHistoryUntilReset` so the next turn does
- *   not auto-trim that paused trajectory / generate a summary;
+ * not auto-trim that paused trajectory / generate a summary;
  * - model/skills changes take effect at turn boundaries (`setModel` /
- *   `setActiveSkills` are read at turn start, never mid-stream): the model is
- *   resolved at the start of `runTurn` (`config.resolveModel` when provided,
- *   else the injected/current model) and captured for the whole turn — a
- *   mid-turn `setModel` never replaces a running loop's dependency;
+ * `setActiveSkills` are read at turn start, never mid-stream): the model is
+ * resolved at the start of `runTurn` (`config.resolveModel` when provided,
+ * else the injected/current model) and captured for the whole turn — a
+ * mid-turn `setModel` never replaces a running loop's dependency;
  * - a model-resolution failure rejects the turn at the boundary with an explicit
- *   `SessionModelError` (code `model-resolve-failed`) — no silent fallback, no
- *   invented token window — and leaves committed history untouched;
+ * `SessionModelError` (code `model-resolve-failed`) — no silent fallback, no
+ * invented token window — and leaves committed history untouched;
  * - the host accumulates each loop run's usage/cost into a cross-turn session
- *   ledger (`usage` / `cost`) for L1 display and budget level; this is separate
- *   from estimation — the budget tracker keeps feeding ESTIMATED values;
+ * ledger (`usage` / `cost`) for L1 display and budget level; this is separate
+ * from estimation — the budget tracker keeps feeding ESTIMATED values;
  * - a stable environment snapshot is appended as a history system message only
- *   when its text changes (never re-injecting stable prefix bytes each turn);
+ * when its text changes (never re-injecting stable prefix bytes each turn);
  * - the budget tracker feeds ESTIMATED values (never billed usage): it sees the
- *   current turn's accumulated assistant/tool trajectory before tool execution
- *   and the trimmed memory estimate at turn end; no model window → no invented
- *   token limit (`maxHistoryTurns` is only an explicit positive-number fallback
- *   when there is no token budget).
+ * current turn's accumulated assistant/tool trajectory before tool execution
+ * and the trimmed memory estimate at turn end; no model window → no invented
+ * token limit (`maxHistoryTurns` is only an explicit positive-number fallback
+ * when there is no token budget).
  */
 
 /** Session-level rejection mirroring the RPC busy envelope code (`busy`). */
@@ -78,10 +78,10 @@ export class SessionBusyError extends Error {
   }
 }
 
-/**
+/*
  * The session is blocked from further turns because a started tool outcome is
- * unknown (C# `AgentRunner._recoveryBlockedReason`). Replay is forbidden: the
- * caller must inspect the side effects and call `resetHistory()` (or start a new
+ * unknown (`AgentRunner._recoveryBlockedReason`). Replay is forbidden: the
+ * caller must inspect the side effects and call `resetHistory` (or start a new
  * session) before the same host may continue.
  */
 export class SessionRecoveryBlockedError extends Error {
@@ -93,9 +93,8 @@ export class SessionRecoveryBlockedError extends Error {
   }
 }
 
-/**
- * Model/provider resolution failure at the turn boundary (C#
- * `ILlmService.ResolveModelAsync` rejection / `LlmRuntime.RequireAdapter`).
+/*
+ * Model/provider resolution failure at the turn boundary (* `ILlmService.ResolveModelAsync` rejection / `LlmRuntime.RequireAdapter`).
  * Rejects the turn with an explicit error — never a silent fallback, never an
  * invented token window — and leaves committed cross-turn history untouched.
  */
@@ -118,22 +117,22 @@ export interface ActiveSkill {
 export interface AgentSessionConfig {
   /** Stable system prompt injected first in every model request (loop prefix). */
   readonly systemPrompt: string;
-  /**
-   * Optional turn-boundary model resolver (C# `AgentRunner._modelFactory` /
-   * `ILlmService.ResolveModelAsync`). When provided, `runTurn` awaits it at the
-   * turn boundary with the current model reference and uses the returned
-   * `ChatModel` for THAT turn. A throwing / rejecting resolver (or one returning
-   * no model) rejects the turn with `SessionModelError` — no silent fallback, no
-   * invented token window — and does not disturb committed history. When absent,
-   * the injected / `setModel`-swapped model is used directly.
-   */
+  /*
+ * Optional turn-boundary model resolver (`AgentRunner._modelFactory` /
+ * `ILlmService.ResolveModelAsync`). When provided, `runTurn` awaits it at the
+ * turn boundary with the current model reference and uses the returned
+ * `ChatModel` for THAT turn. A throwing / rejecting resolver (or one returning
+ * no model) rejects the turn with `SessionModelError` — no silent fallback, no
+ * invented token window — and does not disturb committed history. When absent,
+ * the injected / `setModel`-swapped model is used directly.
+ */
   readonly resolveModel?: (current: ChatModel) => ChatModel | Promise<ChatModel>;
   /** Model-facing tool schemas. */
   readonly tools?: readonly ToolSpec[];
-  /**
-   * Soft input budget (tokens) for history trimming and the loop's context guard.
-   * `undefined` = no known model window → no invented token limit.
-   */
+  /*
+ * Soft input budget (tokens) for history trimming and the loop's context guard.
+ * `undefined` = no known model window → no invented token limit.
+ */
   readonly tokenBudget?: number;
   /** Turn-boundary dynamic budget (for model switches); undefined means unknown window. */
   readonly tokenBudgetProvider?: () => number | undefined;
@@ -144,15 +143,15 @@ export interface AgentSessionConfig {
   /** Optional shared tracker the host reads for L1 predictions; the session feeds ESTIMATED values only. */
   readonly budgetTracker?: InputBudgetTracker;
   readonly checkpoint?: LoopCheckpoint;
-  /**
-   * Durable session store (P5): owns the JSONL checkpoint writes (`beginCheckpointTurn`
-   * before each loop run, the loop's durable `LoopCheckpoint` seam, `completeCheckpointTurn`
-   * at turn end) and the same-process recovery on a model/cancellation error — the host
-   * reloads the durable checkpoint into memory and continues without re-executing tools;
-   * a started-but-unfinished outcome blocks further turns until `resetHistory`. When set,
-   * it takes precedence over `checkpoint` for the loop seam. Absent = no session log
-   * (`--no-session`).
-   */
+  /*
+ * Durable session store: owns the JSONL checkpoint writes (`beginCheckpointTurn`
+ * before each loop run, the loop's durable `LoopCheckpoint` seam, `completeCheckpointTurn`
+ * at turn end) and the same-process recovery on a model/cancellation error — the host
+ * reloads the durable checkpoint into memory and continues without re-executing tools;
+ * a started-but-unfinished outcome blocks further turns until `resetHistory`. When set,
+ * it takes precedence over `checkpoint` for the loop seam. Absent = no session log
+ * (`--no-session`).
+ */
   readonly sessionStore?: SessionStore;
   readonly events?: (event: AgentEvent) => void | Promise<void>;
   readonly onObserverError?: (error: unknown, event: AgentEvent) => void | Promise<void>;
@@ -179,7 +178,7 @@ export interface SessionTurnOptions {
   readonly signal?: AbortSignal;
 }
 
-/**
+/*
  * The only session-turn entry. One session serializes turns: a concurrent prompt
  * (or reset) is rejected per the busy policy; `resetHistory` is only effective
  * when no turn is running. Each turn merges the full loop trajectory into
@@ -193,7 +192,7 @@ export class AgentSession {
   private readonly sessionId_ = `session-${randomUUID()}`;
   private history_: AgentMessage[] = [];
   private preserveHistoryUntilReset_ = false;
-  /** C# `AgentRunner._recoveryBlockedReason`: set when a started tool outcome is unknown. */
+  /**: set when a started tool outcome is unknown. */
   private recoveryBlockedReason_: string | undefined;
   private lastHistoryBudget_: number | undefined;
   private lastSnapshotText_: string | undefined;
@@ -278,7 +277,7 @@ export class AgentSession {
   /**
    * Clear all cross-turn memory. Only allowed when no turn is running — the
    * in-use array is never cleared concurrently (loop-and-state.md §"中断、取消与
-   * 并发生命周期"). Mirrors C# `AgentRunner.ResetHistory` (snapshot marker and
+   * 并发生命周期"). Mirrors  (snapshot marker and
    * budget tracker holder are reset too so the snapshot is re-injected next turn).
    */
   resetHistory(): void {
@@ -295,7 +294,7 @@ export class AgentSession {
 
   /**
    * Restore a validated session trajectory before the next explicit user turn
-   * (C# `AgentRunner.RestoreHistory`; the `--resume` entry). The restored history
+   * (; the `--resume` entry). The restored history
    * is treated as a paused trajectory (`preserveHistoryUntilReset`), so the next
    * turn does not auto-trim it; a `context_limit` pause preserves the restored
    * task and its tool results until a larger budget continues.
@@ -323,7 +322,7 @@ export class AgentSession {
    *    and history is not being preserved,
    * 2. appends the stable environment snapshot only when its text changed,
    * 3. pre-trims oldest whole user-turns while the full incoming-request estimate
-   *    exceeds the budget (mirroring C# `EstimateIncomingRequestTokens`),
+   *    exceeds the budget (mirroring ),
    * 4. runs the pure loop with `beforeToolExecution` feeding the budget tracker
    *    the accumulated trajectory (estimated values only),
    * 5. persists the trajectory: `context_limit` preserves it verbatim and sets
@@ -356,7 +355,7 @@ export class AgentSession {
       }
 
       // Start-of-turn trim when the budget shrank (or this is the first turn) and
-      // history is not being preserved (C# `_lastHistoryBudget is null ||
+      // history is not being preserved (`_lastHistoryBudget is null ||
       // SoftThreshold < _lastHistoryBudget`). Trims whole user-turns, keeps the
       // most recent one, then sanitizes; a still-over-budget history is cleared.
       if (
@@ -386,7 +385,7 @@ export class AgentSession {
       const skillContext = buildSkillContext(this.activeSkills_);
       const systemContext = combineSystemContext(skillContext, options.systemContext);
 
-      // Whole-request pre-trim (C# `EstimateIncomingRequestTokens`): drop oldest
+      // Whole-request pre-trim (`EstimateIncomingRequestTokens`): drop oldest
       // whole user-turns while the estimate of the incoming request exceeds the
       // budget and more than one user turn remains. Skipped while preserving a
       // paused trajectory (context_limit).
@@ -428,7 +427,7 @@ export class AgentSession {
         ...(this.config_.toolValidator !== undefined ? { toolValidator: this.config_.toolValidator } : {}),
       };
 
-      // Durable turn-start checkpoint (C# `CheckpointLog?.BeginCheckpointTurn`):
+      // Durable turn-start checkpoint (`CheckpointLog?.BeginCheckpointTurn`):
       // a snapshot of the current history + the user message is durable before
       // any model work. A failed write aborts the turn before any side effect.
       if (sessionStore !== undefined) {
@@ -439,7 +438,7 @@ export class AgentSession {
       try {
         result = await runAgentLoop(request, dependencies, options.signal);
       } catch (error) {
-        // Same-process recovery (C# `RunAsync` catch): refresh the in-memory
+        // Same-process recovery (`RunAsync` catch): refresh the in-memory
         // history from the durable checkpoint so the SAME host can continue
         // without re-executing tools. A started-but-unfinished outcome blocks
         // further turns (fail closed) until an explicit reset.
@@ -461,7 +460,7 @@ export class AgentSession {
       }
 
       // Turn end: persist cross-turn memory. `context_limit` is an explicit pause
-      // (C# `AgentStopReason.ContextLimit`): the trajectory is preserved verbatim
+      // (`AgentStopReason.ContextLimit`): the trajectory is preserved verbatim
       // and the next turn does not auto-trim it or generate a summary
       // (preserveHistoryUntilReset). Other stops trim oldest whole user-turns by
       // the estimated budget (falling back to `maxHistoryTurns` only when no
@@ -487,12 +486,12 @@ export class AgentSession {
       }
       this.syncTracker_(this.history_);
       // Cross-turn usage/cost ledger: each loop run's usage/cost is accumulated
-      // here by the host (C# accounting), for L1 display / budget level. The
+      // here by the host (accounting), for L1 display / budget level. The
       // budget tracker is NOT updated from these values — it keeps feeding
       // ESTIMATED values only (never treat a UI-display value as the truth).
       this.usage_ = tokenUsageAdd(this.usage_, result.usage);
       this.cost_ = combineCost(this.cost_, result.cost);
-      // Durable turn-completion marker (C# `CheckpointLog?.CompleteCheckpointTurn`),
+      // Durable turn-completion marker (`CheckpointLog?.CompleteCheckpointTurn`),
       // after the in-memory history/ledger commit. If this write fails the turn
       // result was still fully persisted as earlier checkpoints and remains recoverable.
       if (sessionStore !== undefined) {
@@ -506,14 +505,13 @@ export class AgentSession {
     }
   }
 
-  /**
-   * Resolve the model for THIS turn at the turn boundary (C#
-   * `_modelFactory(CurrentModel)` / `ILlmService.ResolveModelAsync`). Without a
-   * configured resolver the injected/current model is returned; with one, the
-   * resolver is awaited with the current model reference. A throwing / rejecting
-   * resolver (or one returning no model) is surfaced as an explicit
-   * `SessionModelError` — no silent fallback, no invented token window.
-   */
+  /*
+ * Resolve the model for THIS turn at the turn boundary (* `_modelFactory(CurrentModel)` / `ILlmService.ResolveModelAsync`). Without a
+ * configured resolver the injected/current model is returned; with one, the
+ * resolver is awaited with the current model reference. A throwing / rejecting
+ * resolver (or one returning no model) is surfaced as an explicit
+ * `SessionModelError` — no silent fallback, no invented token window.
+ */
   private async resolveModel_(): Promise<ChatModel> {
     const resolve = this.config_.resolveModel;
     if (resolve === undefined) return this.model_;

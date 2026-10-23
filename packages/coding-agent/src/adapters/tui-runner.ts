@@ -20,21 +20,21 @@ import type { Skill } from "../core/skills/skill.ts";
 import { errorMessage } from "../modes/common.ts";
 import { eventPayload, isAbortError, resultPayload, zeroUsage } from "../modes/wire.ts";
 
-/**
- * LocalAgentRunnerAdapter：把生产 CLI 的同进程 CoreRunner（CliHost 组合根，P7a
+/*
+ * LocalAgentRunnerAdapter：把生产 CLI 的同进程 CoreRunner（CliHost 组合根，
  * createSessionRunner 桥接 AgentSession）适配到 di-tui 的 {@link RunnerPort}，
  * 供 `di-tui.runInteractive(port)` 直接驱动现有 TUI 组件树（零子进程、零 RPC）。
  *
  * 这是 Core `AgentEvent` / `AgentResult`（@di/agent camelCase）与 protocol wire
  * `RpcAgentEvent` / `RpcAgentResult`（tui/src/rpc/protocol.ts snake_case）之间
- * 的**唯一转换点**——转换函数由 {@link ../../modes/wire.ts} 共享给 `--mode rpc`
+ * 的**唯一转换点**——转换函数由 {@link../../modes/wire.ts} 共享给 `--mode rpc`
  * 路径，保证同进程与子进程 RPC 两种后端产出的 wire 载荷字节级等价（同一事件序、
  * 同一载荷形状；`interrupted` 事件省略、软停经 result.stop_reason 上报等）。
  *
  * 生命周期契约（architecture.md §RunnerPort）：
  * - subscribe → connect（ready 握手恰好一次）→ prompt（一次事件流 + result）；
  * - interrupt = 硬取消（绑定到 prompt 的 AbortController，映射 stop_reason "cancelled"，
- *   绝不连到 CoreRunner.requestSoftStop）；
+ * 绝不连到 CoreRunner.requestSoftStop）；
  * - 回合失败消化为 result.stop_reason "error"（消息而非崩溃），会话级错误走 onError；
  * - stop 幂等，优雅 teardown（中止在途回合，使同进程退出不被挂起）。
  */
@@ -62,11 +62,11 @@ export class LocalAgentRunnerAdapter implements RunnerPort {
     };
   }
 
-  /**
-   * 握手：刷新模型目录（尽力而为）→ 写会话首行（尽力而为）→ 从组合根生成等价
-   * ReadyMessage（version/model/effort?/skills/models）→ 调用 onReady 后 resolve。
-   * 未订阅 handlers 视为契约违反（connect 只应在 onReady 已执行一次后 resolve）。
-   */
+  /*
+ * 握手：刷新模型目录（尽力而为）→ 写会话首行（尽力而为）→ 从组合根生成等价
+ * ReadyMessage（version/model/effort?/skills/models）→ 调用 onReady 后 resolve。
+ * 未订阅 handlers 视为契约违反（connect 只应在 onReady 已执行一次后 resolve）。
+ */
   async connect(): Promise<void> {
     if (this.connected) throw new Error("RunnerPort 已连接，请勿重复 connect()");
     if (this.stopped) throw new Error("RunnerPort 已停止");

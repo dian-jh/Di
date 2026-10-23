@@ -1,11 +1,10 @@
-/**
+/*
  * User-command Markdown parsing (`~/.di/commands/<name>.md`): `---`-wrapped
- * frontmatter + a body instruction template. Mirrors
- * `Di.Cli/Commands/CommandMarkdown.cs` at baseline 09f4e08 — frontmatter only
+ * frontmatter + a body instruction template. * — frontmatter only
  * carries display metadata (`description` required, `argument-hint` optional);
  * the command name IS the file name (frontmatter declares no name). The body is
  * the instruction template; invocation appends args and runs a full turn (the
- * loader wraps it into a turn-based command). Strictness mirrors `SkillMarkdown`:
+ * loader wraps it into a turn-based command). Strictness `SkillMarkdown`:
  * recognized fields may appear only once, unknown fields are ignored, BOM/CRLF
  * tolerated.
  */
@@ -109,14 +108,14 @@ function isValidName(name: string): boolean {
   return name.length <= MAX_COMMAND_NAME_LENGTH && VALID_NAME_PATTERN.test(name);
 }
 
-/** Remove every leading occurrence of any of `chars` (C# `TrimStart(...)`). */
+/** Remove every leading occurrence of any of `chars`. */
 function trimStartChars(text: string, ...chars: string[]): string {
   let i = 0;
   while (i < text.length && chars.includes(text[i]!)) i += 1;
   return text.slice(i);
 }
 
-/** Remove every trailing '\r' (C# `TrimEnd('\r')`). */
+/** Remove every trailing '\r'. */
 function trimTrailingCr(text: string): string {
   return text.replace(/\r+$/g, "");
 }

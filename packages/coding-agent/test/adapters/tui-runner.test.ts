@@ -35,13 +35,13 @@ import {
 } from "../modes/test-host.ts";
 
 /**
- * P9-local-runner card — the LocalAgentRunnerAdapter protocol suite: the
+ *
  * in-process TUI runner must produce the SAME observable event sequence and wire
  * payload shapes (ready fields model/effort?/skills/models, snake_case,
  * null-keys-omitted, text/reasoning/tool_call deltas, tool lifecycle,
  * turn_completed/run_failed, result, cancelled/interrupted, list/run commands)
  * as the child-process `--mode rpc` path (docs/tui-rpc.md / tui protocol.ts
- * authority). Both fake-Runner AND real-host suites required (§P7 gate): the
+ *
  * fake suite mirrors test/modes/rpc-mode.test.ts, the real-host suite mirrors
  * test/cli/real-host-rpc.test.ts — same scenarios, same byte-level expectations
  * on both backends. Byte-level is interpreted as protocol-shape equivalence:
@@ -98,7 +98,7 @@ test("adapter connect: ready carries version/model/effort?/skills/models (byte-i
   };
   const { ready } = await runAdapter({
     service,
-    skills: [skill("backend-tests", "跑后端测试", "dotnet test")],
+    skills: [skill("backend-tests", "跑后端测试", "npm test")],
     reasoningEffort: "high",
   });
 
@@ -274,7 +274,7 @@ test("adapter runCommand: /model lists the catalog and carries the model snapsho
 });
 
 test("adapter runCommand: turn-type command throws CommandError turn_not_supported with turnMessage", async () => {
-  const skills = [skill("backend-tests", "跑后端测试", "dotnet test")];
+  const skills = [skill("backend-tests", "跑后端测试", "npm test")];
   const { adapter } = await runAdapter({ skills });
   await assert.rejects(
     () => adapter.runCommand("skill", "backend-tests 补测试"),

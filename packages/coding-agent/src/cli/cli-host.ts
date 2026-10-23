@@ -10,8 +10,8 @@ import type { TextWriter } from "./io.ts";
 import { createCliHost } from "./cli-host-compose.ts";
 
 /**
- * CLI host seam (the composition root; C# `Di.Cli/CliHost.cs` at baseline
- * 09f4e08). P6.3b exposed models + skills for list-models / skill-eval; P6.3c
+ * CLI host interface shared by the command dispatcher and mode runners. It
+ * exposes model and skill information for list-models and skill-eval, plus
  * adds the mode seams the interactive / print / json / rpc bodies drive: the
  * session-turn runner, the AgentLoopEvent bus, the shared slash-command registry,
  * the optional session store, the reasoning-effort snapshot and the REPL display
@@ -19,21 +19,21 @@ import { createCliHost } from "./cli-host-compose.ts";
  */
 
 /**
- * The session-turn runner seam the modes drive (C# `IAgentRunner` subset):
+ * The session-turn runner seam the modes drive:
  * current model label read-write, history reset, active-skill replacement and one
- * turn. `AgentSession` (P5) is the real implementation surface; the composition
- * root bridges it through {@link createSessionRunner} (P7 wiring).
+ * turn. `AgentSession` is the real implementation surface; the composition
+ * root bridges it through {@link createSessionRunner}.
  */
 export interface TurnRunner {
-  /** Current model label (C# `runner.CurrentModel`; `ModelSelection` reads/writes it). */
+  /** Current model label (`runner.CurrentModel`; `ModelSelection` reads/writes it). */
   readonly currentModel: string;
-  /** Commit a model label (P7 bridges the label to the session's ChatModel). */
+  /** Commit a model label ( bridges the label to the session's ChatModel). */
   setCurrentModel(model: string): void;
-  /** Clear screen + conversation memory (C# `runner.ResetHistory()`). */
+  /** Clear screen + conversation memory (`runner.ResetHistory`). */
   resetHistory(): void;
   /** Replace the active skill set (translates to the session's volatile request tail). */
   setActiveSkills(skills: readonly Skill[]): void;
-  /** Run one turn (C# `IAgentRunner.RunAsync`; `AgentSession.runTurn`). */
+  /** Run one turn through the active agent session. */
   runTurn(userMessage: string, signal?: AbortSignal): Promise<AgentResult>;
 }
 
@@ -54,16 +54,16 @@ export interface CliHost {
   readonly reasoningEffort?: string | null;
   /** REPL display configuration (output redirect sets UseAnsi false). */
   readonly replOptions?: ReplOptions;
-  /**
-   * Dispose chain (C# `CliHost.IDisposable`): writes `di exiting`, closes the
-   * DiLog file, clears the ProcessDiagnostics hook. The dispatch shell calls it
-   * after the mode body; idempotent.
-   */
+  /*
+ * Dispose chain (`CliHost.IDisposable`): writes `di exiting`, closes the
+ * DiLog file, clears the ProcessDiagnostics hook. The dispatch shell calls it
+ * after the mode body; idempotent.
+ */
   readonly dispose?: () => void;
 }
 
-/**
- * Host factory (C# `Func<CliArgs, string, TextWriter, bool, CliHost>`): called
+/*
+ * Host factory (`Func<CliArgs, string, TextWriter, bool, CliHost>`): called
  * with the parsed args, the current workspace, a stderr writer for construction
  * warnings and the ANSI decision (`stdoutTty && !noAnsi`). A throwing factory is
  * turned into the documented host-failure output (json → stdout error envelope,
@@ -79,10 +79,10 @@ export type CliHostFactory = (
   useAnsi: boolean,
 ) => CliHost | Promise<CliHost>;
 
-/**
- * Default host factory — the REAL composition root (P7a): AgentSession + tools +
+/*
+ * Default host factory — the REAL composition root: AgentSession + tools +
  * skills + sessionStore + DiLog + createSessionRunner, with `--resume` recovery
- * and the P6.4 emission seams. It is async (layered config load); the dispatch
+ * and the emission seams. It is async (layered config load); the dispatch
  * shell awaits it and turns a thrown/rejected factory into the documented
  * host-failure envelope. Injected factories replace it in tests / embedded hosts.
  */

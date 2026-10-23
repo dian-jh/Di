@@ -40,9 +40,9 @@ export {
 } from "./shell-session.ts";
 export type { ShellCommand, ShellSessionKind } from "./shell-session.ts";
 
-/**
+/*
  * The three file tools in canonical order (read/write/edit), the first slice of
- * the 8-tool registry (`Core/Tools/CoreTools.cs` canonical order). Glob/grep,
+ * the 8-tool registry ( canonical order). Glob/grep,
  * the one-shot shell tool (`createBashTool`) and the PowerShell / Python tools
  * (`createPowerShellTool` / `createPythonTool`) extend the registry.
  */
@@ -57,12 +57,12 @@ export function createFileTools(
   ];
 }
 
-/**
+/*
  * Build an `@di/agent` `ToolExecutor` routing tool-call names to these tools.
- * Unknown names return an error observation (C# `Executor` behavior), and the
+ * Unknown names return an error observation (`Executor` behavior), and the
  * AbortSignal is passed through to the tool.
  *
- * P4.5 compatibility alias (C# `CoreTools` registry behavior): when the tool
+ * compatibility alias (`CoreTools` registry behavior): when the tool
  * set contains the platform shell tool (display name "cmd" on Windows / "bash"
  * elsewhere) and no tool is independently named "bash", the old "bash" call
  * name routes to the same instance — so legacy prompts that invoke "bash"

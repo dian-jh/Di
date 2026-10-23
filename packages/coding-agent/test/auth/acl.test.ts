@@ -8,7 +8,6 @@ import { AclError, createAclAdapter, CredentialStore } from "@di/coding-agent";
 import { mockLockProvider, noopAcl } from "./test-doubles.ts";
 
 /**
- * P8b — ACL adapter (acl.ts).
  *
  * Windows: set + read back the current-user-only DACL via `icacls` subprocess
  * (probe §3b proved readback works; Node stat.mode on NTFS always reads 0o100666

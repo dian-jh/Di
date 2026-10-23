@@ -5,15 +5,14 @@ import type { ModelEvent, ProviderChunk, SseEvent } from "@di/ai";
 import { AssemblerError, SseEventParser, SseStreamError, parseSseStream, sseToModelEvents } from "@di/ai";
 
 /**
- * P3 card 2 red list — HTTP/SSE framing (Di baseline
- * `Core/Providers/DeepSeek/DeepSeekAdapter.cs` SSE parsing + models-and-auth.md
+ *
  * §DeepSeek 协议边界 item 1):
  * SSE field parsing (data/event/id, multi-line data, comments, CRLF/LF, optional
  * blank-line separation), byte-level chunk splitting/merging, multi-byte sequences
  * split across frames, clean EOF, mid-stream connection error, idle timeout.
  *
  * The generic raw translator below is test-only and deliberately NOT the DeepSeek
- * wire translator (P3 card 3): it maps a minimal JSON payload onto the provider
+ *
  * chunk vocabulary so the framer → assembler wiring can be exercised end to end.
  */
 
@@ -94,7 +93,7 @@ interface RawPayload {
 
 /**
  * Generic raw SSE → chunk translator used only by these framing tests. It is NOT
- * the DeepSeek wire translator (P3 card 3): it maps a minimal JSON payload onto
+ *
  * the provider chunk vocabulary to exercise the framer/assembler wiring.
  */
 function rawTranslator(event: SseEvent): readonly ProviderChunk[] {

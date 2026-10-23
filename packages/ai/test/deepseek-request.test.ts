@@ -5,8 +5,7 @@ import type { ModelRequest, ToolSpec } from "@di/ai";
 import { DeepSeekError, serializeRequest, toWireRequest } from "@di/ai";
 
 /**
- * P3 card 3 red list — DeepSeek request translation (Di baseline
- * `Core/Providers/DeepSeek/DeepSeekTranslator.cs` `ToWire` + models-and-auth.md
+ *
  * §DeepSeek 协议边界 items 2-3): internal AgentMessage/ToolSpec history → DeepSeek
  * wire DTO with byte-stable JSON (null vs omission, reasoning entries, tool-call
  * history), thinking/reasoning-effort mapping, tools/tool_choice, and validation

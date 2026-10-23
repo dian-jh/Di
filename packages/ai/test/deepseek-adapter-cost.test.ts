@@ -5,7 +5,7 @@ import type { ModelEvent, ModelRequest, TokenUsage } from "@di/ai";
 import { DeepSeekAdapter, costForModel } from "@di/ai";
 
 /**
- * P3.4 cost wiring red list — the DeepSeek adapter must forward the stream usage
+ *
  * to `costForModel("deepseek", model, usage)` so production `ModelResponse.cost`
  * is real (Di baseline `LlmRuntime.CalculateCost` + models-and-auth.md
  * §Token 与缓存计量). A catalog model with rates gets a computed cost; an

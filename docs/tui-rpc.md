@@ -1,169 +1,66 @@
-# Di RPC 协议（`--mode rpc`）：线协议唯一权威
+# TUI RPC 协议
 
-模型选择补充：`ready.models[].id` 使用 `provider/model` 完整路由。`command_ran`
-可包含 `models: [{id,name}]` 目录快照，TUI 在 `/model --refresh` 后更新参数补全。
-`set_model` 和 `/model` 共用名称匹配与本地鉴权检查；回合进行中拒绝模型或 `/thinking` 强度修改（`busy`），
-失败时保留当前模型。`set_model` 校验失败返回 `error.code: invalid_model`。
-`command_ran.effort` 始终返回当前值（默认档位为显式 null），`/thinking` 修改后更新显示，跨 provider 切换后前端清除旧强度显示。
+`--mode rpc` 使用 UTF-8 NDJSON：stdin 每行一个请求，stdout 每行一个响应或事件；stderr 用于
+诊断。编码/校验代码在 `tui/src/rpc/codec.ts`（`encodeMessage`、`parseMessage`），双端类型在
+`tui/src/rpc/protocol.ts`，TUI 客户端在 `tui/src/rpc/client.ts`，后端在
+`packages/coding-agent/src/modes/rpc-mode.ts`（`runRpcMode`）。输出采用 snake_case，未定义的可选
+字段省略。行内未知字段可忽略，但未知消息类型或事件 kind 会报协议错误。
 
-> 唯一权威：TS TUI（`tui/`）与 `di --mode rpc`（C# 后端）之间的进程边界协议。
-> 双端实现**必须**与此文档逐字段一致；事件载荷形状以 `Core.AgentLoop.AgentLoopEvent` 为准
-> （事件类型表唯一权威：`docs/modules/events.md`）。
->
-> 配套文档：`docs/tui.md`（设计）、`docs/cli.md`（CLI 契约与跨语言重写指南）。
+## 后端到 TUI
 
----
+启动时发送一次 `ready`：`version` 必填；当前 `model`、推理 `effort`、`skills` 和 `models` 可选。
+模型 id 为 `provider/model`，skill 项含 `name` 与 `description`。
 
-## 1. 传输与帧
+流式事件外层为 `{"type":"event","seq":N,"event":{...}}`，序号在每个回合内递增，最终
+`result.seq` 大于该回合的事件序号。事件载荷：
 
-- 子进程 **stdin / stdout** 均为 UTF-8 文本流；**每行一个 JSON 对象**（NDJSON），以 `\n` 结尾。
-- stdout 上的每个事件 / 结果必须**立即 flush**（实时流式）。
-- **stderr 不参与协议**（仅日志 / 诊断）。
-- **无背压协商**：请求串行处理，事件顺序 = 发布顺序；一次 `prompt` 请求对应一段连续事件流
-  并以一个 `result` 终结。
-- TUI 等到 `ready` 之后才开始发请求。
-
-## 2. 方向 核心 → TUI（stdout）
-
-### 2.1 `ready`
-
-```json
-{"type":"ready","version":"0.1.0","model":"deepseek-flash","effort":"high","skills":[{"name":"backend-tests","description":"跑后端测试"}],"models":[{"id":"deepseek-flash","name":"DeepSeek Flash"}]}
-```
-
-组合根（`CliHost`）构建完成、可服务请求后发出，仅一次。携带会话元数据快照，TUI 据此渲染
-右下角状态栏（模型 + 强度）与命令补全（`/model`、`/skill`）：
-
-| 字段 | 类型 | 语义 |
-|---|---|---|
-| `model` | string | 当前生效模型名（`/model` 可切换） |
-| `effort` | string? | 推理强度（支持值因模型而异；启动由 `--thinking` / 配置提供，运行期可用 `/thinking` 修改）。ready 中 null 键省略 |
-| `skills` | `[{name,description}]` | 可见 skills（`/skill` 补全与一次性执行） |
-| `models` | `[{id,name}]` | 模型目录（`/model <Tab>` 参数补全） |
-
-### 2.2 `event`
-
-```json
-{"type":"event","seq":<int>,"event":{"kind":"<kind>", ...}}
-```
-
-`seq` 单调递增（回合内连续）。`kind` 与载荷：
-
-| kind | 载荷字段 | 对应 `AgentLoopEvent` |
-|---|---|---|
-| `text_delta` | `delta: string` | `TextDelta` |
-| `reasoning_delta` | `delta: string` | `ReasoningDelta`（M1 新增，转发 `ModelEvent.ReasoningDelta`） |
-| `tool_call_delta` | `id,name,arguments`（arguments 为迄今原始 JSON 串，可能未完成） | `ToolCallDelta`（M1 新增，转发 `ModelEvent.ToolCallDelta`） |
-| `tool_started` | `call: {id,name,arguments}` | `ToolStarted` |
-| `tool_completed` | `call: {id,name,arguments}`, `observation: string`, `is_error: bool` | `ToolCompleted` |
-| `turn_completed` | `iteration: int`, `usage: TokenUsage`, `cost?: number`, `finish_reason: string` | `TurnCompleted` |
-| `run_failed` | `failure: {code,message,status?,provider_retry_after?}` | `RunFailed` |
-| `interrupted` | 无 | `Interrupted`（软停止：回合将在相位边界收敛，见 `docs/interrupt.md`） |
-
-`TokenUsage`（snake_case，null 键省略）：
-`{input_tokens, output_tokens, total_tokens?, cache_read_tokens?, cache_write_tokens?, reasoning_tokens?}`。
-
-`turn_completed.usage` 和 `cost` 是回合截至该 iteration 的累计快照；同一 prompt 的 `result.usage` / `cost` 是最终回合值。前端只用 `result` 结算正常会话累计，遇到携带合成零 usage 的错误/取消终结时才回退到最后事件快照，避免重复累加。
-
-### 2.3 `result`
-
-```json
-{"type":"result","seq":<int>,"result":{
-  "answer": string,
-  "stop_reason": "answer"|"final_output_tool"|"max_iterations"|"context_limit"|"error"|"cancelled"|"interrupted",
-  "iterations": int,
-  "usage": { ...TokenUsage },
-  "cost"?: number,
-  "failure"?: {"code": string, "message": string}
-}}
-```
-
-- 每个 `prompt` 请求**恰好一个** `result`，为该回合的终结。
-- 位于 `prompt` 与 `result` 之间的全部 `event` 属于该回合。
-- 中断取消 → `stop_reason: "cancelled"`（C# 侧由 RpcMode 捕获 `OperationCanceledException` 合成；
-  `AgentStopReason` 无此值，故由宿主层映射，不落 Core）。
-- 软停止 → `stop_reason: "interrupted"`（`AgentStopReason.Interrupted` 直接映射，Core 原生；
-  回合在相位边界收敛，先发一个 `interrupted` 事件再发 `result`）。见 `docs/interrupt.md`。
-- 上下文预算不足 → `stop_reason: "context_limit"`。本轮在模型调用前暂停，checkpoint 保留完整轨迹；增大预算后显式继续，避免丢弃原任务。
-
-### 2.4 `error`
-
-```json
-{"type":"error","code":string,"message":string}
-```
-
-会话级不可恢复错误（如凭据缺失，code 沿用 `LlmErrorCodes`）。回合内失败走 `run_failed` /
-`result.stop_reason:"error"`，不用 `error` 消息。
-
-### 2.5 命令应答（`command` 请求的同步应答）
-
-`{"type":"request","method":"command",...}` 的应答为以下三种之一：
-**按请求序同步返回**（命令处理期间主循环不读下一条请求，不与事件流交错）：
-
-```json
-{"type":"command_listed","commands":[{"name":"clear","description":"清空屏幕与对话记忆","argument_hint":null}]}
-{"type":"command_ran","name":"model","lines":["模型已切换为 deepseek-chat"],"exit":false,"model":"deepseek-chat","effort":"high"}
-{"type":"command_error","code":"turn_not_supported","message":"命令 /skill 是回合型命令，TUI 应改用 prompt 执行","turn_message":"【Skill：backend-tests】跑后端测试\n\ndotnet test\n\n补测试"}
-{"type":"command_error","code":"unknown_command","message":"未知命令: /bogus"}
-```
-
-- `command_listed`：`list` 应答，列出注册表全部命令（内置 + 用户命令，按名排序）。
-  `commands[i] = {name, description, argument_hint?}`。
-- `command_ran`：`run` 应答；`lines` 为命令输出行（无 ANSI），`exit=true` 表示命令请求退出
-  （如 `/exit`，TUI 自行决定是否发 `shutdown`）。`model` / `effort` 为命令执行后的模型/强度
-  快照（`/model` 切换后 TUI 据此更新状态栏，不依赖解析提示文本）。
-- `command_error`：命令级错误（**不含在 `error` 会话级语义内**）：
-  - `unknown_command` —— 注册表无此命令；
-  - `turn_not_supported` —— 回合型命令（`/skill <名> <参数>`、用户命令）：RPC 无回合执行器，
-    应答携带 `turn_message`（指令+参数全文），TUI 据此**改用自身 `prompt` 机制跑回合**；
-  - `invalid_request` —— 参数非法（缺 `name`、类型错误等）。
-
-## 3. 方向 TUI → 核心（stdin）
-
-每行一个请求：
-
-```json
-{"type":"request","id":<int>,"method":"<m>","params":{...}}
-```
-
-- 请求**串行**处理（按行序）；`prompt` 处理中收到 `interrupt` → 取消当前回合。
-- 无逐请求回执；对 `prompt` 的"回执"即 stdout 事件流 + 一个 `result`。`id` 保留给未来
-  并行请求（如列表会话），当前恒单调递增即可。
-
-| method | params | 语义 |
-|---|---|---|
-| `prompt` | `{message: string}` | 运行一回合（等价 `IAgentRunner.RunAsync`）；事件流 + `result` |
-| `interrupt` | `{}` | **硬取消**当前回合 → 对应 `result.stop_reason:"cancelled"`（软停止尚未接线到本协议，见 `docs/interrupt.md` §7） |
-| `set_model` | `{model: string}` | `AgentRunner.CurrentModel` |
-| `set_skills` | `{names: string[]}` | 替换会话固定 skill 集，未知名称忽略；每个 `prompt` 通过 `SkillActivation.Compute` 叠加自动匹配并重算 `AgentRunner.ActiveSkills` |
-| `clear_history` | `{}` | `AgentRunner.ResetHistory()` |
-| `command` | `{list?: true}` 或 `{name: string, args?: string}` | 列出（`list: true`）或运行（`name`，可选 `args`）斜杠命令；应答见 §2.5。回合型命令返回 `command_error: turn_not_supported` |
-| `ping` | `{}` | 心跳，无应答 |
-| `shutdown` | `{}` | 优雅退出，exit 0 |
-
-## 4. 约定与不变式
-
-- **序列化**：snake_case；null 键省略；宽松 UTF-8 转义。与 `Di.Cli/modes/PrintMode.cs` /
-  `Core/Sessions/SessionLog.cs` 的 `JsonSerializerOptions`（`PropertyNamingPolicy = SnakeCaseLower,
-  DefaultIgnoreCondition = WhenWritingNull, Encoder = UnsafeRelaxedJsonEscaping`）保持一致。
-- **UTF-8**：后端启动时固定 `Console.OutputEncoding/InputEncoding = UTF-8`（沿
-  `Di.Cli/Program.cs` 惯例；GBK 代码页下防乱码）。
-- **失败是消息不是崩溃**：回合失败 → `run_failed` 或 `result.stop_reason:"error"`；协议解析失败
-  → `error` 消息后继续（或按行号报告）。
-- **向后兼容**：TUI 对未知 `kind` 应忽略并告警，不得崩溃。
-- **退出码**：`shutdown` → 0；stdin EOF → 结束当前回合后 exit 0；其余异常 exit 1（沿
-  `docs/cli.md` 退出码契约）。
-
-## 5. 实现映射（源码为最终权威）
-
-| 端 | 位置（相对仓库根） |
+| `event.kind` | 字段 |
 |---|---|
-| C# 模式分派 | `Di.Cli/cli/CliMode.cs`（`AppMode.Rpc`）+ `Di.Cli/CliApp.cs`（分派到 RpcMode） |
-| C# 后端宿主 | `Di.Cli/modes/RpcMode.cs`（新增） |
-| C# 事件转发 | `Core/AgentLoop/ReAct.cs`（`ReasoningDelta`/`ToolCallDelta` 补发）+ `Core/AgentLoop/AgentLoopEvent.cs`（新记录） |
-| TS 类型 | `tui/src/rpc/protocol.ts` |
-| TS 编解码 | `tui/src/rpc/codec.ts` |
-| TS 子进程客户端 | `tui/src/rpc/client.ts` |
+| `text_delta` / `reasoning_delta` | `delta` |
+| `tool_call_delta` | `id`、`name`、累积的原始 JSON `arguments` 字符串 |
+| `tool_started` | `call`（`id`、`name`、`arguments`） |
+| `tool_completed` | `call`、`observation`、`is_error` |
+| `turn_completed` | `iteration`、`usage`、可选 `cost`、`finish_reason` |
+| `run_failed` | `failure`（`code`、`message`，可选 HTTP `status` / `provider_retry_after`） |
 
-> 事件类型表（`AgentLoopEvent` 全量载荷）唯一权威在 `docs/modules/events.md`，本页只定义线格式
-> 与映射关系，不复制载荷定义。
+每个 `prompt` 恰好产生一个终结 `result`，包含 `seq` 和 `result`；结果字段为 `answer`、
+`stop_reason`、`iterations`、`usage`，以及可选 `cost`、`failure`。`usage` 至少含
+`input_tokens`、`output_tokens`，其它 token 计数可省略。停止原因包括 `answer`、
+`final_output_tool`、`max_iterations`、`error`、`interrupted`、`context_limit`、`cancelled`。
+RPC `interrupt` 取消正在运行的回合，终结结果使用 `cancelled`。软停止事件不会单独编码到 wire。
+
+会话级错误为 `{"type":"error","code":"…","message":"…"}`。后端还发送
+`command_listed`、`command_ran`、`command_error`；命令列表字段为 `name`、`description`、可选
+`argument_hint`。命令结果含 `lines`、`exit`，并可包含模型目录、当前模型及 `effort` 快照。
+
+## TUI 到后端
+
+请求格式为 `{"type":"request","id":N,"method":"…","params":{…}}`。客户端递增 `id`，但
+当前后端不在输出中回显 id；客户端只允许单个 prompt / command 未完成，并按 stdout 顺序读取
+`event`、`result` 和命令应答，不要把 id 当作应答关联键。
+
+| `method` | `params` | 行为 |
+|---|---|---|
+| `prompt` | `message` 字符串 | 开始回合；回合执行期间后端继续读取请求 |
+| `interrupt` | `{}` | 取消当前回合 |
+| `set_model` | `model` 字符串 | 切换模型；运行中的回合返回 `busy` |
+| `set_skills` | `names` 字符串数组 | 设置固定启用的 skill，未知名称忽略 |
+| `clear_history` | `{}` | 清空内存会话历史 |
+| `command` | `{list:true}` 或 `{name,args?}` | 列命令或运行同步命令 |
+| `ping` | `{}` | 心跳，不回包 |
+| `shutdown` | `{}` | 等待当前回合结束后正常退出 |
+
+请求按 stdin 行序列处理。回合执行在后台进行，`interrupt` 和 `shutdown` 可在回合期间到达；新
+`prompt` 会先等上一回合结束。语法错误返回 `parse_error` 并继续读后续行；缺字段返回
+`invalid_request`；未知 method 返回 `unknown_method`。正在运行时切换模型返回 `busy`；无效模型
+返回 `invalid_model`。`command` 对未知命令返回 `unknown_command`，回合型命令返回
+`turn_not_supported` 并附 `turn_message`，由 TUI 再发 prompt。`ping` 无应答；stdin EOF 会等当前
+回合结束再以 0 退出。
+
+## 启动与 TUI 接线
+
+`tui/src/rpc/backend-launcher.ts` 的 `buildBackendLauncher` 优先采用显式 `DI_BIN`，否则定位
+workspace 编译入口或 TUI 同级安装包中的 `@di/coding-agent` 编译入口，并使用当前 Node 启动。
+TUI 通过 `tui/src/runner/rpc-port.ts` 将 RPC client 映射到 `RunnerPort`，再由
+`tui/src/interactive.ts` 的 `runInteractive` 驱动界面。生产 CLI 的本地 runner adapter 位于
+`packages/coding-agent/src/adapters/tui-runner.ts`。

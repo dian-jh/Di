@@ -42,26 +42,26 @@ import type { CliHost, CliHostFactory, TurnRunner } from "./cli-host.ts";
 import type { CliArgs } from "./args.ts";
 import type { TextWriter } from "./io.ts";
 
-/**
- * The REAL composition root (C# `Di.Cli/CliHost.Create` at baseline 09f4e08),
- * replacing the P6.3b fail-closed `defaultCliHostFactory` stub: assemble config /
- * tools (P4.x) / skills (P6.2) / sessionStore (P5) / AgentSession / DiLog (P6.4) /
+/*
+ * The REAL composition root,
+ * replacing the fail-closed `defaultCliHostFactory` stub: assemble config /
+ * tools (.x) / skills / sessionStore / AgentSession / DiLog /
  * createSessionRunner into one {@link CliHost} every mode drives.
  *
- * P7 wiring decisions:
+ * wiring decisions:
  * - `--resume` loads the trajectory through {@link loadRecovery} FIRST (a
- *   recovery failure throws and becomes the documented host-failure envelope —
+ * recovery failure throws and becomes the documented host-failure envelope —
  * - the current-model LABEL is resolved to the session's `ChatModel` at turn
- *   boundaries (`AgentSessionConfig.resolveModel`) and on `setCurrentModel`
- *   (`session.setModel`) — the provider runtime creates the configured adapter/retry chain
- *   with native credential locking for ChatGPT.
+ * boundaries (`AgentSessionConfig.resolveModel`) and on `setCurrentModel`
+ * (`session.setModel`) — the provider runtime creates the configured adapter/retry chain
+ * with native credential locking for ChatGPT.
  *
- * - the P6.4 emission seams are closed here: `runStarted` is published before
- *   every `session.runTurn`, and every resolved model is wrapped in
- *   {@link ModelCallProbe} so `modelCallStarted` reaches the bus on each call;
+ * - the emission seams are closed here: `runStarted` is published before
+ * every `session.runTurn`, and every resolved model is wrapped in
+ * {@link ModelCallProbe} so `modelCallStarted` reaches the bus on each call;
  * - `DiLog` subscribes to the bus, writes `di starting pid=… workspace=…`, and
- *   `ProcessDiagnostics.log` is injected into `DiLog.log`; `dispose()` writes
- *   `di exiting`, closes the file and clears the static hook.
+ * `ProcessDiagnostics.log` is injected into `DiLog.log`; `dispose` writes
+ * `di exiting`, closes the file and clears the static hook.
  *
  * Everything is injectable so tests never touch the network or the user's home:
  * diHome / config / modelFactory / modelService / tools / skills /
@@ -70,7 +70,7 @@ import type { TextWriter } from "./io.ts";
 
 /** Composition-root injection points (tests replace the real defaults; production uses none). */
 export interface ComposeCliHostOptions {
-  /** DI_HOME override (default: `DiHome.fromEnvironment(process.env, homedir())`). */
+  /** DI_HOME override (default: `DiHome.fromEnvironment(process.env, homedir)`). */
   readonly diHome?: DiHome;
   /** Pre-loaded effective config (default: layered DiConfig.load from the standard sources). */
   readonly config?: DiConfig;
@@ -90,16 +90,16 @@ export interface ComposeCliHostOptions {
   readonly artifactPid?: () => number;
 }
 
-/** Global cross-tool operation rules contributed to the system prompt (C# `CoreTools.GlobalPromptGuidelines`). */
+/** Global cross-tool operation rules contributed to the system prompt (`CoreTools.GlobalPromptGuidelines`). */
 const GLOBAL_PROMPT_GUIDELINES = [
   '观察结果以 "exit: N"（退出码）或 "error: ..."（出错）开头；error 表示修正参数后重试',
   "长输出会被截断（保留头尾）；必要时缩小搜索范围或分批读取",
   "回答要简洁",
 ];
 
-/**
+/*
  * Build the tool-usage instructions injected as the stable system-prompt prefix
- * (C# `CoreTools.BuildInstructions`): a one-line list of the available tools and
+ * (`CoreTools.BuildInstructions`): a one-line list of the available tools and
  * the de-duplicated operation rules contributed by the tools themselves.
  */
 export function buildToolInstructions(tools: readonly CoreTool[]): string {
@@ -154,7 +154,7 @@ export async function createCliHost(
       { readFile: defaultReadFile },
     ));
 
-  // Effective model options (C# `ModelOptions` + CLI overrides): --provider swaps
+  // Effective model options ( + CLI overrides): --provider swaps
   // the provider route, --model overrides the default model label.
   const configuredProvider = asString(config.get("model:provider"), "deepseek");
   const configuredDefaultModel = asString(config.get("model:defaultmodel"), "deepseek-flash");
@@ -187,7 +187,7 @@ export async function createCliHost(
   })();
   const toolSpecs = tools.map((tool) => tool.spec);
 
-  // Skills: standard locations in priority order (C# `CliHost.Create`): user
+  // Skills: standard locations in priority order: user
   // ~/.agents/skills → DI_HOME/skills → ancestor .agents/skills (nearest→git root)
   // → project <workspace>/.di/skills (highest). Invalid files only warn.
   const userHome = homedir();
@@ -227,7 +227,7 @@ export async function createCliHost(
 
   const sessionStore = args.noSession ? undefined : new SessionStore({ rootDirectory: diHome.rootDirectory });
 
-  // Skill-aware executor (C# `AgentRunner`): with skills present, expose the
+  // Skill-aware executor: with skills present, expose the
   // load_skill tool to the model and intercept its calls; otherwise the plain
   // executor over the core tool set.
   const baseExecutor = createToolExecutor(tools);
@@ -317,7 +317,7 @@ export async function createCliHost(
 
   // The host's runner IS the ModelSelectionHost seam: it publishes runStarted
   // before every turn and tracks the busy flag that rejects mid-turn model
-  // switches (C# `AgentRunner.RunAsync` publishes RunStarted; ModelSelection
+  // switches ( publishes RunStarted; ModelSelection
   // pre-checks the busy session).
   const runner: TurnRunner & ModelSelectionHost = {
     get currentModel(): string {
@@ -394,11 +394,11 @@ export async function createCliHost(
   };
 }
 
-/** The production host factory (C# `Func<CliArgs, string, TextWriter, bool, CliHost>`). */
+/** The production host factory. */
 export const defaultCliHostFactory: CliHostFactory = createCliHost;
 
 /**
- * Advisory model catalog (C# `ILlmService` subset): deepseek / chatgpt routes
+ * Advisory model catalog ( subset): deepseek / chatgpt routes
  * from the shared `MODEL_CATALOG` (models-and-auth.md). Refresh is in-memory (the
  * catalog is advisory, never a network call); auth checks are local env/config
  * probes only — DeepSeek requires the API key present; ChatGPT uses the host auth store.

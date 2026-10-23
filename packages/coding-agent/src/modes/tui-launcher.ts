@@ -2,10 +2,10 @@ import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { join } from "node:path";
 
-/**
- * Interactive-mode frontend decision (C# `Di.Cli/TuiLauncher.cs` at baseline
- * 09f4e08, M4): interactive defaults to handing the console to the TS TUI (node
- * subprocess inheriting stdio) and falls back to the C# REPL when unavailable.
+/*
+ * Interactive-mode frontend decision (at current implementation
+ *, M4): interactive defaults to handing the console to the TS TUI (node
+ * subprocess inheriting stdio) and falls back to the REPL when unavailable.
  * All external dependencies (env / entry resolution / node probe / spawn) go
  * through the injectable {@link TuiLauncherContext} so tests never open a real
  * process. Rules: `DI_UI=repl` (exact) forces the REPL; otherwise `DI_TUI` (file

@@ -8,9 +8,6 @@ import type { AgentResult } from "@di/agent";
 import { aggregateSessionStats, SessionStore } from "@di/coding-agent";
 
 /**
- * P5 session stats (docs/migration/typescript-core/sessions-and-compatibility.md
- * §"审计型回合" + the stats gate "累计快照不会重复统计，未知字段不伪造已知"; C#
- * baseline `Core/Sessions/SessionStats.cs` `Aggregate`).
  *
  * Aggregation is per `task_complete` record, exactly once each: turns, token
  * counts, cost and duration are cumulative snapshots. Unknown/extra fields and

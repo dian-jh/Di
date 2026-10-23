@@ -1,8 +1,8 @@
-// P7b-3 scenario-C session-generation fixture.
+
 //
 // An independent Node process that imports the committed @di/coding-agent dist
 // and, using the REAL SessionStore, writes a COMPLETED session into an isolated
-// DI_HOME — mirroring the P5 child-test-host "after-completed" shape (host.mjs)
+
 // but with the real `write_file` tool name and a real side-effect file written
 // through the real tool executor:
 //
@@ -12,7 +12,7 @@
 //     c2 = write_file  → never starts (partial batch completes)
 //   completeCheckpointTurn  → the turn is durably completed
 //
-// The PRODUCTION of the session is this fixture's job (host-style, like P5). The
+
 // RESTART in the parent test MUST go through the real CLI production chain
 // (`node dist/cli/main.js --mode rpc --resume <file>`), never through this
 // fixture or a test host — the "no side-effect replay" proof is the
@@ -28,7 +28,7 @@
 // Why this lives in test/cli/fixtures/ instead of test/child-test-host/: it is
 // the scenario-C producer for THIS card (crash-resume through the real CLI), and
 // keeping it beside test/cli/crash-resume.test.ts keeps the card's inputs local;
-// test/child-test-host/ is P5's territory (host.mjs + its sibling tests). It is
+
 // an .mjs (not .mts) so `node` runs it directly with zero type-stripping setup,
 // exactly like host.mjs does.
 

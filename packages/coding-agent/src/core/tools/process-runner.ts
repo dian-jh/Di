@@ -7,9 +7,9 @@ import { smartDecode, type LegacyDecoder } from "./encoding.ts";
 import { resolveOemDecoder } from "./read.ts";
 import { ProcessDiagnostics } from "../logging/process-diagnostics.ts";
 
-/**
- * One-shot process runner (port of `Core/Tools/ProcessRunner.cs` at 09f4e08 +
- * the P4-win-process-probe conclusions).
+/*
+ * One-shot process runner ( +
+ * the conclusions).
  *
  * Lifecycle: a single internal AbortController unifies the tool timeout and the
  * external AbortSignal. Whichever fires first triggers the same teardown —
@@ -21,7 +21,7 @@ import { ProcessDiagnostics } from "../logging/process-diagnostics.ts";
  * (head 6000 / tail 18000 bytes with a truncation notice; never unbounded
  * concatenation, never collect-then-truncate). The whole segment is decoded only
  * after exit (`outputEncoding` pinned, or UTF-8-first/OEM-fallback smart decode)
- * so a mixed cmd-OEM / .NET-CLI-UTF-8 stream decodes correctly.
+ * so a mixed cmd-OEM /.NET-CLI-UTF-8 stream decodes correctly.
  *
  * After a natural exit the drains get an independent ~1s budget: a background
  * child that inherited the pipes cannot hang the call forever — on budget expiry
@@ -30,36 +30,35 @@ import { ProcessDiagnostics } from "../logging/process-diagnostics.ts";
  * external cancel propagates AbortError.
  */
 
-/** Drain budget after a natural exit, ms (C# `DrainTimeoutMs`). */
+/** Drain budget after a natural exit, ms (`DrainTimeoutMs`). */
 export const PROCESS_DRAIN_BUDGET_MS = 1000;
-/** Budget to await the process `close` after a tree kill, ms (P4-win-process-probe §2: 5s). */
+/** Budget to await the process `close` after a tree kill, ms ( §2: 5s). */
 export const PROCESS_KILL_BUDGET_MS = 5000;
 /** POSIX SIGTERM grace before SIGKILL when killing the process group. */
 const POSIX_KILL_GRACE_MS = 1500;
 
-/**
- * Process-diagnostics knobs (P7a closing the P6.4 emission seam; C#
- * `Core/Tools/ProcessRunner.cs` at baseline 09f4e08): the runner emits bypass
+/*
+ * Process-diagnostics knobs ( closing the emission seam; * ): the runner emits bypass
  * `proc: start / start_failed / running / timeout / exited` lines through the
  * static {@link ProcessDiagnostics} hook. The heartbeat cadence and the
  * slow-success threshold are injectable so tests observe them without a
- * multi-second run (production defaults mirror C#).
+ * multi-second run (production defaults mirror ).
  */
 export interface ProcessDiagnosticsOptions {
-  /** Heartbeat cadence, ms (C# 5000); `proc: running` lines emitted while the process lives. */
+  /** Heartbeat cadence, ms (5000); `proc: running` lines emitted while the process lives. */
   readonly heartbeatIntervalMs?: number;
-  /** Heartbeat tick cadence, ms (C# 1000); the process-liveness poll. */
+  /** Heartbeat tick cadence, ms (1000); the process-liveness poll. */
   readonly heartbeatTickMs?: number;
-  /** Minimum timeout for the heartbeat to start, ms (C# 3000 = `timeout >= 3s`). */
+  /** Minimum timeout for the heartbeat to start, ms (3000 = `timeout >= 3s`). */
   readonly heartbeatMinTimeoutMs?: number;
-  /** Minimum elapsed time for the `proc: exited` slow-success line, ms (C# 2000). */
+  /** Minimum elapsed time for the `proc: exited` slow-success line, ms (2000). */
   readonly exitedMinElapsedMs?: number;
 }
 
 export interface ProcessRunOptions {
   /** Working directory (spawn cwd). */
   readonly cwd?: string;
-  /** Extra environment variables, merged over the parent environment (C# `psi.Environment` overrides). */
+  /** Extra environment variables, merged over the parent environment (`psi.Environment` overrides). */
   readonly env?: Readonly<Record<string, string>>;
   /** Tool timeout in milliseconds; undefined = no timeout. */
   readonly timeoutMs?: number;
@@ -75,25 +74,25 @@ export interface ProcessRunOptions {
   readonly killBudgetMs?: number;
   /** Override the OEM code page used for non-UTF-8 decode (undefined = auto-discover). */
   readonly oemCodePage?: number;
-  /** Process-diagnostic knobs (heartbeat cadence / slow-success threshold); undefined = C# defaults. */
+  /** Process-diagnostic knobs (heartbeat cadence / slow-success threshold); undefined = defaults. */
   readonly diagnostics?: ProcessDiagnosticsOptions;
-  /**
-   * Run the command through the platform default shell (`shell: true`). When
-   * true, `[file, ...args].join(" ")` is passed as ONE command-line string to
-   * `spawn(..., { shell: true })` — Node on Windows wraps it as
-   * `comspec /d /s /c "<line>"` (equivalent to C# `ProcessRunner`'s
-   * `rawArguments` for cmd, so embedded quotes are preserved verbatim and
-   * `&` / redirection / `%CD%` work), on POSIX as `/bin/sh -c <line>` (one arg,
-   * equivalent to C# `ShellCommand.Default` args array). Default false: all
-   * existing behavior is unchanged (args-array spawn, no shell quoting).
-   */
+  /*
+ * Run the command through the platform default shell (`shell: true`). When
+ * true, `[file,...args].join(" ")` is passed as ONE command-line string to
+ * `spawn(..., { shell: true })` — Node on Windows wraps it as
+ * `comspec /d /s /c "<line>"` (equivalent to `ProcessRunner`'s
+ * `rawArguments` for cmd, so embedded quotes are preserved verbatim and
+ * `&` / redirection / `%CD%` work), on POSIX as `/bin/sh -c <line>` (one arg,
+ * equivalent to `ShellCommand.Default` args array). Default false: all
+ * existing behavior is unchanged (args-array spawn, no shell quoting).
+ */
   readonly shell?: boolean;
-  /**
-   * Redirect the child's stdin as a pipe and close it immediately after spawn
-   * (C# `redirectInput: true` semantics — the child's stdin starts at EOF, never
-   * inheriting the caller's handle; `sys.stdin.isatty()` is false and reads hit
-   * EOF at once). The Python tool uses this for its process-level sandbox.
-   */
+  /*
+ * Redirect the child's stdin as a pipe and close it immediately after spawn
+ * (`redirectInput: true` semantics — the child's stdin starts at EOF, never
+ * inheriting the caller's handle; `sys.stdin.isatty` is false and reads hit
+ * EOF at once). The Python tool uses this for its process-level sandbox.
+ */
   readonly closeStdin?: boolean;
 }
 
@@ -178,8 +177,8 @@ export async function runProcess(
   // Default: args array, never a shell string (no shell-quoting injection).
   // `shell: true` (bash tool, platform default shell): the joined line is passed
   // to spawn with shell:true so Node itself constructs `comspec /d /s /c "<line>"`
-  // on Windows (= C# `rawArguments`, embedded quotes preserved, `&`/redirection/
-  // `%CD%` work) and `/bin/sh -c <line>` on POSIX (one arg, = C# args array). All
+  // on Windows (=, embedded quotes preserved, `&`/redirection/
+  // `%CD%` work) and `/bin/sh -c <line>` on POSIX (one arg, = args array). All
   // lifecycle semantics (tree kill, bounded drain, timeout/cancel, startup
   // failure) are identical either way — no separate spawn path bypasses it.
   let child: ChildProcess;
@@ -216,7 +215,7 @@ export async function runProcess(
   };
 
   // Drain stdout/stderr in parallel into the single bounded byte ring. Errors are
-  // benign (abort destroy / IO), matching C# DrainAsync.
+  // benign (abort destroy / IO), matching DrainAsync.
   const drainTasks = [drainStream(child.stdout, buffer), drainStream(child.stderr, buffer)];
 
   // Startup detection: 'spawn' = started, 'error' before that = failed startup.
@@ -232,7 +231,7 @@ export async function runProcess(
     return new ProcessResult(-1, "", `无法启动进程: ${messageOf(spawnFailure)}`);
   }
 
-  // C# `redirectInput: true` semantics: the child's stdin pipe hits EOF at once
+  //  semantics: the child's stdin pipe hits EOF at once
   // (python sandbox — the code must not reach the caller's terminal, and an
   // inherited orphan pipe could wedge startup). The caller opts in by passing a
   // "pipe" stdin in `stdio` plus `closeStdin: true`.
@@ -280,7 +279,7 @@ export async function runProcess(
     exitCode = await Promise.race([childExit, abortRace]);
   } catch {
     // Unified abort: timeout or external cancel -> kill the TREE, await close,
-    // settle drains, then decide the semantics (C# catch Order of WaitForExitAsync).
+    // settle drains, then decide the semantics (catch Order of WaitForExitAsync).
     await killProcessTree(child);
     const budget = cancellableDelay(killBudgetMs);
     const closed = await Promise.race([childClose.then(() => true), budget.promise.then(() => false)]);
@@ -303,7 +302,7 @@ export async function runProcess(
 
   // Natural exit: the drains get an independent budget (a child inheriting the
   // pipes must never hang the call forever). Then honour a cancel that raced the
-  // exit (C# `cancellationToken.ThrowIfCancellationRequested()` after drain).
+  // exit ( after drain).
   const drainBudget = cancellableDelay(drainBudgetMs);
   const drained = await Promise.race([
     Promise.all(drainTasks).then(() => true),
@@ -312,7 +311,7 @@ export async function runProcess(
   if (drained) drainBudget.cancel();
   if (!drained) destroyStreams();
   await Promise.allSettled(drainTasks);
-  // A cancel that raced the exit wins (C# `ThrowIfCancellationRequested` after
+  // A cancel that raced the exit wins ( after
   // the drain); `externalAbort` is the mutable flag so TypeScript cannot narrow
   // it away — the signal may abort at any await point.
   if (externalAbort) {
@@ -338,7 +337,7 @@ async function drainStream(stream: NodeJS.ReadableStream | null, buffer: Bounded
       buffer.append(chunk as Uint8Array);
     }
   } catch {
-    // aborted / destroyed / IO error: benign (C# DrainAsync catches OCE + IOException).
+    // aborted / destroyed / IO error: benign (DrainAsync catches OCE + IOException).
   }
 }
 
@@ -421,7 +420,7 @@ async function decodeOutput(
 }
 
 /**
- * Decode one byte segment: pinned label (non-fatal, C# `GetString` parity) or
+ * Decode one byte segment: pinned label (non-fatal,  parity) or
  * smart decode. Without an OEM decoder, strict UTF-8 with the 1–3 byte seam
  * trims only; failure returns null (explicit decode error, never mojibake).
  */
@@ -462,7 +461,7 @@ function strictUtf8OrNull(bytes: Uint8Array): string | null {
 /** Sentinel for an explicit decode failure (surfaced as an error observation). */
 class OutputDecodeError extends Error {}
 
-/** Merge env overrides over the parent environment (C# `psi.Environment` semantics). */
+/** Merge env overrides over the parent environment ( semantics). */
 function mergeEnv(overrides: Readonly<Record<string, string>> | undefined): NodeJS.ProcessEnv | undefined {
   if (overrides === undefined) return undefined;
   const merged: Record<string, string> = {};
@@ -484,7 +483,7 @@ function formatTimeoutSeconds(timeoutMs: number | undefined): string {
 /**
  * Emit one process-diagnostic line: the hook is nullable and exceptions are
  * swallowed — diagnostics are a bypass observation and must never affect the
- * process they are watching (C# `ProcessRunner.Diagnose`).
+ * process they are watching.
  */
 function diagnose(message: string): void {
   try {
@@ -494,22 +493,22 @@ function diagnose(message: string): void {
   }
 }
 
-/** Collapse control characters and truncate long fields (C# `TruncateField`: 200, 300 for partial). */
+/** Collapse control characters and truncate long fields (: 200, 300 for partial). */
 function truncateField(text: string, max = 200): string {
   const flat = text.replace(/\r/g, " ").replace(/\n/g, " ");
   return flat.length <= max ? flat : flat.slice(0, max) + "…";
 }
 
-/** Reconstruct the command line for the `proc: start` line (C# `BuildCommandLine`). */
+/** Reconstruct the command line for the `proc: start` line. */
 function commandLine(file: string, args: readonly string[]): string {
   return args.length === 0 ? file : `${file} ${args.join(" ")}`;
 }
 
 /**
- * Heartbeat monitor (C# `StartHeartbeatMonitorAsync`): poll the process liveness
- * every `tickMs` (C# 1s) and emit a `proc: running` line every `intervalMs`
- * (C# 5s) while it lives within the timeout. Only started when the timeout is
- * long enough to matter (C# `timeout >= 3s`). Returns a stop token, or null
+ * Heartbeat monitor: poll the process liveness
+ * every `tickMs` (1s) and emit a `proc: running` line every `intervalMs`
+ * (5s) while it lives within the timeout. Only started when the timeout is
+ * long enough to matter. Returns a stop token, or null
  * when the monitor is not started; the monitor is also stopped when the process
  * exits and via the caller's cleanup list.
  */

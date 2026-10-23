@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { AppMode, CliArgsParser, CliMode } from "@di/coding-agent";
 
 /**
- * P6.3b card — CLI argument parsing (port of C# `Di.Cli.Tests/cli/CliArgsTests.cs`
- * at baseline 09f4e08): pure `string[] → CliArgs + diagnostics` mapping with the
+ *
  * pessimistic rules — unknown flags, missing values, invalid --mode, `--`
  * terminator and the optional --list-models pattern.
  */

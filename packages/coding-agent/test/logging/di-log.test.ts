@@ -8,8 +8,7 @@ import { DiLog, EventBus, LogLevel, ProcessDiagnostics } from "@di/coding-agent"
 import type { DiLogOptions, ProcessDiagnosticSink } from "@di/coding-agent";
 
 /**
- * P6.4 card — run logging, port of C# `Di.Tests/Logging/DiLogTests.cs` at
- * baseline 09f4e08 against docs/modules/logging.md: jcode format lines
+ *
  * (`[yyyy-MM-dd HH:mm:ss.fff] [LEVEL] message`), one daily
  * `di-YYYY-MM-DD.log` (LOCAL-time naming, rotation by injected clock), the
  * turn lifecycle timeline (run:started / llm:call_started / llm:call_completed
@@ -305,7 +304,7 @@ test("ProcessDiagnostics_InjectedSink_FlowsProcLinesToTheLog", () => {
   const root = makeRoot();
   const log = new DiLog(options(root));
   try {
-    ProcessDiagnostics.log = (msg) => log.log(LogLevel.Info, msg); // C# host wiring
+    ProcessDiagnostics.log = (msg) => log.log(LogLevel.Info, msg); // host wiring
     ProcessDiagnostics.log("proc: start name=python exe=C:\\python.exe pid=123 timeout_s=30 cwd=C:\\work");
     ProcessDiagnostics.log("proc: running name=python pid=123 elapsed_ms=5000 cpu_ms=240");
     ProcessDiagnostics.log("proc: timeout name=python pid=123 elapsed_ms=30000 cpu_ms=12");

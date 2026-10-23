@@ -9,8 +9,7 @@ import { ConfigParseError, DEFAULT_CONFIG, DiConfig, defaultReadFile } from "@di
 import type { DiConfigDeps, DiConfigSources } from "@di/coding-agent";
 
 /**
- * Layered config merge (P6.1 card 1). Mirrors `Di.Cli/DiConfig.cs` Load at baseline
- * 09f4e08: default -> user (~/.di/config.json) -> project (<workspace>/.di/config.json)
+ *
  * -> environment variables, later layers override earlier ones per key with a deep
  * (nested) merge. Loading never creates or overwrites config files.
  */
@@ -172,7 +171,7 @@ test("nested merge is deep, not a shallow spread", () => {
 test("JSONC comments and trailing commas in config files are accepted", async () => {
   await withTempDirs(async ({ home, workspace }) => {
     await writeConfig(home, "config.json", `{
-  // 用户配置允许注释（与 C# JsonConfigurationProvider 行为一致）
+  // 用户配置允许注释。
   "Model": { "DefaultModel": "home-model" }, /* trailing block comment */
   "DeepSeek": { "StrictTools": false, },
 }`);

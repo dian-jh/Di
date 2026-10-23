@@ -1,15 +1,13 @@
-/**
- * Checkpoint envelope + message/block codec (P5).
+/*
+ * Checkpoint envelope + message/block codec.
  *
- * docs/migration/typescript-core/sessions-and-compatibility.md §"Di 文件布局与
- * 逐行 envelope" / §"实时 checkpoint record 与完整示例"; C# baseline
- * `Core/Sessions/SessionLog.cs` `Append` / `SerializeCheckpointMessage` /
- * `SerializeCheckpointBlock` and `Core/Sessions/SessionRecovery.cs` `ReadMessage`.
+ * 逐行 envelope" / §"实时 checkpoint record 与完整示例"; * `Append` / `SerializeCheckpointMessage` /
+ * `SerializeCheckpointBlock` and `ReadMessage`.
  *
  * The writer emits a stable `{timestamp, ordinal, type, payload}` envelope (raw
  * UTF-8, null omitted, snake_case payload). The in-memory `tool-call` block maps
  * to the wire `tool_call`. The TS writer REJECTS a block it cannot serialize —
- * the C#-baseline `{type:"unknown"}` write / read asymmetry is deliberately not
+ * the `{type:"unknown"}` write / read asymmetry is deliberately not
  * copied. The reader is strict: unknown roles/blocks and missing/mistyped fields
  * become line-numbered `SessionDataError`s, never low-level exceptions.
  */
@@ -26,7 +24,7 @@ export interface SessionEnvelope {
   readonly payload: Record<string, unknown>;
 }
 
-/** C# `SessionLog.Now`: UTC milliseconds with a `Z` suffix (`yyyy-MM-dd'T'HH:mm:ss.fff'Z'`). */
+/** `SessionLog.Now`: UTC milliseconds with a `Z` suffix (`yyyy-MM-dd'T'HH:mm:ss.fff'Z'`). */
 export function nowUtcIso(): string {
   return new Date().toISOString();
 }
@@ -77,7 +75,7 @@ export function serializeCheckpointBlock(block: ContentBlock): Record<string, un
   // NOTE: `OpaqueBlock.type` is `string & {}` (it holds the plugin's actual type
   // string), so `ContentBlock` is not a proper discriminated union — narrowing via
   // switch on `block.type` fails. Use type predicates. A plugin's opaque block is
-  // detected by its `rawJson` field and serialized FIRST, matching the C# baseline
+  // detected by its `rawJson` field and serialized FIRST, matching the current behavior
   // where `SerializeCheckpointBlock` switches on CLR type (an OpaqueBlock always
   // writes `{type:"opaque", unknown_type, raw_json}` regardless of its type string).
   if (isOpaqueBlock(block)) return { type: "opaque", unknown_type: block.type, raw_json: block.rawJson };

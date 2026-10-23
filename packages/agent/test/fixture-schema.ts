@@ -1,10 +1,9 @@
 import type { StopReason } from "@di/agent";
 
 /**
- * Structural validator for the cross-language fixtures (P1.2).
  *
  * The fixtures live at the repo root `fixtures/` and are the single shared
- * input/expected contract between the C# baseline and the TypeScript core.
+ *
  * This validator encodes the schema documented in `fixtures/README.md` (and
  * `fixtures/schema.json`) as typed checks. `validateFixture` returns an empty
  * array when the value satisfies the schema, otherwise a list of errors.
@@ -137,7 +136,6 @@ export interface LoopFixture {
   readonly scenario: string;
   readonly description: string;
   readonly source?: {
-    readonly baseline?: string;
     readonly tests?: readonly string[];
     readonly docs?: string;
   };
@@ -151,7 +149,6 @@ export interface HostRecoveryFixture {
   readonly scenario: string;
   readonly description: string;
   readonly source?: {
-    readonly baseline?: string;
     readonly tests?: readonly string[];
     readonly docs?: string;
   };
@@ -401,7 +398,6 @@ function checkSource(value: unknown, path: string, errors: string[]): void {
     errors.push(`${path}: expected object`);
     return;
   }
-  if (value.baseline !== undefined) checkString(value, "baseline", path, errors);
   if (value.docs !== undefined) checkString(value, "docs", path, errors);
   if (value.tests !== undefined && !Array.isArray(value.tests)) {
     errors.push(`${path}.tests: expected array`);

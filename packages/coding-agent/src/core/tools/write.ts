@@ -6,10 +6,10 @@ import { getContent, getRequiredString, parseArguments, toolSchema } from "./arg
 import { isErrno, messageOf } from "./errors.ts";
 import { resolvePath } from "./paths.ts";
 
-/**
+/*
  * write_file: create or fully overwrite a file (never append), auto-creating
- * missing parent directories. Mirrors `Core/Tools/WriteFileTool.cs` at 09f4e08.
- * Written bytes are UTF-8 without BOM (the .NET default serializer). Expected
+ * missing parent directories..
+ * Written bytes are UTF-8 without BOM (the.NET default serializer). Expected
  * failures (directory target, locked/read-only file, path is a file) become
  * "error:" observations — no silent data loss.
  */

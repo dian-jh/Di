@@ -1,5 +1,5 @@
-/**
- * DeepSeek provider adapter public surface (P3.3 request/response translation).
+/*
+ * DeepSeek provider adapter public surface ( request/response translation).
  * Wire DTOs and quirks stay inside this provider module; only the adapter pieces
  * are exported for `@di/ai` consumers.
  */

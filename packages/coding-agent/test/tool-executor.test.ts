@@ -7,12 +7,11 @@ import { join } from "node:path";
 import { createFileTools, createToolExecutor } from "@di/coding-agent";
 
 /**
- * P4.1 card 1: tool shape / registry / executor routing.
  *
  * tools-and-platform.md §"工具契约": each tool is a ToolSpec (name/description/
  * JSON-Schema parameters) co-located with its execution function, and the schema
  * set stays consistent with the executor set. This card owns the three file tools;
- * the full 8-tool registry comes with later P4 search/process cards.
+ *
  */
 
 const base = mkdtempSync(join(tmpdir(), "di-tools-"));

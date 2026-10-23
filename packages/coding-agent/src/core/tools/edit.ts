@@ -5,10 +5,10 @@ import { getContent, getRequiredString, parseArguments, toolSchema } from "./arg
 import { isErrno, messageOf } from "./errors.ts";
 import { resolvePath } from "./paths.ts";
 
-/**
+/*
  * edit_file: old_string -> new_string replacement, applied only when old_string
  * exists and occurs exactly once (no fuzzy replacement; overlapping occurrences
- * count as ambiguous). Mirrors `Core/Tools/EditFileTool.cs` at 09f4e08.
+ * count as ambiguous)..
  *
  * Matching happens in LF-normalized space (read_file emits LF lines, so an LF
  * old_string hits a CRLF file), and the file's CRLF/LF style plus UTF-8 BOM are
@@ -107,7 +107,7 @@ function decodeUtf8WithBom(bytes: Uint8Array): { content: string; bom: string } 
   return { bom: "", content: new TextDecoder("utf-8").decode(bytes) };
 }
 
-/** Detect the file's line-ending style by the first newline (C# DetectLineEnding). */
+/** Detect the file's line-ending style by the first newline (DetectLineEnding). */
 function detectLineEnding(content: string): "\r\n" | "\n" {
   const crlf = content.indexOf("\r\n");
   const lf = content.indexOf("\n");

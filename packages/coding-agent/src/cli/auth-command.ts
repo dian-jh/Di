@@ -24,7 +24,7 @@ export function defaultChatGptStore(): CredentialStore {
   });
 }
 
-/** `di auth chatgpt ...` command resolution. OAuth and token operations use ChatGptAuth. */
+/** `di auth chatgpt...` command resolution. OAuth and token operations use ChatGptAuth. */
 export async function runAuthCommand(
   args: readonly string[],
   stdout: TextWriter,

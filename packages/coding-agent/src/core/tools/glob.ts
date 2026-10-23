@@ -10,26 +10,26 @@ import { normalizeToolPath, resolvePath } from "./paths.ts";
 import { enumerateFiles } from "./enumerate.ts";
 import { globToRegex } from "./glob-matcher.ts";
 
-/** Default result cap (C# GlobTool.MaxResults). */
+/** Default result cap (GlobTool.MaxResults). */
 export const GLOB_DEFAULT_LIMIT = 200;
-/** Default wall-clock scan budget in ms (C# GlobTool.DefaultScanBudgetSeconds). */
+/** Default wall-clock scan budget in ms (GlobTool.DefaultScanBudgetSeconds). */
 export const GLOB_DEFAULT_SCAN_BUDGET_MS = 60_000;
 
 export interface GlobToolOptions {
-  /** Override the default result cap (host/test injection; C# GlobTool.MaxResults). */
+  /** Override the default result cap (host/test injection; GlobTool.MaxResults). */
   readonly defaultLimit?: number;
-  /** Override the wall-clock scan budget in ms (C# DefaultScanBudgetSeconds). */
+  /** Override the wall-clock scan budget in ms (DefaultScanBudgetSeconds). */
   readonly scanBudgetMs?: number;
 }
 
-/**
+/*
  * glob: recursively locate files by pattern (`*` within one directory level,
  * `?` one character, `**` across directories), returning paths relative to the
  * search start with `/` separators, capped at `limit` (default 200). Ported
- * from `Core/Tools/GlobTool.cs` at 09f4e08.
+ * from.
  *
  * The scan is a truly async cancellable directory walk (`enumerateFiles`): a
- * synchronous scan wrapped in a Promise is NOT used (execution-plan P4 gate).
+ * synchronous scan wrapped in a Promise is NOT used (execution-plan gate).
  * Reaching the limit or the scan budget returns partial results with an
  * explicit "not exhausted" notice — never a fake "no match".
  */
@@ -70,7 +70,7 @@ export function createGlobTool(baseDirectory: string, options?: GlobToolOptions)
       }
       signal?.throwIfAborted();
 
-      // C# Directory.Exists/File.Exists: every stat failure here reads as "目录不存在"
+      // Directory.Exists/File.Exists: every stat failure here reads as "目录不存在"
       // (they swallow access errors too); a file (not directory) is called out.
       let rootStat: Stats;
       try {
@@ -118,14 +118,14 @@ export function createGlobTool(baseDirectory: string, options?: GlobToolOptions)
   };
 }
 
-/** C# TryGetOptionalString: missing / non-string / blank → undefined (ignored). */
+/** TryGetOptionalString: missing / non-string / blank → undefined (ignored). */
 function optionalPath(args: Readonly<Record<string, unknown>>): string | undefined {
   const value = args["path"];
   if (typeof value !== "string" || value.trim().length === 0) return undefined;
   return value;
 }
 
-/** Format the budget like C# `TimeSpan.TotalSeconds.ToString("0.#")`. */
+/** Format the budget like. */
 export function formatScanSeconds(ms: number): string {
   const seconds = Math.round((ms / 1000) * 10) / 10;
   return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1);

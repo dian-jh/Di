@@ -1,5 +1,5 @@
-/**
- * ChatGPT Responses provider adapter public surface (P8a). Wire DTOs and quirks
+/*
+ * ChatGPT Responses provider adapter public surface. Wire DTOs and quirks
  * stay inside this provider module; only the adapter pieces are exported for
  * `@di/ai` consumers.
  */

@@ -5,8 +5,7 @@ import type { FinishReason, ModelEvent, ModelRequest, TokenUsage } from "@di/ai"
 import { ChatGptAdapter, ChatGptError, SseStreamError } from "@di/ai";
 
 /**
- * P8a card red list — ChatGPT Responses HTTP/SSE adapter (Di baseline
- * `Core/Providers/ChatGpt/ChatGptAdapter.cs` `StreamAsync` + `SendAsync`;
+ *
  * models-and-auth.md §"Responses wire 与 SSE"): each Responses SSE delta kind,
  * provider-terminal semantics (completed/failed/incomplete kept distinct, never
  * collapsed to a success stop), protocol truncation vs TCP EOF, per-field usage

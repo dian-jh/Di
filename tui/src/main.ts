@@ -15,7 +15,7 @@ async function main(): Promise<number> {
   const decision = buildBackendLauncher(process.env);
   if (decision.kind === "unavailable") {
     console.error(
-      "未找到 di 后端：请设置环境变量 DI_BIN（显式指定二进制），或先构建 TS 后端（packages/coding-agent），或确保 `di` 在 PATH / ~/.di/bin 下。",
+      "未找到 di 后端：请构建或安装 TypeScript 后端（@di/coding-agent），或设置环境变量 DI_BIN 指定 RPC 启动程序。",
     );
     return 1;
   }

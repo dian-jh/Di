@@ -1,6 +1,5 @@
-/**
- * Bounded streaming output accumulators (port of `Core/Tools/OutputBuffer.cs`
- * and `Core/Tools/BoundedByteBuffer.cs` at 09f4e08).
+/*
+ * Bounded streaming output accumulators (* and ).
  *
  * The head (first 6000 units) and the tail (last 18000 units) are each kept
  * within budget; everything past the head that does not fit the tail is dropped
@@ -8,15 +7,15 @@
  * is head + truncation notice + tail. We never collect-then-truncate: a multi-MB
  * command output would exhaust memory before the trim.
  *
- * - `OutputBuffer` counts UTF-16 code units (C# `string.Length` semantics); this
- *   is the pure-logic accumulator the future line-based ShellSession decoding
- *   will use.
+ * - `OutputBuffer` counts UTF-16 code units (`string.Length` semantics); this
+ * is the pure-logic accumulator the future line-based ShellSession decoding
+ * will use.
  * - `BoundedByteBuffer` counts raw bytes and defers decoding to the end
- *   (`toText`), so a whole segment can be smart-decoded once (UTF-8 first, OEM
- *   fallback). Per-chunk streaming decode would lock the encoding at the first
- *   chunk and garble a stream where cmd built-ins write OEM bytes while .NET CLI
- *   writes UTF-8 (tools-and-platform.md §"Windows OEM/GBK 与 UTF-8 输出"). Used
- *   by the one-shot process runner.
+ * (`toText`), so a whole segment can be smart-decoded once (UTF-8 first, OEM
+ * fallback). Per-chunk streaming decode would lock the encoding at the first
+ * chunk and garble a stream where cmd built-ins write OEM bytes while.NET CLI
+ * writes UTF-8 (tools-and-platform.md §"Windows OEM/GBK 与 UTF-8 输出"). Used
+ * by the one-shot process runner.
  */
 
 export const OUTPUT_HEAD_CHARS = 6000;
@@ -27,7 +26,7 @@ export const OUTPUT_HEAD_BYTES = 6000;
 export const OUTPUT_TAIL_BYTES = 18000;
 export const OUTPUT_MAX_BYTES = OUTPUT_HEAD_BYTES + OUTPUT_TAIL_BYTES;
 
-/** Drop old tail pieces from the front without O(n) `shift()` on a hot path. */
+/** Drop old tail pieces from the front without O(n) `shift` on a hot path. */
 function compactTail<T>(pieces: T[], start: number): { pieces: T[]; start: number } {
   if (start > 1024 && start * 2 > pieces.length) {
     return { pieces: pieces.slice(start), start: 0 };
@@ -35,9 +34,9 @@ function compactTail<T>(pieces: T[], start: number): { pieces: T[]; start: numbe
   return { pieces, start };
 }
 
-/**
+/*
  * Character-level bounded accumulator (head + truncation notice + tail).
- * Mirrors `OutputBuffer.cs`: once the head fills it is frozen, the remainder
+ *: once the head fills it is frozen, the remainder
  * accumulates in the tail and only the last `TailChars` are kept.
  */
 export class OutputBuffer {
@@ -48,7 +47,7 @@ export class OutputBuffer {
   private tailChars_ = 0;
   private totalChars_ = 0;
 
-  /** Append a line, auto-terminating it with `\n` (C# `AppendLine`). */
+  /** Append a line, auto-terminating it with `\n` (`AppendLine`). */
   appendLine(line: string): void {
     this.append(line + "\n");
   }

@@ -12,8 +12,7 @@ import {
 } from "@di/ai";
 
 /**
- * P3 card 5 business tests — the {@link RetryingChatModel} wrapper (Di baseline
- * `Core/Llm/RetryingChatModel.cs`, boundary fixed per models-and-auth.md
+ *
  * §重试边界: retry only before the first {@link ModelEvent}). Tools run in the
  * agent loop, never in the transport — once any delta (including a toolCallDelta)
  * has been delivered downstream, a later stream failure is rethrown and no

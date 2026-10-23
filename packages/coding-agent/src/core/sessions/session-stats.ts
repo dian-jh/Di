@@ -1,9 +1,7 @@
-/**
- * Session stats aggregation (P5).
+/*
+ * Session stats aggregation.
  *
- * docs/migration/typescript-core/sessions-and-compatibility.md §"审计型回合" +
- * the stats gate "累计快照不会重复统计，未知字段不伪造已知"; C# baseline
- * `Core/Sessions/SessionStats.cs` `Aggregate`.
+ * the stats gate "累计快照不会重复统计，未知字段不伪造已知"; * `Aggregate`.
  *
  * Aggregates every `task_complete` record exactly once into a cumulative
  * snapshot (turns, token counts, cost, duration). Unknown/extra fields and
@@ -12,7 +10,7 @@
  * default to zero only for token counts, never for cost; the cache hit rate is
  * cacheRead / (input + cacheRead + cacheWrite), null when there is no billable
  * input. Unparseable lines are skipped tolerantly. A missing/unreadable file
- * throws (the C# IOException equivalent).
+ * throws (the IOException equivalent).
  */
 
 import { readFileSync } from "node:fs";
@@ -114,9 +112,9 @@ export function aggregateSessionStats(logFilePath: string): SessionStatsSummary 
 }
 
 /**
- * Read one integer usage token count. Absent field -> 0 (C# `GetInt64` default);
+ * Read one integer usage token count. Absent field -> 0 ( default);
  * a null/mistyped/primitive usage object or a non-integer field throws so the
- * whole record is skipped (C# `GetInt64` on a wrong token type throws).
+ * whole record is skipped ( on a wrong token type throws).
  */
 function intField(usage: unknown, key: string): number {
   if (usage === undefined) return 0;

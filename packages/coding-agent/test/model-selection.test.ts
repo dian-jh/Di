@@ -12,8 +12,7 @@ import {
 import { FakeAdapter, FakeModelService, RecordingHost } from "./commands/test-doubles.ts";
 
 /**
- * P6.3a card — model selection (port of C# `ModelSelectionTests.cs` minus the
- * RPC-mode / DI-factory cases, which are P6.3b wiring): provider/model
+ *
  * resolution (unique ID, unique fragment, ambiguity error), refresh-failure
  * keeps the last snapshot, a failed switch never changes the current model, a
  * successful cross-provider switch resets the reasoning tier, and a busy

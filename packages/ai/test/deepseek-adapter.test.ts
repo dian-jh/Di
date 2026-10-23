@@ -5,10 +5,9 @@ import type { ModelEvent, ModelRequest } from "@di/ai";
 import { DeepSeekAdapter, DeepSeekError, mapHttpErrorBody } from "@di/ai";
 
 /**
- * P3 card 3 red list — DeepSeek HTTP/SSE adapter and non-2xx error mapping
- * (Di baseline `Core/Providers/DeepSeek/DeepSeekAdapter.cs` `SendAsync` +
+ *
  * `ParseDeepSeekError` + `MapErrorCode`; models-and-auth.md §DeepSeek 协议边界
- * item 4). Retry/backoff and header-wait timeout are later card P3.5 — no retry
+ *
  * loops here, only the structured non-2xx body → LlmFailure mapping and the
  * stream plumbing through the `TranslateEvent` seam.
  */

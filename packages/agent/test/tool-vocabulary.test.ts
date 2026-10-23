@@ -11,10 +11,9 @@ import type {
 import type { ToolCall, ToolSpec } from "@di/ai";
 
 /**
- * Tool-calling vocabulary import test (P1.2).
  *
  * Asserts the @di/agent public exports match the contract in
- * docs/migration/typescript-core/loop-and-state.md (§"建议公开的最小 loop types")
+ *
  * and architecture.md (§"契约名" table). This is the TDD red→green anchor for the
  * vocabulary: before the exports exist, typecheck fails with "has no exported member".
  */

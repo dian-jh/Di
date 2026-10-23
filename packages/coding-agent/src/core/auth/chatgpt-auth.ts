@@ -16,11 +16,11 @@ import {
 } from "./constants.ts";
 import { ChatGptCredential, needsRefresh, type CredentialStore } from "./credential-store.ts";
 
-/**
- * Token-only host-side ChatGPT OAuth client (C# `ChatGptAuth` @09f4e08).
+/*
+ * Token-only host-side ChatGPT OAuth client (`ChatGptAuth` @).
  *
  * OAuth PKCE over a loopback `127.0.0.1` random port with a time-limited
- * callback. Validation mirrors the C# faithfully: callback path, random `state`,
+ * callback. Validation the faithfully: callback path, random `state`,
  * authorization code, issued client ID, PKCE verifier/challenge, required token
  * fields, positive `expires_in` and the `chatgpt.tokens.use.direct` scope.
  * Invalid NEW responses must NOT overwrite a valid old credential (the credential
@@ -65,13 +65,13 @@ export interface ChatGptStatus {
 export interface ChatGptAuthOptions {
   /** Injected HTTP client; defaults to `globalThis.fetch`. */
   readonly http?: FetchLike;
-  /** Time limit for the authorization callback, in ms (C#: 5 minutes). */
+  /** Time limit for the authorization callback, in ms (: 5 minutes). */
   readonly authorizationTimeoutMs?: number;
   /** Time limit for a token-endpoint response, in ms. */
   readonly tokenTimeoutMs?: number;
 }
 
-/** Terminal refresh-token rejections (C# `AccessTokenAsync` catch list). */
+/** Terminal refresh-token rejections (`AccessTokenAsync` catch list). */
 const TERMINAL_REFRESH_CODES = new Set([
   "invalid_grant",
   "invalid_refresh_token",
@@ -109,7 +109,7 @@ export class ChatGptAuth {
     this.tokenTimeoutMs = options.tokenTimeoutMs ?? DEFAULT_TOKEN_TIMEOUT_MS;
   }
 
-  /** Local, never refreshes (C# `StatusAsync`). */
+  /** Local, never refreshes (`StatusAsync`). */
   async status(signal?: AbortSignal): Promise<ChatGptStatus> {
     const c = (await this.store.read(signal)).credential;
     return {
@@ -119,7 +119,7 @@ export class ChatGptAuth {
     };
   }
 
-  /** Local signed-in check for the model catalog — never refreshes (C# `CheckAsync`). */
+  /** Local signed-in check for the model catalog — never refreshes (`CheckAsync`). */
   async check(signal?: AbortSignal): Promise<boolean> {
     const c = (await this.store.read(signal)).credential;
     return (
@@ -159,7 +159,7 @@ export class ChatGptAuth {
     return ids;
   }
 
-  /** Full OAuth PKCE sign-in (C# `SignInAsync`). `openBrowser` receives the authorize URL. */
+  /** Full OAuth PKCE sign-in. `openBrowser` receives the authorize URL. */
   async signIn(
     openBrowser: (uri: URL) => Promise<void>,
     newRegistration = false,
@@ -231,7 +231,7 @@ export class ChatGptAuth {
       : null;
   }
 
-  /** Revoke the refresh token, clear tokens, retain registration (C# `SignOutAsync`). */
+  /** Revoke the refresh token, clear tokens, retain registration. */
   async signOut(signal?: AbortSignal): Promise<boolean> {
     let confirmed = true;
     await this.store.update(async (data) => {
@@ -264,7 +264,7 @@ export class ChatGptAuth {
               }
               if (response.status < 500) break;
             } catch (error) {
-              // Network-level failure: retry (C# catches HttpRequestException).
+              // Network-level failure: retry (catches HttpRequestException).
               if (isAbortError(error)) throw error;
             }
             await sleep((attempt + 1) * 1000, signal);
@@ -310,7 +310,7 @@ export class ChatGptAuth {
       else if (idToken !== undefined) query.set("id_token_hint", idToken);
       if (consent) query.set("prompt", "consent");
 
-      // The listener is live before the browser opens (C# starts HttpListener first,
+      // The listener is live before the browser opens (starts HttpListener first,
       // then opens the browser on a background task WITHOUT awaiting it — the
       // callback loop and the browser navigation must run concurrently, because a
       // browser that blocks on its own redirect would deadlock against a server
@@ -402,7 +402,7 @@ export class ChatGptAuth {
     return value as Record<string, unknown>;
   }
 
-  /** Open the system default browser (C# `ChatGptAuth.OpenSystemBrowserAsync`). */
+  /** Open the system default browser. */
   static async openSystemBrowser(uri: URL): Promise<void> {
     if (process.platform === "win32") {
       await new Promise<void>((resolve, reject) => {

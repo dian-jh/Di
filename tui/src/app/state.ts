@@ -44,8 +44,8 @@ export interface TurnView {
 const STATUS_RANK: Record<ToolStatus, number> = { pending: 0, running: 1, completed: 2, failed: 2 };
 
 /**
- * 把 TokenUsage 格式化为 REPL 同款（对齐 Core/Llm/TokenUsage.cs ToString / EventRenderer.cs:140）：
- * `in=X (cache_read=Y) out=Z (reasoning=R) total=T`。可空键缺省视作 0（对齐 C# `?? 0`）；
+ * 把 TokenUsage 格式化为状态栏统计摘要：
+ * `in=X (cache_read=Y) out=Z (reasoning=R) total=T`。可空键缺省视作 0；
  * total 缺省时按计费输入 + 输出兜底（计费输入 = 未命中 + 命中读 + 命中写）。
  */
 function formatTokenUsage(usage: TokenUsage): string {
@@ -240,7 +240,7 @@ export class TurnStateMachine {
     this.turnUsage = undefined;
     this.turnCost = undefined;
     this.state = "idle";
-    // 左下角状态行记录本回合统计摘要（对齐 REPL 展示，EventRenderer.cs:140 同源；cost F6）。
+    // 左下角状态行记录本回合统计摘要，费用保留六位小数。
     // 取消回合不产生有效统计，单独提示。
     if (result.stop_reason === "context_limit") {
       this.statusText = "\u4e0a\u4e0b\u6587\u9884\u7b97\u5df2\u7528\u5c3d\uff0c\u8f68\u8ff9\u5df2\u4fdd\u7559\uff1b\u8bf7\u5148\u63d0\u70bc\u72b6\u6001\u518d\u7ee7\u7eed";

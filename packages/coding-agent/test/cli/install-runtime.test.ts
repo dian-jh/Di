@@ -9,19 +9,38 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const repoRoot = resolve(fileURLToPath(new URL("../../../..", import.meta.url)));
 const installer = join(repoRoot, "install.ps1");
 
-test("isolated install copies runtime dependencies, launches di-ts, and preserves user files", (t) => {
+test("Windows installer refuses a di.exe that would shadow the global di shim", { skip: process.platform !== "win32" }, (t) => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "di-install-shadow-"));
+  const diHome = join(tempRoot, "di-home");
+  const bin = join(diHome, "bin");
+  mkdirSync(bin, { recursive: true });
+  const blocker = join(bin, "di.exe");
+  writeFileSync(blocker, "unmanaged launcher");
+  t.after(() => rmSync(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }));
+
+  const shell = process.env.DI_TEST_POWERSHELL ?? "powershell.exe";
+  const shellArgs = process.env.DI_TEST_POWERSHELL === undefined
+    ? ["-NoProfile", "-ExecutionPolicy", "Bypass"]
+    : ["-NoProfile"];
+  const result = spawnSync(shell, [...shellArgs, "-File", installer, "-DiHome", diHome, "-SkipBuild", "-SkipPathUpdate"], {
+    cwd: repoRoot, encoding: "utf8", windowsHide: true, timeout: 30_000,
+  });
+  assert.equal(result.error, undefined, `PowerShell installer could not start: ${result.error?.message ?? ""}`);
+  assert.notEqual(result.status, 0, "installer must reject a launcher that shadows the TypeScript default");
+  assert.match(`${result.stdout}\n${result.stderr}`, /blocks the default di launcher/i);
+  assert.equal(readFileSync(blocker, "utf8"), "unmanaged launcher", "existing executable must remain untouched");
+});
+
+test("isolated install installs di and di-ts TypeScript commands and preserves user files", (t) => {
   const tempRoot = mkdtempSync(join(tmpdir(), "di-install-runtime-"));
   const diHome = join(tempRoot, "di-home");
   const bin = join(diHome, "bin");
   mkdirSync(bin, { recursive: true });
 
-  const csharpMarker = join(bin, process.platform === "win32" ? "di.exe" : "di");
   const configFile = join(diHome, "config.json");
   const sessionFile = join(diHome, "sessions", "session.jsonl");
   const credentialFile = join(diHome, "auth", "chatgpt", "credentials.json");
-  const markerContents = Buffer.from("existing C# launcher marker\n", "utf8");
   const configContents = Buffer.from('{"user-setting":"preserve-me"}\n', "utf8");
-  writeFileSync(csharpMarker, markerContents);
   writeFileSync(configFile, configContents);
   mkdirSync(dirname(sessionFile), { recursive: true });
   mkdirSync(dirname(credentialFile), { recursive: true });
@@ -49,13 +68,14 @@ test("isolated install copies runtime dependencies, launches di-ts, and preserve
   );
   assert.equal(install.error, undefined, `PowerShell installer could not start: ${install.error?.message ?? ""}`);
   assert.equal(install.status, 0, `isolated installer failed (exit ${install.status})\n${install.stdout}\n${install.stderr}`);
-  assert.deepEqual(readFileSync(csharpMarker), markerContents, "existing C# di launcher must remain byte-identical");
   assert.deepEqual(readFileSync(configFile), configContents, "user config.json must remain byte-identical");
   assert.deepEqual(readFileSync(sessionFile), sessionContents, "existing sessions must remain byte-identical");
   assert.deepEqual(readFileSync(credentialFile), credentialContents, "existing credentials must remain byte-identical");
 
   const installedEntry = join(diHome, "ts-cli", "node_modules", "@di", "coding-agent", "dist", "cli", "main.js");
   const launcher = join(bin, process.platform === "win32" ? "di-ts.cmd" : "di-ts");
+  const defaultLauncher = join(bin, process.platform === "win32" ? "di.cmd" : "di");
+  assert.ok(existsSync(defaultLauncher), "install must create the default global di command");
   if (process.platform !== "win32") {
     assert.notEqual(statSync(launcher).mode & 0o111, 0, "POSIX di-ts launcher must be executable");
   }
@@ -117,16 +137,11 @@ test("isolated install copies runtime dependencies, launches di-ts, and preserve
 
 });
 
-test("explicit default install removes only managed C# launchers and keeps user data across repeats", (t) => {
+test("default install is repeatable and keeps user data", (t) => {
   const tempRoot = mkdtempSync(join(tmpdir(), "di-install-default-"));
   const diHome = join(tempRoot, "di-home");
   const bin = join(diHome, "bin");
   mkdirSync(bin, { recursive: true });
-  const csharpNames = process.platform === "win32"
-    ? ["di.exe", "di", "di.exe.bak-20261016-124909", "di.exe.bak-20261019-103922", "di-csharp.exe"]
-    : ["di", "di-csharp"];
-  for (const name of csharpNames) writeFileSync(join(bin, name), `C# package ${name}`);
-  writeFileSync(join(bin, ".di-cli-selection.json"), '{"version":1,"runtime":"typescript"}');
   const unrelatedExe = join(bin, "other-tool.exe");
   writeFileSync(unrelatedExe, "unrelated executable");
   const sentinels = [
@@ -145,21 +160,13 @@ test("explicit default install removes only managed C# launchers and keeps user 
   const shell = process.env.DI_TEST_POWERSHELL ?? (process.platform === "win32" ? "powershell.exe" : "pwsh");
   const shellArgs = process.platform === "win32" && process.env.DI_TEST_POWERSHELL === undefined
     ? ["-NoProfile", "-ExecutionPolicy", "Bypass"] : ["-NoProfile"];
-  const args = [...shellArgs, "-File", installer, "-DiHome", diHome, "-SkipBuild", "-UseAsDefault", "-RemoveCSharp", ...(process.platform === "win32" ? ["-SkipPathUpdate"] : [])];
+  const args = [...shellArgs, "-File", installer, "-DiHome", diHome, "-SkipBuild", ...(process.platform === "win32" ? ["-SkipPathUpdate"] : [])];
   for (let run = 0; run < 2; run++) {
     const install = spawnSync(shell, args, { cwd: repoRoot, encoding: "utf8", windowsHide: true, timeout: 120_000 });
     assert.equal(install.error, undefined, `installer could not start: ${install.error?.message ?? ""}`);
     assert.equal(install.status, 0, `default install run ${run + 1} failed\n${install.stdout}\n${install.stderr}`);
-    for (const name of csharpNames) {
-      if (process.platform !== "win32" && name === "di") {
-        assert.equal(existsSync(join(bin, name)), true, "POSIX di must now be the TypeScript shim");
-      } else {
-        assert.equal(existsSync(join(bin, name)), false, `managed C# launcher ${name} must be removed`);
-      }
-    }
     assert.deepEqual(readFileSync(unrelatedExe, "utf8"), "unrelated executable", "other executables must remain untouched");
     for (const [file, contents] of sentinels) assert.deepEqual(readFileSync(file, "utf8"), contents, `${file} must remain unchanged`);
-    assert.equal(existsSync(join(bin, ".di-cli-selection.json")), false, "the default installation must not claim a rollback state");
   }
   const launcher = join(bin, process.platform === "win32" ? "di.cmd" : "di");
   const cli = spawnSync(process.platform === "win32" ? shell : launcher,
@@ -170,10 +177,10 @@ test("explicit default install removes only managed C# launchers and keeps user 
   assert.match(cli.stdout, /TypeScript|Node|@di\/coding-agent/i, "--info output must identify the TS CLI");
 
   const freshHome = join(tempRoot, "fresh-di-home");
-  const fresh = spawnSync(shell, [...shellArgs, "-File", installer, "-DiHome", freshHome, "-SkipBuild", "-UseAsDefault", "-RemoveCSharp", ...(process.platform === "win32" ? ["-SkipPathUpdate"] : [])], {
+  const fresh = spawnSync(shell, [...shellArgs, "-File", installer, "-DiHome", freshHome, "-SkipBuild", ...(process.platform === "win32" ? ["-SkipPathUpdate"] : [])], {
     cwd: repoRoot, encoding: "utf8", windowsHide: true, timeout: 120_000,
   });
   assert.equal(fresh.error, undefined, `fresh installer could not start: ${fresh.error?.message ?? ""}`);
-  assert.equal(fresh.status, 0, `fresh default install without C# package failed\n${fresh.stdout}\n${fresh.stderr}`);
+  assert.equal(fresh.status, 0, `fresh install failed\n${fresh.stdout}\n${fresh.stderr}`);
   assert.ok(existsSync(join(freshHome, "bin", process.platform === "win32" ? "di.cmd" : "di")), "fresh install must create a TypeScript di launcher");
 });

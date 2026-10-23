@@ -8,11 +8,9 @@ import { createReadFileTool } from "@di/coding-agent";
 import { createLegacyDecoder, discoverOemCodePage } from "../src/core/tools/encoding.ts";
 
 /**
- * P4.1 card 1: read_file tool.
  *
- * Mirrors Di.Tests/Tools/ReadFileToolTests.cs at baseline 09f4e08: line numbers,
  * range reads, continuation notices, budget truncation and failure paths. Decoding
- * follows the P4-win-encoding-probe findings: UTF-8 first (BOM stripped), OEM
+ *
  * code page fallback for non-UTF-8 files, explicit error when no decoder exists.
  *
  * All file IO happens in an isolated temp dir; never touches user files.

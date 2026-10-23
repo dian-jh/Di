@@ -1,8 +1,8 @@
-/**
+/*
  * Argument parsing/validation shared by the tools.
  *
- * Mirrors `Core/Tools/ToolHelpers.cs` (TryGetString / TryGetContent /
- * TryGetOptionalInt) so the error observations match the C# baseline.
+ * (TryGetString / TryGetContent /
+ * TryGetOptionalInt) so the error observations match the.
  */
 
 export type ParseResult<T> =
@@ -23,7 +23,7 @@ export function parseArguments(argumentsJson: string): ParseResult<Record<string
   return { ok: true, value: value as Record<string, unknown> };
 }
 
-/** Required string; missing / non-string / blank is an error (C# TryGetString). */
+/** Required string; missing / non-string / blank is an error (TryGetString). */
 export function getRequiredString(
   args: Readonly<Record<string, unknown>>,
   name: string,
@@ -47,7 +47,7 @@ export function getContent(
   return { ok: true, value };
 }
 
-/** Optional integer; absent is fine, present-but-invalid is an error (C# TryGetOptionalInt). */
+/** Optional integer; absent is fine, present-but-invalid is an error (TryGetOptionalInt). */
 export function getOptionalInt(
   args: Readonly<Record<string, unknown>>,
   name: string,
@@ -62,7 +62,7 @@ export function getOptionalInt(
   return { ok: true, value };
 }
 
-/** Optional boolean; absent is fine, present-but-invalid is an error (C# TryGetOptionalBool). */
+/** Optional boolean; absent is fine, present-but-invalid is an error (TryGetOptionalBool). */
 export function getOptionalBool(
   args: Readonly<Record<string, unknown>>,
   name: string,

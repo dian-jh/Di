@@ -30,13 +30,10 @@ import { isLoopFixture } from "./fixture-schema.ts";
 import { RecordingExecutor } from "./recording-executor.ts";
 
 /**
- * P2.1 + P2.2 loop tests (docs/migration/typescript-core/loop-and-state.md §"一回合精确时序").
  *
- * The pure-answer fixture (P2.1) is the tool-free contract; the tool-round-trip
- * fixture (P2.2) is the primary tool-phase contract: a model tool call is
  * validated, executed via the injected executor, its observation appended as a
  * ToolResultMessage, then the model is called again and answers. Expected values
- * come from the C# baseline tests at 09f4e08 — never from generated TS output.
+ *
  * The fixture's scripted model yields exactly one `completed` per call (the
  * non-streaming semantics the fixtures' eventSequence assumes); delta forwarding
  * is exercised by a separate streaming model.
@@ -1021,8 +1018,8 @@ test("a single round with multiple tools respects the iteration cap (no tools ru
 
 // ---------------------------------------------------------------------------
 // P2.4 soft-stop and hard-cancel
-// (loop-and-state.md §"中断、取消与并发生命周期"; C# ReActInterruptTests at
-// 09f4e08 — StopRequested_AfterModelProducedToolCalls_DoesNotExecuteTools,
+// Interrupt, cancellation, and concurrent lifecycle behavior:
+// StopRequested_AfterModelProducedToolCalls_DoesNotExecuteTools,
 // StopRequested_BeforeFirstModelCall_ReturnsInterruptedWithoutCallingModel,
 // StopRequested_AfterToolBatch_StopsBeforeNextModelCall)
 // ---------------------------------------------------------------------------
@@ -1274,7 +1271,7 @@ test("an AbortError thrown by a tool propagates as a rejection, never an isError
 // (loop-and-state.md §"事件 sink 是观测旁路，不是控制面": observer failures are
 // caught, ordered through onObserverError, and never stall the loop, block an
 // authorized tool, or turn a success into a failure; checkpoint failures stay
-// fail-closed — the error aborts the loop unchanged. C# baseline ReAct.Emit is
+// fail-closed — the error aborts the loop unchanged. Event delivery is
 // fire-and-forget and the event bus isolates subscriber exceptions.)
 // ---------------------------------------------------------------------------
 

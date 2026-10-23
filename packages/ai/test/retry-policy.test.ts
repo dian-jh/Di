@@ -11,8 +11,7 @@ import {
 import { SseStreamError, DeepSeekError, deepSeekErrorCodes } from "@di/ai";
 
 /**
- * P3 card 5 red list — pure retry policy (Di baseline
- * `Core/Llm/RetryingChatModel.cs` `RetryPolicyOptions` + `LlmException.IsRetryable`;
+ *
  * models-and-auth.md §重试边界). Classification and wait computation stay
  * provider-neutral: failures are judged by their {@link LlmFailure} shape and SSE
  * transport errors by their {@link SseStreamError} code. Cancellation and
@@ -81,7 +80,7 @@ test("retryDelayMs applies ±jitterRatio jitter around the delay", () => {
   assert.equal(retryDelayMs(undefined, 1, { ...opts, random: () => 0.5 }), 100);
 });
 
-test("RETRY_DEFAULTS mirror the C# RetryPolicyOptions / DeepSeekDefaults", () => {
+test("RETRY_DEFAULTS mirror the RetryPolicyOptions / DeepSeekDefaults", () => {
   assert.equal(RETRY_DEFAULTS.maxAttempts, 3);
   assert.equal(RETRY_DEFAULTS.initialBackoffMs, 500);
   assert.equal(RETRY_DEFAULTS.maxBackoffMs, 30_000);

@@ -21,16 +21,16 @@ import { formatScanSeconds } from "./glob.ts";
 import { decodeSmart, type LegacyDecoder } from "./encoding.ts";
 import { resolveOemDecoder, splitLines } from "./read.ts";
 
-/** Default result cap (C# GrepTool.MaxResults). */
+/** Default result cap (GrepTool.MaxResults). */
 export const GREP_DEFAULT_LIMIT = 100;
-/** Default wall-clock scan budget in ms (C# GrepTool.DefaultScanBudgetSeconds). */
+/** Default wall-clock scan budget in ms (GrepTool.DefaultScanBudgetSeconds). */
 export const GREP_DEFAULT_SCAN_BUDGET_MS = 60_000;
-/** Single-file size cap; larger files are skipped and reported (C# MaxFileBytes). */
+/** Single-file size cap; larger files are skipped and reported (MaxFileBytes). */
 export const GREP_MAX_FILE_BYTES = 1 << 20;
-/** Single matched line is truncated past this many characters (C# MaxMatchLineChars). */
+/** Single matched line is truncated past this many characters (MaxMatchLineChars). */
 export const GREP_MAX_MATCH_LINE_CHARS = 500;
-/**
- * Per-regex-job timeout in ms (TS-only safety boundary, P4-regex-probe): a
+/*
+ * Per-regex-job timeout in ms (TS-only safety boundary, ): a
  * pathological pattern can hang a single line for >60s, so each file's regex job
  * runs in a worker thread that is terminated after this budget — the scan budget
  * alone cannot interrupt a running regex.
@@ -38,40 +38,40 @@ export const GREP_MAX_MATCH_LINE_CHARS = 500;
 export const GREP_REGEX_TIMEOUT_MS = 10_000;
 
 export interface GrepToolOptions {
-  /** Override the default result cap (host/test injection; C# GrepTool.MaxResults). */
+  /** Override the default result cap (host/test injection; GrepTool.MaxResults). */
   readonly defaultLimit?: number;
-  /** Override the wall-clock scan budget in ms (C# DefaultScanBudgetSeconds). */
+  /** Override the wall-clock scan budget in ms (DefaultScanBudgetSeconds). */
   readonly scanBudgetMs?: number;
-  /** Override the per-regex-job worker timeout in ms (P4-regex-probe). */
+  /** Override the per-regex-job worker timeout in ms. */
   readonly regexTimeoutMs?: number;
-  /** Override the 1 MiB file-size cap (C# MaxFileBytes). */
+  /** Override the 1 MiB file-size cap (MaxFileBytes). */
   readonly maxFileBytes?: number;
   /** Override the system OEM code page used for non-UTF-8 files (undefined = auto-discover). */
   readonly oemCodePage?: number;
 }
 
-/**
+/*
  * grep: regex search over enumerated file contents, returning `rel:line: text`
- * matches. Ported from `Core/Tools/GrepTool.cs` at 09f4e08 with the worker
- * safety boundary mandated by P4-regex-probe + tools-and-platform.md: every
+ * matches. Ported from with the worker
+ * safety boundary mandated by + tools-and-platform.md: every
  * bounded regex job runs in a worker_threads Worker so a catastrophic pattern is
- * terminated via `worker.terminate()` instead of hanging the loop; abort also
+ * terminated via `worker.terminate` instead of hanging the loop; abort also
  * terminates the worker and rejects with AbortError.
  *
- * File content is decoded like read_file (P4-win-encoding-probe): strict UTF-8
+ * File content is decoded like read_file: strict UTF-8
  * first (BOM stripped), then the system OEM code page; files that decode
  * neither are skipped and reported, never silently mojibake'd.
  *
- * .NET -> JS regex bridging (probe §推荐结论): the `u` flag is always set so
+ *.NET -> JS regex bridging (probe §推荐结论): the `u` flag is always set so
  * `\p{…}` works and identity escapes like `\A`/`\z`/`\Z` never silently match as
  * literals; `\A`/`\z`/`\Z` are translated to `^`/`$` (equivalent per line, since
  * a line has no newlines); `.NET`-only syntax that JS rejects (single-quote
  * named groups, balanced/conditional groups, `\p{IsScript}`…) becomes an
  * explicit `error:` observation, never a silent empty result. The Unicode
- * shorthand classes are bridged to .NET CultureInvariant semantics (this card):
+ * shorthand classes are bridged to.NET CultureInvariant semantics (this card):
  * `\w`/`\d`/`\b` and their negations (`\W`/`\D`/`\B`, incl. inside character
  * classes) are rewritten to Unicode-aware JS equivalents by `translateDotNetRegex`
- * (P4-regex-probe §对照表 A), so grep matches like the C# baseline instead of
+ * ( §对照表 A), so grep matches like the instead of
  * JS's ASCII-only `\w`/`\d`/`\b`.
  */
 export function createGrepTool(baseDirectory: string, options?: GrepToolOptions): CoreTool {
@@ -176,12 +176,12 @@ export function createGrepTool(baseDirectory: string, options?: GrepToolOptions)
           const rel = normalizeToolPath(relative(searchRoot, file));
           if (globRegex !== null && !globRegex.test(rel)) continue;
 
-          // C# FileInfo.Length check first so oversized files are never read.
+          // FileInfo.Length check first so oversized files are never read.
           let info: Stats;
           try {
             info = await stat(file);
           } catch {
-            continue; // vanished/unreadable file -> skip like C# GetFiles drift
+            continue; // vanished/unreadable file -> skip like GetFiles drift
           }
           if (info.size > maxFileBytes) {
             skippedOversizeTotal += 1;
@@ -193,7 +193,7 @@ export function createGrepTool(baseDirectory: string, options?: GrepToolOptions)
           try {
             bytes = await readFile(file);
           } catch {
-            continue; // per-file IO errors swallowed (C# catches IOException/UnauthorizedAccess)
+            continue; // per-file IO errors swallowed (catches IOException/UnauthorizedAccess)
           }
           signal?.throwIfAborted();
 
@@ -215,7 +215,7 @@ export function createGrepTool(baseDirectory: string, options?: GrepToolOptions)
             hits = await runner.run(compiled.source, compiled.flags, lines, regexTimeoutMs, signal);
           } catch (error) {
             if (error instanceof Error && error.name === "AbortError") throw error;
-            continue; // worker failure on this file -> skip like C# swallows per-file errors
+            continue; // worker failure on this file -> skip like swallows per-file errors
           }
           if (hits === null) {
             skippedRegexTimeoutTotal += 1;
@@ -247,7 +247,7 @@ export function createGrepTool(baseDirectory: string, options?: GrepToolOptions)
       }
 
       // Skips of any kind suppress the "no match" marker: not having searched a
-      // file must never masquerade as "no match" (C# regression, and the same
+      // file must never masquerade as "no match" (regression, and the same
       // rule for regex-timeout/decode skips added in the TS port).
       let output =
         results.length === 0 &&
@@ -294,7 +294,7 @@ export function createGrepTool(baseDirectory: string, options?: GrepToolOptions)
 
 /**
  * Compile the effective pattern for matching. `literal` escapes the pattern
- * (C# Regex.Escape); otherwise .NET anchors and Unicode shorthand classes are
+ * (Regex.Escape); otherwise.NET anchors and Unicode shorthand classes are
  * bridged via `translateDotNetRegex` (this card: `\w`/`\d`/`\b` + negations to
  * Unicode semantics). The `u` flag is always set (P4-regex-probe): `\p{…}` works
  * and .NET identity escapes never silently match as literals. A compile failure
@@ -316,12 +316,12 @@ function compileGrepRegex(
   return { ok: true, source, flags };
 }
 
-/** Escape regex metacharacters for literal mode (JS equivalent of C# Regex.Escape). */
+/** Escape regex metacharacters for literal mode (JS equivalent of Regex.Escape). */
 function escapeRegExpLiteral(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Port of C# GrepTool.TruncateLine: cap the rendered line at 500 chars. */
+/** GrepTool.TruncateLine: cap the rendered line at 500 chars. */
 function truncateLine(line: string): { text: string; truncated: boolean } {
   if (line.length <= GREP_MAX_MATCH_LINE_CHARS) return { text: line, truncated: false };
   return {
@@ -330,8 +330,8 @@ function truncateLine(line: string): { text: string; truncated: boolean } {
   };
 }
 
-/**
- * Port of C# GrepTool.ScanWithContext: emit a [line-context, line+context]
+/*
+ * GrepTool.ScanWithContext: emit a [line-context, line+context]
  * window per hit, context lines as `rel-N- text`, match lines as `rel:N: text`,
  * overlapping windows deduplicated via `lastEmitted`.
  */
@@ -368,14 +368,14 @@ function appendContextWindows(
   return { matchCount: count, limitReached, truncated };
 }
 
-/** C# TryGetOptionalString: missing / non-string / blank -> undefined (ignored). */
+/** TryGetOptionalString: missing / non-string / blank -> undefined (ignored). */
 function optionalString(args: Readonly<Record<string, unknown>>, name: string): string | undefined {
   const value = args[name];
   if (typeof value !== "string" || value.trim().length === 0) return undefined;
   return value;
 }
 
-/** Sample file names wrapped like C#: `“a”、“b”`. */
+/** Sample file names wrapped like: `“a”、“b”`. */
 function formatSamples(samples: readonly string[]): string {
   return samples.map((s) => `“${s}”`).join("、");
 }

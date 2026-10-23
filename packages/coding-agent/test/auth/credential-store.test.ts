@@ -8,7 +8,6 @@ import { CredentialDataError, CredentialStore, needsRefresh, ChatGptCredential, 
 import { mockLockProvider, noopAcl, recordingAcl, failingFileAcl } from "./test-doubles.ts";
 
 /**
- * P8b — CredentialStore transaction (C# `ChatGptCredentialStore` @09f4e08).
  *
  * The ONLY write path is `update(change)`: acquire cross-process exclusive lock →
  * re-read latest credentials INSIDE the lock → apply change → validate → atomic
@@ -175,7 +174,7 @@ test("ACL failure refuses the token write (fail closed, old file kept)", async (
   }
 });
 
-test("legacy C# format (PascalCase Accounts/ActiveClientId) is migrated preserving the active credential", async () => {
+test("legacy credential format (PascalCase Accounts/ActiveClientId) is migrated preserving the active credential", async () => {
   const dir = await tempDir();
   try {
     const legacy = {
@@ -209,7 +208,7 @@ test("corrupt credentials file is reported, never silently treated as empty", as
   }
 });
 
-test("needsRefresh: only within the 3-minute window (C# NeedsRefresh port)", () => {
+test("needsRefresh: only within the 3-minute window", () => {
   const now = 1_700_000_000_000;
   const base = { clientId: "x", scopes: [] as readonly string[], expiresAt: now };
   assert.equal(needsRefresh({ ...base, expiresAt: now + 4 * 60_000 }, now), false, "4 min out → not yet");
@@ -219,7 +218,7 @@ test("needsRefresh: only within the 3-minute window (C# NeedsRefresh port)", () 
   // earliest_refresh_at gate: a future earliest blocks refresh even inside the window.
   assert.equal(needsRefresh({ ...base, expiresAt: now + 60_000, earliestRefreshAt: now + 10_000 }, now), false);
   assert.equal(needsRefresh({ ...base, expiresAt: now + 60_000, earliestRefreshAt: now - 1 }, now), true);
-  // An expired credential refreshes regardless of a future earliest gate (C#: ExpiresAt <= UtcNow short-circuit).
+
   assert.equal(needsRefresh({ ...base, expiresAt: now - 1, earliestRefreshAt: now + 10_000 }, now), true);
 });
 

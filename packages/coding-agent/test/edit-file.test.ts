@@ -7,9 +7,7 @@ import { dirname, join } from "node:path";
 import { createEditFileTool } from "@di/coding-agent";
 
 /**
- * P4.1 card 1: edit_file tool.
  *
- * Mirrors Di.Tests/Tools/EditFileToolTests.cs at baseline 09f4e08: old_string must
  * exist and occur exactly once (no fuzzy replacement), overlapping occurrences count
  * as ambiguous, CRLF/LF style is preserved on write-back, UTF-8 BOM is kept, and a
  * failed edit never leaves the file partially corrupted.

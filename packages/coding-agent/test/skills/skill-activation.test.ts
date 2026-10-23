@@ -5,9 +5,7 @@ import type { Skill } from "@di/coding-agent";
 import { LexicalSkillMatcher, computeSkillActivation } from "@di/coding-agent";
 
 /**
- * P6.2b unit 5 — activation. Ports every case of
- * `Di.Tests/Skills/SkillActivationTests.cs` against `Core/Skills/SkillActivation.cs`
- * at baseline 09f4e08 (`SkillActivation.Compute`): pinned skills come first,
+ *
  * auto-matched skills are appended after and deduped against the pinned set,
  * the whole set is recomputed every turn (never cumulative), and
  * `disable-model-invocation` skills are not auto-matched yet still accept an
@@ -16,8 +14,8 @@ import { LexicalSkillMatcher, computeSkillActivation } from "@di/coding-agent";
 
 const backendTests: Skill = {
   name: "backend-tests",
-  description: "运行并修复后端测试（dotnet）。当用户要求运行测试、分析失败或修复测试时使用。",
-  instructions: "1. dotnet build\n2. dotnet test",
+  description: "运行并修复后端测试（TypeScript workspace）。当用户要求运行测试、分析失败或修复测试时使用。",
+  instructions: "1. npm run build\n2. npm test",
   metadata: {},
   allowedTools: [],
   disableModelInvocation: false,

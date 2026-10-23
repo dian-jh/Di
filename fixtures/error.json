@@ -4,11 +4,10 @@
   "scenario": "error",
   "description": "Non-retryable model failure: the first model call rejects with LlmFailure(code=MISSING_CREDENTIAL). The loop returns stopReason=error carrying the failure fact, an empty answer, and no assistant message in the trajectory (only the user message).",
   "source": {
-    "baseline": "09f4e0816c1b2dc42461e79a968b46e811d3880c",
     "tests": [
-      "Di.Tests/AgentLoop/ReActTests.cs::RunAsync_NonRetryableModelError_ReturnsCleanErrorResult"
+      "packages/agent/test/agent-loop.test.ts"
     ],
-    "docs": "docs/migration/typescript-core/loop-and-state.md §iteration 与停止理由; Core/Llm/LlmException.cs (LlmErrorCodes.MissingCredential = \"MISSING_CREDENTIAL\")"
+    "docs": "docs/modules/agent-loop.md; docs/modules/llm.md"
   },
   "input": {
     "sessionId": "error",
@@ -25,7 +24,10 @@
     "model": {
       "responses": [
         {
-          "failure": { "message": "missing api key", "code": "MISSING_CREDENTIAL" }
+          "failure": {
+            "message": "missing api key",
+            "code": "MISSING_CREDENTIAL"
+          }
         }
       ]
     }
@@ -34,15 +36,31 @@
     "stopReason": "error",
     "answer": "",
     "iterations": 1,
-    "usage": { "inputTokens": 0, "outputTokens": 0 },
+    "usage": {
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
     "cost": null,
-    "failure": { "message": "missing api key", "code": "MISSING_CREDENTIAL" },
+    "failure": {
+      "message": "missing api key",
+      "code": "MISSING_CREDENTIAL"
+    },
     "modelRequestCount": 1,
-    "eventSequence": ["runFailed"],
+    "eventSequence": [
+      "runFailed"
+    ],
     "toolCalls": [],
     "trajectoryCount": 1,
     "trajectory": [
-      { "role": "user", "content": [{ "type": "text", "text": "hello" }] }
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ]
+      }
     ]
   }
 }

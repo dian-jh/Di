@@ -1,6 +1,6 @@
 import type { Skill } from "./skill.ts";
 
-/**
+/*
  * Skill matcher — the "auto activation" seam deciding which skills a user
  * message should auto-load (semantic relevance of the message against each
  * skill's name + description). This is the replaceable seam: the current
@@ -8,16 +8,16 @@ import type { Skill } from "./skill.ts";
  * testable); an embedding-based matcher can swap in later without callers or the
  * loop noticing.
  *
- * Mirrors `Core/Skills/SkillMatcher.cs` at baseline 09f4e08:
+ *:
  * - ASCII tokenization `[A-Za-z0-9]+`, lowercased, dropping words shorter than
- *   2 chars and the English stopword list (Ordinal set);
+ * 2 chars and the English stopword list (Ordinal set);
  * - Chinese adjacent-character bigrams over CJK U+4E00..U+9FFF (no
- *   segmentation dependency);
+ * segmentation dependency);
  * - overlap coefficient = |query ∩ skill| / min(|query|, |skill|) so neither a
- *   long query nor a long description is diluted;
+ * long query nor a long description is diluted;
  * - relevance threshold 0.30, at most 3 matches;
  * - equal scores tie-broken by name with Ordinal (UTF-16 code-unit) comparison,
- *   NOT locale ordering.
+ * NOT locale ordering.
  */
 
 /** One skill match (skill + relevance). */
@@ -48,7 +48,7 @@ export interface LexicalSkillMatcherOptions {
   readonly maxMatches?: number;
 }
 
-/**
+/*
  * Lexical matcher: tokenizes the user message and each skill's name + description
  * (ASCII words + Chinese bigrams) and scores with the overlap coefficient.
  * Lightweight, offline, deterministic and testable; weaker than an embedding
@@ -101,7 +101,7 @@ function tokenize(text: string): Set<string> {
 
 /**
  * Add adjacent CJK character bigrams (range U+4E00..U+9FFF); any other character
- * breaks the run (C# `SkillMatcher.AddCjkBigrams` over `char`).
+ * breaks the run ( over `char`).
  */
 function addCjkBigrams(text: string, tokens: Set<string>): void {
   let prev = "";
@@ -130,7 +130,7 @@ function overlapCoefficient(query: Set<string>, skill: Set<string>): number {
   return overlap / Math.min(query.size, skill.size);
 }
 
-/** Ordinal (UTF-16 code-unit) comparison — C# `StringComparer.Ordinal`, NOT locale. */
+/** Ordinal (UTF-16 code-unit) comparison —, NOT locale. */
 function ordinalCompare(a: string, b: string): number {
   if (a < b) return -1;
   if (a > b) return 1;

@@ -7,15 +7,14 @@ import { join } from "node:path";
 import { createGrepTool, type GrepToolOptions } from "@di/coding-agent";
 
 /**
- * P4-regex-unicode-conformance: grep bridges JS ASCII-only `\w`/`\d`/`\b`
+ *
  * (and their negations `\W`/`\D`/`\B`, incl. inside character classes) to the
- * .NET `RegexOptions.CultureInvariant` Unicode semantics (P4-regex-probe §对照表 A,
- * fixed on 09f4e08 GrepTool.cs). The `.NET` `\w` is `\p{L}\p{Mn}\p{Nd}\p{Pc}_`,
+ *
  * `\d` is `\p{Nd}`, and `\b` is a word boundary between those classes.
  *
  * Fixtures: CJK (中文), fullwidth (ＡＢＣ), Arabic-Indic digit (٣, U+0663),
  * combining mark (U+0301), emoji separators. Assertions mirror the .NET
- * CultureInvariant engine, verified empirically against 09f4e08-era GrepTool.
+ *
  */
 
 const base = mkdtempSync(join(tmpdir(), "di-grep-unicode-"));

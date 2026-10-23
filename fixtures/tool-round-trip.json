@@ -4,11 +4,10 @@
   "scenario": "tool-round-trip",
   "description": "Model requests one tool call, the executor runs it and returns an observation, the observation is appended, then the model answers. stopReason=answer, iterations=2, trajectory=[user, assistant(tool-call), tool, assistant]. Tool call arguments are carried as a raw JSON string and never reshaped.",
   "source": {
-    "baseline": "09f4e0816c1b2dc42461e79a968b46e811d3880c",
     "tests": [
-      "Di.Tests/AgentLoop/ReActTests.cs::RunAsync_ToolCallThenAnswer_ExecutesToolAppendsObservationAndLoops"
+      "packages/agent/test/fixtures.test.ts"
     ],
-    "docs": "docs/migration/typescript-core/loop-and-state.md §一回合精确时序"
+    "docs": "docs/modules/agent-loop.md"
   },
   "input": {
     "sessionId": "tool-round-trip",
@@ -17,7 +16,14 @@
     "history": [],
     "systemContext": null,
     "tools": [
-      { "name": "echo", "description": "test tool", "parameters": { "type": "object", "properties": {} } }
+      {
+        "name": "echo",
+        "description": "test tool",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        }
+      }
     ],
     "contextTokenBudget": null,
     "maxIterations": 8,
@@ -28,10 +34,19 @@
       "responses": [
         {
           "text": "need data",
-          "toolCalls": [{ "id": "call_1", "name": "echo", "arguments": "{\"x\":1}" }],
+          "toolCalls": [
+            {
+              "id": "call_1",
+              "name": "echo",
+              "arguments": "{\"x\":1}"
+            }
+          ],
           "finishReason": "tool-calls",
           "failure": null,
-          "usage": { "inputTokens": 0, "outputTokens": 0 },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0
+          },
           "cost": null,
           "model": "fake"
         },
@@ -40,7 +55,10 @@
           "toolCalls": [],
           "finishReason": "stop",
           "failure": null,
-          "usage": { "inputTokens": 0, "outputTokens": 0 },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0
+          },
           "cost": null,
           "model": "fake"
         }
@@ -51,11 +69,19 @@
     "stopReason": "answer",
     "answer": "done",
     "iterations": 2,
-    "usage": { "inputTokens": 0, "outputTokens": 0 },
+    "usage": {
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
     "cost": null,
     "failure": null,
     "modelRequestCount": 2,
-    "eventSequence": ["turnCompleted", "toolStarted", "toolCompleted", "turnCompleted"],
+    "eventSequence": [
+      "turnCompleted",
+      "toolStarted",
+      "toolCompleted",
+      "turnCompleted"
+    ],
     "toolCalls": [
       {
         "id": "call_1",
@@ -67,16 +93,45 @@
     ],
     "trajectoryCount": 4,
     "trajectory": [
-      { "role": "user", "content": [{ "type": "text", "text": "hello" }] },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ]
+      },
       {
         "role": "assistant",
         "content": [
-          { "type": "text", "text": "need data" },
-          { "type": "tool-call", "id": "call_1", "name": "echo", "arguments": "{\"x\":1}" }
+          {
+            "type": "text",
+            "text": "need data"
+          },
+          {
+            "type": "tool-call",
+            "id": "call_1",
+            "name": "echo",
+            "arguments": "{\"x\":1}"
+          }
         ]
       },
-      { "role": "tool", "toolCallId": "call_1", "content": "result for echo", "isError": false },
-      { "role": "assistant", "content": [{ "type": "text", "text": "done" }] }
+      {
+        "role": "tool",
+        "toolCallId": "call_1",
+        "content": "result for echo",
+        "isError": false
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "done"
+          }
+        ]
+      }
     ]
   }
 }

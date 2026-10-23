@@ -5,13 +5,12 @@ import type { ModelRequest, ToolSpec } from "@di/ai";
 import { ChatGptError, toChatGptWireRequest, serializeChatGptRequest } from "@di/ai";
 
 /**
- * P8a card red list — ChatGPT Responses request translation (Di baseline
- * `Core/Providers/ChatGpt/ChatGptTranslator.cs` `Request`; models-and-auth.md
+ *
  * §"Responses wire 与 SSE"): stateless request (`store:false`, `stream:true`,
  * full input history, NO `previous_response_id`), system → developer role,
  * tools into the Di namespace, explicitly-unsupported sampling/penalty/max-token
  * /stop options rejected with `UNSUPPORTED_OPTION` before sending, and the raw
- * output replay path (verbatim `response.output` vs the C#-compatible legacy
+ *
  * replay of encrypted reasoning + normalized display blocks).
  */
 
@@ -86,7 +85,7 @@ test("rejects explicitly unsupported sampling/penalty/max-token/stop options bef
       `option=${JSON.stringify(option)}`,
     );
   }
-  // An empty stop list is not an explicit stop option (C# `Stop is { Count: > 0 }`).
+  // An empty stop list is not an explicit stop option.
   const wire = toChatGptWireRequest(baseRequest({ stop: [] }), "gpt-6.1-sol");
   assert.equal(wire.stream, true);
 });
@@ -205,7 +204,7 @@ test("replays original response.output items verbatim and never re-sends normali
   assert.ok(!json.includes("normalized display text"));
 });
 
-test("replays old history without raw output via the C#-compatible path", () => {
+test("replays old history without raw output via the -compatible path", () => {
   const wire = toChatGptWireRequest(
     {
       messages: [

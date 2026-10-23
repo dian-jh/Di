@@ -1,4 +1,4 @@
-/** Shared host-side ChatGPT auth constants (P8b). C# `ChatGptAuth` @09f4e08. */
+/** Shared host-side ChatGPT auth constants. `ChatGptAuth` @. */
 export const CHATGPT_RESOURCE = "https://api.openai.com/v1";
 export const CHATGPT_DIRECT_SCOPE = "chatgpt.tokens.use.direct";
 export const CHATGPT_AUTHORIZE_URL = "https://auth.openai.com/api/accounts/authorize";

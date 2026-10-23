@@ -11,24 +11,24 @@ import {
 import { isErrno, messageOf } from "./errors.ts";
 import { resolvePath } from "./paths.ts";
 
-/** Single-read size cap (1 MiB) so a giant file cannot exhaust context (C# MaxBytes). */
+/** Single-read size cap (1 MiB) so a giant file cannot exhaust context (MaxBytes). */
 export const READ_FILE_MAX_BYTES = 1 << 20;
 /** Max rendered lines per call; beyond this a continuation hint is emitted. */
 export const READ_FILE_MAX_OUTPUT_LINES = 2000;
-/** Max rendered characters per call (UTF-16 code units, matching C# string.Length). */
+/** Max rendered characters per call (UTF-16 code units, matching string.Length). */
 export const READ_FILE_MAX_OUTPUT_CHARS = 64 * 1024;
 
 export interface ReadFileToolOptions {
-  /** Override the 1 MiB file-size cap (host/test injection; C# ReadFileOptions.MaxBytes). */
+  /** Override the 1 MiB file-size cap (host/test injection; ReadFileOptions.MaxBytes). */
   readonly maxBytes?: number;
   /** Override the system OEM code page used for non-UTF-8 files (undefined = auto-discover). */
   readonly oemCodePage?: number;
 }
 
-/**
+/*
  * read_file: UTF-8 text with line numbers, range reads, bounded output with a
- * continuation protocol. Mirrors `Core/Tools/ReadFileTool.cs` at 09f4e08.
- * Decoding follows P4-win-encoding-probe.md: UTF-8 first (BOM stripped), then
+ * continuation protocol..
+ * Decoding follows: UTF-8 first (BOM stripped), then
  * OEM code page fallback, explicit decode error when no decoder exists.
  */
 export function createReadFileTool(

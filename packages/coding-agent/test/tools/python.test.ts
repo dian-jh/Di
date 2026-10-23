@@ -8,8 +8,7 @@ import { spawnSync } from "node:child_process";
 import { createPythonTool, ProcessDiagnostics } from "@di/coding-agent";
 
 /**
- * P4-shell-session card — the Python tool (port of `Core/Tools/PythonTool.cs` at
- * 09f4e08): executes code via `python -c` in a standalone process whose default
+ *
  * working directory is the system temp dir (process-level isolation only — NOT
  * an OS sandbox, no filesystem/network restriction claimed). stdin starts at EOF
  * (redirected then closed), timeout force-kills the tree, output is forced to
@@ -22,7 +21,7 @@ import { createPythonTool, ProcessDiagnostics } from "@di/coding-agent";
 const base = mkdtempSync(join(tmpdir(), "di-py-"));
 test.after(() => rmSync(base, { recursive: true, force: true }));
 
-/** Locate a runnable python; undefined when none exists (C# TestEnvironment.FindPython). */
+
 function findPython(): string | undefined {
   for (const candidate of ["python", "python3"]) {
     const probe = spawnSync(candidate, ["-c", "print('ok')"], { windowsHide: true });

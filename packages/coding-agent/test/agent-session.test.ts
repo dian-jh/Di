@@ -25,12 +25,8 @@ import {
 } from "@di/coding-agent";
 
 /**
- * P2.6 card 6 + P2.7 card 7 (model switching): cross-turn history, environment
+ *
  * snapshot, the budget tracker and the model-resolution / usage-cost ledger — the
- * `AgentSession` host (docs/migration/typescript-core/loop-and-state.md
- * §"模型与 Skills 切换" / §"预算、成本与 usage 记账"; C# baseline
- * `Core/AgentLoop/AgentRunner.cs` `RunAsync` / `_modelFactory` +
- * `Core/Llm/LlmRuntime.cs` `ResolveModelAsync` / `CalculateCost`).
  *
  * Every business case is red by ASSERTION (never a path / missing-export error):
  * turn A's trajectory appears in turn B's history; whole user-turn trim keeps the
@@ -513,7 +509,7 @@ test("a soft-stop request is honored and cleared at turn end (no leak into the n
 });
 
 // ---------------------------------------------------------------------------
-// Pure history helpers (direct contracts; C# TrimHistoryByTokens / SanitizeHistory)
+// Pure history helpers with direct trimming and sanitization contracts.
 // ---------------------------------------------------------------------------
 
 test("sanitizeHistory removes an unpaired tool group (assistant + partial results) from the persisted tail", () => {

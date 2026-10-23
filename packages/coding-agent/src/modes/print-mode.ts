@@ -5,9 +5,9 @@ import type { TextReader, TextWriter } from "../cli/io.ts";
 import { appendTurn, applySkills, errorMessage, resolvePrompt, startSession } from "./common.ts";
 import { drainEvents, EventRenderer, renderAll } from "./event-renderer.ts";
 
-/**
- * Headless text single-shot mode (C# `Di.Cli/modes/PrintMode.cs` at baseline
- * 09f4e08; Pi's print mode): runs one turn then exits. Events stream to stdout in
+/*
+ * Headless text single-shot mode (at current implementation
+ *; Pi's print mode): runs one turn then exits. Events stream to stdout in
  * real time (ANSI disabled; under a real terminal the "正在请求模型…" status line
  * is shown until the first event arrives — omitted on pipe/redirect so captured
  * output stays clean). Prompt = joined positionals, or stdin to EOF. Failure

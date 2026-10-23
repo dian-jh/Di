@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { ConfigParseError, parseJsonc, parseJsonObject } from "@di/coding-agent";
 
 /**
- * JSONC parsing (P6.1 card 1). Config files follow the C# baseline where they are
+ *
  * parsed with .NET's JsonConfigurationProvider, which tolerates comments and
  * trailing commas. A pinned JSONC parser is required — regex comment stripping
  * or strict JSON.parse must NOT be used (operator-guide new-dependency rule).

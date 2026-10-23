@@ -35,7 +35,7 @@ const INTERNET_SETTINGS_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersio
 const require = createRequire(import.meta.url);
 const proxyAgents = new Map<string, unknown>();
 
-/**
+/*
  * Parse `reg.exe query` output. Values are retained only in memory and are never
  * included in errors or diagnostics because proxy URLs can contain credentials.
  */
@@ -102,7 +102,7 @@ export function createWindowsSystemProxyFetch(options: WindowsSystemProxyFetchOp
 
 // Fixed code only: the request URL is passed as environment data, never shell code.
 // Windows PowerShell uses the OS-provided .NET Framework proxy resolver, including
-// automatic detection and PAC. No project C# build or installed .NET SDK is needed.
+// automatic detection and PAC. No project build or installed.NET SDK is needed.
 const SYSTEM_PROXY_SCRIPT = `
 $ErrorActionPreference = 'Stop'
 $target = [Uri]$env:DI_SYSTEM_PROXY_TARGET
@@ -214,7 +214,7 @@ function parseEnvironmentProxy(value: string): string {
   if ((uri.protocol !== "http:" && uri.protocol !== "https:" && uri.protocol !== "socks5:" && uri.protocol !== "socks4:" && uri.protocol !== "socks4a:") || uri.hostname === "") {
     throw new UnsupportedEnvironmentProxyProtocolError();
   }
-  // .NET 10's Unix environment proxy parser defaults an unqualified proxy port to 80.
+  //.NET 10's Unix environment proxy parser defaults an unqualified proxy port to 80.
   // Undici's Socks5ProxyAgent defaults to 1080, so preserve the source runtime's value explicitly.
   if (uri.protocol === "socks5:" && uri.port === "") uri.port = "80";
   if ((uri.protocol === "socks4:" || uri.protocol === "socks4a:") && uri.port === "") uri.port = "80";
@@ -225,7 +225,7 @@ class UnsupportedEnvironmentProxyProtocolError extends Error {
   constructor() { super("The configured environment proxy protocol is unsupported."); }
 }
 
-/** .NET NO_PROXY: comma-separated; leading-dot suffix matches apex/subdomains; bare names are exact. */
+/**.NET NO_PROXY: comma-separated; leading-dot suffix matches apex/subdomains; bare names are exact. */
 function isDotNetNoProxyBypassed(noProxy: string | undefined, target: URL): boolean {
   if (noProxy === undefined) return false;
   const host = target.hostname.toLowerCase();

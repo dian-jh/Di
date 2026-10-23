@@ -1,36 +1,36 @@
-/**
- * .NET -> JS regex bridging for grep's shorthand classes (P4-regex-unicode-
+/*
+ *.NET -> JS regex bridging for grep's shorthand classes (-regex-unicode-
  * conformance). Used only by grep (grep.ts); see tools-and-platform.md §
  * ".NET 与 JavaScript 搜索语义差异" (`\w`/`\b`/大小写忽略 row) and
- * P4-regex-probe §对照表 A.
+ * §对照表 A.
  *
- * GrepTool.cs at 09f4e08 compiles with `RegexOptions.CultureInvariant`, so
+ * compiles with `RegexOptions.CultureInvariant`, so
  * `\w`/`\d`/`\b` follow Unicode semantics, while JS `\w`/`\d`/`\b` are ASCII-only
- * even under the `u` flag. This module rewrites the .NET shorthand classes to
+ * even under the `u` flag. This module rewrites the.NET shorthand classes to
  * Unicode-aware JS equivalents (the caller still sets `u`):
  *
- * - `\w` -> `[\p{L}\p{Mn}\p{Nd}\p{Pc}_]`. This is the empirically verified .NET
- *   `\w` (matching CJK, fullwidth letters, combining marks Mn and connector
- *   punctuation Pc; deliberately NOT `\p{N}`/`\p{M}`, which would wrongly match
- *   Nl/No numbers like Ⅻ/² and Mc/Me marks).
+ * - `\w` -> `[\p{L}\p{Mn}\p{Nd}\p{Pc}_]`. This is the empirically verified.NET
+ * `\w` (matching CJK, fullwidth letters, combining marks Mn and connector
+ * punctuation Pc; deliberately NOT `\p{N}`/`\p{M}`, which would wrongly match
+ * Nl/No numbers like Ⅻ/² and Mc/Me marks).
  * - `\d` -> `\p{Nd}` (.NET decimal digits; matches e.g. U+0663 Arabic-Indic).
  * - `\b` -> lookaround equivalent `(?:(?<!word)(?=word)|(?<=word)(?!word))`,
- *   `\B` -> its complement. Fixed-width lookarounds only: no new backtracking
- *   blowup is introduced, and the pattern still runs inside a worker that can be
- *   terminated (P4-regex-probe §超时终止实验).
+ * `\B` -> its complement. Fixed-width lookarounds only: no new backtracking
+ * blowup is introduced, and the pattern still runs inside a worker that can be
+ * terminated ( §超时终止实验).
  * - Negations `\W`/`\D` and in-class uses `[\w]`/`[\d]`/`[\W]`/`[\D]` are
- *   bridged too. A class containing `\W`/`\D` is `body ∪ ¬word`/`body ∪ ¬Nd`
- *   (or, negated, `word ∩ ¬body`/`Nd ∩ ¬body`), rewritten as an alternation /
- *   negative-lookahead since JS cannot negate a class escape inside a class.
+ * bridged too. A class containing `\W`/`\D` is `body ∪ ¬word`/`body ∪ ¬Nd`
+ * (or, negated, `word ∩ ¬body`/`Nd ∩ ¬body`), rewritten as an alternation /
+ * negative-lookahead since JS cannot negate a class escape inside a class.
  * - `[\b]` inside a class stays the backspace escape (both engines agree);
- *   `[\B]` inside a class is left untouched so JS rejects it like .NET does.
+ * `[\B]` inside a class is left untouched so JS rejects it like.NET does.
  *
  * Only these escapes are rewritten; every other token passes through unchanged.
  * `\A`/`\z`/`\Z` anchor bridging is also handled here (previously translateAnchors).
  * Backslash runs are preserved: `\\w` (even count) stays a literal backslash + w.
  */
 
-/** Unicode word-class body: .NET `\w` = `\p{L}\p{Mn}\p{Nd}\p{Pc}_`. */
+/** Unicode word-class body:.NET `\w` = `\p{L}\p{Mn}\p{Nd}\p{Pc}_`. */
 const WORD_BODY = String.raw`\p{L}\p{Mn}\p{Nd}\p{Pc}_`;
 /** Single-char word class. */
 const WORD_CLASS = String.raw`[${WORD_BODY}]`;

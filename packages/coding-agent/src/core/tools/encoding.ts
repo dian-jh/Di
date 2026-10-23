@@ -15,9 +15,9 @@ export function createLegacyEncoder(codePage: number): ((text: string) => Uint8A
 }
 
 /**
- * Output/file decoding per P4-win-encoding-probe.md.
+ * Output and file decoding policy.
  *
- * Strategy (mirrors `Core/Tools/ProcessEncoding.cs` SmartDecode):
+ * Strategy:
  * 1. strict UTF-8 decode (fatal) — valid UTF-8 wins immediately;
  * 2. else trim 1–3 bytes from the tail (a multi-byte char cut at the seam),
  *    then 1–3 bytes from the head, re-testing strict UTF-8;
@@ -111,7 +111,7 @@ export async function discoverOemCodePage(): Promise<number | undefined> {
     return cachedOemCodePage;
   }
   if (process.platform !== "win32") {
-    // C# maps non-Windows OEM to UTF-8 (65001); strict UTF-8 already covered it.
+    // Non-Windows systems use UTF-8 (65001); strict UTF-8 was already checked.
     cachedOemCodePage = 65001;
     return cachedOemCodePage;
   }

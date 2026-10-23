@@ -2,12 +2,12 @@ import type { ToolCall, ToolSpec } from "@di/ai";
 import type { ToolExecutor, ToolObservation } from "@di/agent";
 import type { Skill } from "./skill.ts";
 
-/**
+/*
  * Model-visible skill tools (the "Load" phase of progressive disclosure, aligned
  * with MS Agent Framework's load_skill): the model sees the skill list in the
  * advertisement block and loads a skill's FULL instructions by name on demand
- * instead of keeping every body resident. Mirrors `Core/Skills/SkillTools.cs` at
- * baseline 09f4e08. NOTE (unit 7): `allowed-tools` is parsed metadata, NOT an
+ * instead of keeping every body resident. at
+ *. NOTE (unit 7): `allowed-tools` is parsed metadata, NOT an
  * enforced permission constraint in this codebase — nothing here claims to
  * sandbox tool execution.
  */
@@ -31,11 +31,11 @@ export function isLoadSkillCall(call: ToolCall): boolean {
   return call.name === LOAD_SKILL_TOOL.name;
 }
 
-/**
+/*
  * Execute load_skill: return the skill's full instructions (with a directory
  * hint so bundled files resolve relative to it); unknown names / missing or
  * invalid arguments return an `error:`-prefixed string. Never throws — every
- * failure is communicated in the returned text (mirrors C# `ExecuteLoadSkill`,
+ * failure is communicated in the returned text (`ExecuteLoadSkill`,
  * which catches `JsonException` and returns an error string).
  */
 export function executeLoadSkill(call: ToolCall, skills: ReadonlyMap<string, Skill>): string {
@@ -56,7 +56,7 @@ export function executeLoadSkill(call: ToolCall, skills: ReadonlyMap<string, Ski
     : renderLoadedSkill(skill);
 }
 
-/**
+/*
  * Render a loaded skill's full body, attaching the skill directory so the model
  * can resolve the relative paths of bundled files (scripts / references / assets).
  */
@@ -68,9 +68,9 @@ export function renderLoadedSkill(skill: Skill): string {
 
 /**
  * Executor decorator: intercepts load_skill calls, delegating everything else to
- * the inner executor. Mirrors C# `SkillAwareExecutor`: the load_skill result is
+ * the inner executor. Mirrors: the load_skill result is
  * a plain observation (errors are `error:`-prefixed text, never throws), so it is
- * returned with `isError: false` exactly as C# `ReAct.ExecuteToolAsync` marks
+ * returned with `isError: false` exactly as  marks
  * non-throwing executor results.
  */
 export function createSkillAwareExecutor(

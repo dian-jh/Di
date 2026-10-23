@@ -102,12 +102,12 @@ describe("parseMessage（parse + validate）", () => {
 
   it("解析 command_error 携带 turn_message（回合型命令回退）", () => {
     const msg = parseMessage(
-      '{"type":"command_error","code":"turn_not_supported","message":"回合型命令","turn_message":"【Skill：backend-tests】跑后端测试\\n\\ndotnet test\\n\\n补测试"}',
+      '{"type":"command_error","code":"turn_not_supported","message":"回合型命令","turn_message":"【Skill：backend-tests】跑后端测试\\n\\nnpm test\\n\\n补测试"}',
     );
     assert.equal(msg.type, "command_error");
     if (msg.type !== "command_error") throw new Error("unreachable");
     assert.equal(msg.code, "turn_not_supported");
-    assert.equal(msg.turn_message, "【Skill：backend-tests】跑后端测试\n\ndotnet test\n\n补测试");
+    assert.equal(msg.turn_message, "【Skill：backend-tests】跑后端测试\n\nnpm test\n\n补测试");
   });
 
   it("容忍 \\r\\n 行尾", () => {

@@ -1,165 +1,68 @@
-# Di 家目录与配置规范（~/.di）
+# `~/.di` 与配置
 
-> 设计文档。定义 Di 的用户级数据/配置落点与分层合并规则，对齐主流 agent 的约定
-> （Claude Code `~/.claude/`、Codex `~/.codex/`），让用户可以直接编写自己的配置、
-> skills、命令，而不需要改任何代码。
->
-> 配套文档：`docs/README.md`（总索引）、`docs/architecture.md`（架构与关键决策）、
-> `docs/modules/skills.md`（skills 目录消费方）、`docs/modules/sessions.md`（sessions/ 落盘）。
+`packages/coding-agent/src/core/config/di-home.ts` 的 `DiHome` 计算用户数据路径。默认根目录为
+用户家目录下的 `.di`；非空 `DI_HOME` 会原样用作根路径（相对值不会自动转成绝对路径）。
 
----
+## 目录布局
 
-## 1. 定位与原则
+| 路径 | 用途 |
+|---|---|
+| `config.json` | 用户级配置，只读加载，不由 CLI 自动改写 |
+| `sessions/` | session JSONL 与按日期组织的工具输出 artifacts |
+| `logs/` | 运行日志 |
+| `skills/`、`commands/` | 用户技能与斜杠命令 |
+| `auth/chatgpt/` | ChatGPT OAuth 凭据与锁文件 |
+| `mcp.json` | MCP 配置路径入口 |
 
-- **单一来源**：`~/.di` 是 Di 唯一的用户级数据根目录，由 `packages/coding-agent/src/core/config/di-home.ts` 的 `DiHome` 统一解析，
-  各子系统不再各自拼路径。
-- **所有权分明**：程序只写 `sessions/`（会话记录）；配置文件（`config.json` 等）一律**用户所有**，
-  程序只读、不创建、不覆盖。
-- **分层覆盖**：配置按「默认 → 用户全局 → 项目级 → 环境变量」合并，后一层覆盖前一层，
-  全部灌进同一个 `IConfiguration`，各 Options 绑定自动生效。
-- **目录即契约**：子目录的**位置**现在是规范，其内容（skills/commands/agents/MCP）按目录约定
-  逐步实现，将来加功能时目录结构不需要再改。
+工作区配置在 `<workspace>/.di/config.json`。路径 getter 定义在 `DiHome`；session 落盘由
+`packages/coding-agent/src/core/sessions/session-log.ts` 的 `SessionStore` 实现，认证存储由
+`packages/coding-agent/src/core/auth/credential-store.ts` 实现。
 
-## 2. 目录结构
+## 合并顺序与格式
 
-```
-~/.di/
-├── config.json            # 用户全局配置（可选；用户自己写，程序只读）
-├── sessions/              # 会话记录（SessionLog 写入，追加式 JSONL）
-│   └── YYYY/MM/DD/
-│       ├── session-*.jsonl
-│       └── artifacts/     # L1 大输出落盘（TS FileArtifactStore 写入，阶段一按天落盘）
-├── logs/                  # 运行日志（DiLog 写入，jcode 格式文本，按日一个文件）
-│   └── di-YYYY-MM-DD.log  # 每行 [yyyy-MM-dd HH:mm:ss.fff] [LEVEL] message
-├── skills/                # 用户 skills（已实现；解析/匹配/披露见 docs/modules/skills.md）
-│   ├── <name>/SKILL.md    # 目录式（MS 规范）
-│   └── <name>.md          # 扁平式（对齐 Pi 的 .pi/skills/*.md，二选一）
-├── commands/              # 用户斜杠命令（命令名 = 文件名；格式见 §6）
-│   └── <name>.md          # 扁平式：frontmatter(description[, argument-hint]) + 指令模板
-├── agents/                # 子代理定义（将来）
-│   └── <name>.md
-└── mcp.json               # MCP 服务器配置（将来，JSON 数组）
-```
+`packages/coding-agent/src/core/config/di-config.ts` 的 `DiConfig.load` 按以下顺序合并：
 
-> **skills 多源发现（Agent Skills 规范位置）**：除 `~/.di/skills` 外，还发现
-> `~/.agents/skills`（用户标准）与祖先 `.agents/skills`（项目标准，从工作目录沿父目录向上
-> 到 git 根，近者优先），加上 `<workspace>/.di/skills` 项目级。合并优先级与发现规则唯一定义在
-> `docs/modules/skills.md`（§多源发现合并）。
+1. 程序默认值
+2. `~/.di/config.json`
+3. `<workspace>/.di/config.json`
+4. 环境变量
 
-根目录可被环境变量 `DI_HOME` 覆盖（测试隔离、多环境共存）：
+后加载的同名键覆盖先前值。对象递归展平后按 `:` 分隔路径合并，查找键不区分大小写；环境变量
+中的双下划线 `__` 转为层级分隔符，单下划线保留。配置文件使用 JSONC，可带注释和尾逗号；根
+元素必须是对象。配置读取与解析入口分别为 `packages/coding-agent/src/core/config/di-config.ts` 和
+`packages/coding-agent/src/core/config/jsonc.ts`。
 
-```bash
-export DI_HOME=~/mydi    # 默认是 ~/.di
-```
+常用配置示例：
 
-### 2.1 各条目职责
-
-| 条目 | 谁写 | 谁读 | 状态 |
-|---|---|---|---|
-| `config.json` | 用户 | 程序（分层配置源 #2） | ✅ 已实现（用户级） |
-| `sessions/YYYY/MM/DD/*.jsonl` | 程序（TS `SessionStore`） | 用户/重放工具 | ✅ 已实现 |
-| `sessions/YYYY/MM/DD/artifacts/*.txt` | 程序（TS `FileArtifactStore`，L1 大输出落盘） | 用户/`read_file` | ✅ 阶段一（会话目录随阶段二迁入） |
-| `logs/di-YYYY-MM-DD.log` | 程序（TS `DiLog`） | 用户/排障 | ✅ 已实现 |
-| `skills/<name>/SKILL.md` 或 `skills/<name>.md` | 用户 | SkillRepository（多源合并 + `/skill` 激活） | ✅ MVP |
-| `commands/<name>.md` | 用户 | TS `packages/coding-agent/src/core/commands/command-loader.ts`（内置 + 用户命令 → `SlashCommandRegistry`） | ✅ 已实现 |
-| `agents/<name>.md` | 用户 | 将来子代理加载器 | 🔜 格式已预留 |
-| `mcp.json` | 用户 | 将来 MCP 桥 | 🔜 格式已预留 |
-
-## 3. 配置分层与优先级
-
-TS CLI 启动时由 `packages/coding-agent/src/core/config/di-config.ts` 的 `DiConfig.load` 依次加载以下源，**后加载覆盖先加载**：
-
-| 优先级 | 源 | 位置 | 说明 |
-|---|---|---|---|
-| 1（最低） | 程序默认值 | `packages/coding-agent/src/core/config/di-config.ts` 的 `DEFAULT_CONFIG` | 兜底 |
-| 2 | 用户全局 | `~/.di/config.json` | 个人偏好 |
-| 3 | 项目级 | `<workspace>/.di/config.json` | 团队共享，随仓库走 |
-| 4（最高） | 环境变量 | 进程环境 | 运行时覆盖（如 `Model__DefaultModel`） |
-
-C# 基线另加载 `Di.Cli/appsettings.json`；TS 层目前没有单独的构建内配置文件。
-
-> **项目级 > 用户全局**：与 Claude Code 的 local > project > user 一致——仓库内的团队设置
-> 优先于个人偏好（例如团队统一默认模型，个人只覆盖 UI 偏好）。
-
-### 3.1 配置段
-
-| 段 | 绑定到 | 主要键 |
-|---|---|---|
-| `AgentLoop` | TS `createCliHost` / `AgentSession` | `SystemPrompt`、`MaxIterations`、`MaxTokens`、`ReasoningEffort`、`HistoryBudgetRatio` |
-| `ContextManagement` | TS `BudgetPolicy` / `createCliHost` | `Enabled`、`MarginRatio`、`OutputReserveTokens`、`NextOutputReserveTokens`、`SoftRatio` / `HardRatio` / `BlockingRatio`（详见 `docs/modules/context-management.md`） |
-| `Model` | TS `createCliHost` / `ModelSelection` | `Provider`、`DefaultModel` |
-| `Repl` | `ReplOptions` | `Prompt`、`WorkingStatusText`、`UseAnsi` |
-| `Retry` | `RetryPolicyOptions` | `MaxAttempts`、`InitialBackoff` 等 |
-| `DeepSeek` | `DeepSeekAdapterConfig` | `ApiKey`、`BaseUrl`、`DefaultReasoningEffort`、`StrictTools`、`UseSystemProxy` |
-
-示例——用户个人配置 `~/.di/config.json`：
-
-```json
+```jsonc
 {
-  "Model": { "DefaultModel": "deepseek-v4-pro" },
-  "Repl": { "Prompt": "di> " }
+  "Model": {
+    "Provider": "deepseek",
+    "DefaultModel": "deepseek-flash"
+  },
+  "DeepSeek": {
+    "DefaultReasoningEffort": "high",
+    "StrictTools": false,
+    "UseSystemProxy": false,
+    "TimeoutSeconds": 60,
+    "StreamIdleTimeoutSeconds": 60
+  },
+  "AgentLoop": {
+    "MaxIterations": 0,
+    "HistoryBudgetRatio": 0.5,
+    "ReasoningEffort": "high",
+    "MaxTokens": 8192,
+    "SystemPrompt": ""
+  },
+  "ContextManagement": {
+    "Enabled": true
+  }
 }
 ```
 
-项目级 `<workspace>/.di/config.json`（团队统一）：
-
-```json
-{
-  "AgentLoop": { "MaxIterations": 12, "MaxTokens": 4096, "ReasoningEffort": "high", "HistoryBudgetRatio": 0.4 },
-  "DeepSeek": { "DefaultReasoningEffort": "max" }
-}
-```
-
-环境变量覆盖（键名用 `__` 代替 `:` 分层）：
-
-```bash
-export Model__DefaultModel=deepseek-flash
-```
-
-## 4. 所有权规则
-
-- **程序写**：`sessions/`（会话记录，追加式 JSONL，进程中断不损坏）与 `logs/`（运行日志，
-  jcode 格式文本，按日一个文件）；`~/.di` 根目录本身在首次写会话 / 日志时隐式创建。
-- **程序只读**：`config.json`、`skills/`、`commands/`、`agents/`、`mcp.json`。
-- 程序**绝不**覆盖已存在的配置文件；也不因「配置文件缺失」而报错——所有配置源都是可选的。
-
-## 5. TypeScript 实现入口
-
-| 能力 | 仓库根相对源码路径 | 状态 |
-|---|---|---|
-| 家目录解析与目录计算 | `packages/coding-agent/src/core/config/di-home.ts` | ✅ |
-| 分层配置合并 | `packages/coding-agent/src/core/config/di-config.ts` | ✅ |
-| 命令/skill/session/log 所有权接线 | `packages/coding-agent/src/cli/cli-host-compose.ts` | ✅ |
-| artifacts 路径 | `packages/coding-agent/src/core/context-management.ts` | ✅ |
-
-下表为 C# 迁移基线实现入口，不代表 TS 当前源码位置。
-
-## C# 基线实现现状（行为参考）
-
-| 能力 | 落点 | 状态 |
-|---|---|---|
-| 家目录解析（`DI_HOME` + `~/.di` 默认） | `Core/Configuration/DiHome.cs` | ✅ |
-| 分层配置合并（4 源） | `Di.Cli/DiConfig.cs` | ✅ |
-| 配置段绑定 | `Di.Cli/DiServiceCollectionExtensions.cs` | ✅ |
-| SessionLog 不再写 `config.json` | `Core/Sessions/SessionLog.cs` | ✅ |
-| 组合根决策入配置（prompt/迭代上限/默认模型/UI） | `Di.Cli/Program.cs` | ✅ |
-| Skills：MS 规范解析 + 多源发现（`.di` + `.agents` 标准位置）+ 激活注入 | `Core/Skills/` + `Di.Cli/Repl.cs` | ✅ |
-| Skills：渐进式披露（广告块 + `load_skill` 工具） | `Core/Skills/SkillTools.cs` + `AgentRunner` | ✅ |
-| Skills：匹配器质量与上下文成本指标 | `Core/Skills/SkillEvaluator.cs` | ✅ |
-| 命令注册表：内置 + `~/.di/commands/*.md` 用户命令，REPL 与 RPC/TUI 共用 | `Di.Cli/Commands/`（`SlashCommandRegistry` / `BuiltinCommands` / `CommandLoader`） | ✅ |
-
-## 6. 将来扩展（格式预留给定）
-
-- **commands/<name>.md 格式**：`---` 包裹的 frontmatter（`description` 必填、`argument-hint` 可选）
-  + 正文指令模板；命令名 = 文件名（小写字母/数字/连字符，对齐 `SkillMarkdown` 命名规则）。
-  输入 `/名 参数` 时正文模板 + 参数作为用户请求运行一个完整回合（对齐 Pi 的 prompt templates；
-  MVP 不做 `$1` 占位符替换）。无效 / 与内置重名的文件告警跳过，绝不让启动失败。
-- **MCP**：`mcp.json` 声明服务器（stdio 命令 + 环境），通过 `ICoreTool`/`IToolProvider` 桥接，
-  ReAct 循环无感。
-- **项目级指令**：将来支持 `<workspace>/AGENTS.md` 作为项目指令注入（当前
-  `CoreTools.BuildInstructions` 的输出是代码内默认，可被 `AgentLoop:SystemPrompt` 覆盖）。
-
-## 7. 关联：Skill 测试与指标
-
-skill 的触发 / 排除 / 执行三类测试、匹配质量指标（精确率 / 召回率 / 无匹配率 / 上下文成本）及其
-`Core/Skills/SkillEvaluator.cs` 落点，**唯一定义在 `docs/modules/skills.md`（§测试与指标）**，此处不重复。
+`MaxTokens` 和 `SystemPrompt` 为可选项；`MaxIterations=0` 表示不设迭代上限。宿主未配置
+provider/model 时使用 `deepseek` / `deepseek-flash`。DeepSeek API key 可由 `DEEPSEEK_API_KEY`
+提供。CLI 参数 `--provider`、`--model`、`--thinking` 覆盖对应运行值。环境变量可用双下划线表示
+层级，例如 `AGENTLOOP__MAXITERATIONS`。完整字段读取点见
+`packages/coding-agent/src/cli/cli-host-compose.ts` 与
+`packages/coding-agent/src/cli/provider-runtime.ts`。

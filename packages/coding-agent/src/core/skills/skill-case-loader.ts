@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 
-/**
- * Labeled skill-matcher case loader (C# `Core/Skills/SkillCaseLoader.cs` at
- * baseline 09f4e08): a JSON array of `{"message": "...", "expected_skills": [...]}`
+/*
+ * Labeled skill-matcher case loader (at
+ * ): a JSON array of `{"message": "...", "expected_skills": [...]}`
  * items (snake_case, matching the wire format) for the skill evaluator
  * (trigger / exclusion tests). `message` is required and non-blank;
  * `expected_skills` is optional (absent = an exclusion case expected to match
@@ -16,9 +16,9 @@ export interface SkillTestCase {
   readonly expectedSkills: readonly string[];
 }
 
-/**
+/*
  * Load the labeled cases from `path`. Throws on file-level errors (mirroring the
- * C# IOException / JsonException / InvalidDataException contract); entry-level
+ * IOException / JsonException / InvalidDataException contract); entry-level
  * problems are reported through `warn` and skipped.
  */
 export function loadSkillCases(path: string, warn?: (message: string) => void): readonly SkillTestCase[] {

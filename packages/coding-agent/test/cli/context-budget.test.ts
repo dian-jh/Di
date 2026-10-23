@@ -22,7 +22,7 @@ test("BudgetPolicy mirrors configured reserves, clamping, waterlines and predict
   assert.equal(policy.predictsOverSoft(40_000, 8_499), false);
   assert.equal(policy.predictsOverSoft(40_000, 8_500), true);
   assert.equal(new BudgetPolicy(1_000).inputBudget, 0);
-  assert.equal(new BudgetPolicy(5, { marginRatio: 0.1, outputReserveTokens: 0 }).marginTokens, 0, "C# midpoint rounding is ties-to-even");
+  assert.equal(new BudgetPolicy(5, { marginRatio: 0.1, outputReserveTokens: 0 }).marginTokens, 0, "ties-to-even midpoint rounding");
   assert.throws(() => new BudgetPolicy(10, { softRatio: 0.9, hardRatio: 0.8 }));
 });
 

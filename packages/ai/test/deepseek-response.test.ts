@@ -11,10 +11,9 @@ import {
 } from "@di/ai";
 
 /**
- * P3 card 3 red list — DeepSeek response translation plugged into the
+ *
  * `TranslateEvent` seam of `sseToModelEvents` (Di baseline
- * `Core/Providers/DeepSeek/DeepSeekAdapter.cs` `TranslateChunk` +
- * `DeepSeekTranslator.cs` from-wire mappings; models-and-auth.md §DeepSeek 协议
+ *
  * 边界 items 1/4/5): raw SSE data line → ProviderChunk(s), text/reasoning/
  * tool-call fragments, [DONE] terminal, bad-JSON line skipping (never crash),
  * usage cache/reasoning split, finish-reason mapping.

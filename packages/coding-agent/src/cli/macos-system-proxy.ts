@@ -17,7 +17,7 @@ export interface MacOSSystemProxyFetchOptions {
   readonly proxyFetch?: (input: string, init: RequestInit | undefined, proxy: string) => Promise<Response>;
 }
 
-/**
+/*
  * Route through the static macOS HTTP, HTTPS or SOCKS proxy. PAC and WPAD are
  * detected but fail closed: this implementation does not evaluate PAC scripts.
  */
@@ -111,7 +111,7 @@ export function parseMacOSSystemProxySettings(output: string): MacOSSystemProxyS
     const host = values.get(hostKey);
     const proxyPort = port(portKey);
     if (host === undefined || host === "" || proxyPort === undefined) throw new Error("Incomplete proxy endpoint");
-    const url = new URL(`${scheme}://${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}:${proxyPort}`);
+    const url = new URL(`${scheme}://${host.includes(":") && !host.startsWith("[") ? `[${host}]`: host}:${proxyPort}`);
     if (url.hostname === "" || url.username !== "" || url.password !== "") throw new Error("Invalid proxy endpoint");
     return url.toString();
   };

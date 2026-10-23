@@ -23,7 +23,7 @@ import {
 import { inputLines, makeArgs, outputLines } from "../modes/test-host.ts";
 
 /**
- * P4.5 card — real composition-root integration for `createBashTool`: the same
+ *
  * RPC wiring as real-host-rpc.test.ts, but the injected tool set is the bash
  * tool and the scripted model issues a REAL one-shot shell call through the
  * platform shell name. This is the true wiring acceptance: prompt →
@@ -108,7 +108,7 @@ const SET_SESSION_STATE = IS_WINDOWS
   : "cd sub && export DI_SHELL_SESSION=alive";
 const READ_SESSION_STATE = IS_WINDOWS ? "cd & echo %DI_SHELL_SESSION%" : "pwd; echo $DI_SHELL_SESSION";
 
-/** Drive `runRpcMode` in-process over the given host (same driver the P7b suite uses). */
+
 async function runRpc(host: CliHost, input: string) {
   const stdout = new StringTextWriter();
   const stderr = new StringTextWriter();

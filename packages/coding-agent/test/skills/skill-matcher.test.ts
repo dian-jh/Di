@@ -5,8 +5,7 @@ import type { Skill } from "@di/coding-agent";
 import { LexicalSkillMatcher } from "@di/coding-agent";
 
 /**
- * P6.2b unit 4 — matching. Ports every case of `Di.Tests/Skills/SkillMatcherTests.cs`
- * at baseline 09f4e08 against `Core/Skills/SkillMatcher.cs` (LexicalSkillMatcher):
+ *
  * ASCII `[A-Za-z0-9]+` tokenization with English stopwords, Chinese adjacent-
  * character bigrams (CJK U+4E00..U+9FFF), the overlap coefficient (shorter side
  * as denominator), relevance threshold 0.30, at most 3 matches, and equal scores

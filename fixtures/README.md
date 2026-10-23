@@ -1,24 +1,17 @@
-# Cross-language fixtures
+# Agent loop fixtures
 
-Location decision (P1.2): **repo-root `fixtures/`**. The migration docs specify a
-fixture location only for the P5 session-format fixtures
-(`packages/coding-agent/test/fixtures/sessions/`, owned by `@di/coding-agent`);
-no location was specified for the loop fixtures, so this directory was chosen and
-recorded here and in `docs/migration/typescript-core/progress.md`. The P5 session
-fixtures stay out of this directory to avoid mixing loop and JSONL-format assets.
+Loop fixtures live in the repository-root `fixtures/` directory. Session format
+fixtures live separately in `packages/coding-agent/test/fixtures/sessions/`.
 
 ## Purpose
 
-These JSON files are the single shared input/expected contract between the C#
-baseline (`09f4e0816c1b2dc42461e79a968b46e811d3880c`) and the TypeScript core.
-The minimal scenario set comes from `docs/migration/typescript-core/execution-plan.md`
-P1 item 5: pure answer, tool round-trip, error, soft-stop, hard-cancel,
-budget-pause, recovery.
+These JSON files define the inputs and expected outputs for the TypeScript agent
+loop tests. They cover pure answers, tool round trips, errors, soft stops, hard
+cancellation, budget pauses, and host recovery.
 
-**Provenance rule (operator-guide.md):** every `expected` value is derived from the
-C# baseline source/tests or the leaf migration docs — never from generated TS
-output. Each fixture's `source.tests` lists the baseline test(s) it is extracted
-from. Normalize volatile values (timestamps, ids) and keep invariant values exact
+Each fixture's optional `source.tests` and `source.docs` fields point to current
+TypeScript tests and documentation. Normalize volatile values (timestamps, ids)
+and keep invariant values exact
 (`call_id`, `name`, raw `arguments` string, message ordering).
 
 ## Files
@@ -38,8 +31,7 @@ from. Normalize volatile values (timestamps, ids) and keep invariant values exac
 
 `schema.json` is the machine-readable reference; this section is the readable
 contract. A structural validator encoding these rules lives in
-`packages/agent/test/fixture-schema.ts` and is enforced by the P1.2 node:test
-(`npm test -w @di/agent`).
+`packages/agent/test/fixture-schema.ts` and is enforced by the agent package tests.
 
 Top level:
 
@@ -49,7 +41,7 @@ Top level:
 | `kind` | `"loop"` \| `"host-recovery"` | default `loop` |
 | `scenario` | string | one of the seven scenarios |
 | `description` | string | what it covers + provenance note |
-| `source` | object (optional) | `baseline`, `tests[]`, `docs` provenance |
+| `source` | object (optional) | Current test and documentation references |
 | `input` | object | see below |
 | `expected` | object | see below |
 
@@ -103,7 +95,7 @@ document the observable partial state at the abort point (not a returned
 
 ### `kind: "host-recovery"`
 
-Documents the host-level fail-closed boundary (P5, `AgentSession`), not a
+Documents the host-level fail-closed boundary in `AgentSession`, rather than a
 pure-loop run.
 
 `input`: `{ sessionId, checkpointState, attemptedPrompt, checkpointedTrajectory }`.
@@ -111,9 +103,9 @@ pure-loop run.
 
 ## Consumption
 
-- P1.2 (this wave): `packages/agent/test/fixtures.test.ts` validates every
+- `packages/agent/test/fixtures.test.ts` validates every
   fixture against the schema and drives the recording executor through
   `tool-round-trip.json` to prove recording/replay works.
-- P2: the pure loop validates its behavior against the `kind: "loop"` fixtures
+- The pure loop validates its behavior against the `kind: "loop"` fixtures
   with the fake model + recording executor.
-- P5: the session host validates the `kind: "host-recovery"` fixture.
+- The session host validates the `kind: "host-recovery"` fixture.

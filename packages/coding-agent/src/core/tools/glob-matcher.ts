@@ -1,14 +1,14 @@
-/**
+/*
  * Minimal glob → regex matcher.
  *
- * Semantics ported exactly from `Core/Tools/GlobMatcher.cs` at 09f4e08:
+ * Semantics ported exactly from:
  * - `*` matches any segment within the same directory level
  * - `?` matches exactly one character
  * - `**` matches across directories
  * - `**` followed by `/` matches zero or more directory levels (so the
- *   double-star-slash pattern also hits root-level files)
+ * double-star-slash pattern also hits root-level files)
  * - Paths are always matched with `/` separators; a backslash in the pattern is
- *   normalized to `/` (a model writing Windows-style patterns still matches)
+ * normalized to `/` (a model writing Windows-style patterns still matches)
  *
  * Everything else is matched literally: regex metacharacters are escaped. Case
  * folding for Windows uses plain JS `i` (Unicode case folding, not
@@ -57,7 +57,7 @@ export function globIsMatch(
   return globToRegex(pattern, ignoreCase, normalizeBackslashes).test(path);
 }
 
-/** Escape one regex metacharacter (C# Regex.Escape for the pattern's literal chars). */
+/** Escape one regex metacharacter (Regex.Escape for the pattern's literal chars). */
 function escapeRegExpChar(ch: string): string {
   return /[.*+?^${}()|[\]\\]/.test(ch) ? `\\${ch}` : ch;
 }

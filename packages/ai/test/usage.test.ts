@@ -16,8 +16,7 @@ import {
 } from "@di/ai";
 
 /**
- * P3 card 4 red list — usage/cost computation (Di baseline
- * `Core/Llm/TokenUsage.cs` Add/SumOrNull + `Core/Llm/CostAccounting.cs`
+ *
  * `CostCalculator` / `UsageCost`; models-and-auth.md §Token 与缓存计量):
  * SumOrNull with null sides (one null keeps the other), Add accumulation across
  * calls, known-rate cost computation (input/output/cache), cache accounting per

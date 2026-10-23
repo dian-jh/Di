@@ -8,9 +8,7 @@ import { spawnSync } from "node:child_process";
 import { createPowerShellTool, ShellSession, powershellSessionShell } from "@di/coding-agent";
 
 /**
- * P4-shell-session card — the PowerShell tool (port of
- * `Core/Tools/PowerShellTool.cs` at 09f4e08), a real PowerShell child process.
- * Windows uses powershell.exe; POSIX uses pwsh when installed. Same dual-mode design as C#:
+ *
  * - persistent-session mode (a `ShellSession` with the PowerShell shell is
  *   injected): cd / variables / env persist across calls; `working_dir` is not
  *   in the schema.

@@ -1,9 +1,7 @@
-/**
- * JSONL session writer (P5).
+/*
+ * JSONL session writer.
  *
- * docs/migration/typescript-core/sessions-and-compatibility.md §"Di 文件布局与
- * 逐行 envelope" / §"实时 checkpoint record 与完整示例"; C# baseline
- * `Core/Sessions/SessionLog.cs`.
+ * 逐行 envelope" / §"实时 checkpoint record 与完整示例"; *.
  *
  * The writer owns the session file: `~/.di/sessions/YYYY/MM/DD/session-{utc}-{id8}.jsonl`
  * (UTC, never local time), the idempotent `session_meta` first line, the monotonic
@@ -11,7 +9,7 @@
  * the loop's durable seam: `checkpoint_tool_started` is written BEFORE a tool may
  * run (a failed write propagates and the tool never executes), and only after a
  * `checkpoint_tool_completed` write is the result a durable completion fact. The
- * audit methods (`appendTurn` / `appendFailure`) mirror the C# `response_item`
+ * audit methods (`appendTurn` / `appendFailure`) mirror the `response_item`
  * sequence for `di --stats`.
  *
  * Single-writer per file (appendFileSync is synchronous; ordinals never interleave).
@@ -25,7 +23,7 @@ import { textOfMessage } from "@di/ai";
 import type { AgentResult, LoopCheckpoint } from "@di/agent";
 import { nowUtcIso, serializeCheckpointMessage, serializeEnvelope } from "./codec.ts";
 
-/** Session persistence options; defaults mirror C# `SessionLogOptions`. */
+/** Session persistence options; defaults mirror `SessionLogOptions`. */
 export interface SessionLogOptions {
   /** Session root (resolved DI_HOME); the log lives under `sessions/YYYY/MM/DD/`. */
   readonly rootDirectory: string;
@@ -37,7 +35,7 @@ export interface SessionLogOptions {
   readonly source?: string;
   /** `session_meta` model provider; default "deepseek". */
   readonly modelProvider?: string;
-  /** Injectable UTC clock (ISO string) for deterministic tests; default `new Date().toISOString()`. */
+  /** Injectable UTC clock (ISO string) for deterministic tests; default `new Date.toISOString`. */
   readonly now?: () => string;
 }
 
@@ -49,7 +47,7 @@ export interface CheckpointTurnCompletion {
 
 /** The JSONL session writer; also the loop's durable `LoopCheckpoint` seam. */
 export class SessionStore implements LoopCheckpoint {
-  /** Unique id for this session (32 lowercase hex, like C# `Guid.ToString("N")`). */
+  /** Unique id for this session (32 lowercase hex, like `Guid.ToString("N")`). */
   readonly sessionId: string;
   /** Full path of this session's JSONL file (derived from the UTC now, never local time). */
   readonly logFilePath: string;
@@ -262,7 +260,7 @@ function isToolCall(block: ContentBlock): block is ToolCall {
   return block.type === "tool-call";
 }
 
-/** Wire usage shape: token counts + billable + cache hit rate (C# TokenUsage serialization). */
+/** Wire usage shape: token counts + billable + cache hit rate (TokenUsage serialization). */
 function serializeUsage(usage: TokenUsage): Record<string, unknown> {
   const billable = usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
   return {

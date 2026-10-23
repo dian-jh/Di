@@ -7,9 +7,7 @@ import { dirname, join } from "node:path";
 import { createWriteFileTool } from "@di/coding-agent";
 
 /**
- * P4.1 card 1: write_file tool.
  *
- * Mirrors Di.Tests/Tools/WriteFileToolTests.cs at baseline 09f4e08: full-file
  * overwrite (never append), auto-created parent directories, error paths with no
  * silent data loss. UTF-8 without BOM (matches the .NET default serializer).
  */

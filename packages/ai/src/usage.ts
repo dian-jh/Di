@@ -1,9 +1,8 @@
 import type { TokenUsage, UsageCost } from "./types/model.ts";
 import { findModelCostRates } from "./catalog.ts";
 
-/**
- * Usage aggregation and cost computation (Di baseline `Core/Llm/TokenUsage.cs`
- * `Add` / `SumOrNull` + `Core/Llm/CostAccounting.cs` `ModelCostRates` /
+/*
+ * Usage aggregation and cost computation (* `Add` / `SumOrNull` + `ModelCostRates` /
  * `UsageCost` / `CostCalculator`; models-and-auth.md §Token 与缓存计量).
  *
  * Null/undefined fields mean "not reported by the provider" — never defaulted to
@@ -15,7 +14,7 @@ import { findModelCostRates } from "./catalog.ts";
  * are the canonical library forms of those exact semantics.
  */
 
-/** Per-million-token cost rates (from C# `ModelCostRates`), sourced from the catalog. */
+/** Per-million-token cost rates (from `ModelCostRates`), sourced from the catalog. */
 export interface ModelCostRates {
   /** USD per 1M input tokens (cache misses). */
   readonly inputPerMillion: number;
@@ -32,8 +31,8 @@ export function tokenUsageZero(): TokenUsage {
   return { inputTokens: 0, outputTokens: 0 };
 }
 
-/**
- * Accumulate two usages (C# `TokenUsage.Add`). Required counts always sum;
+/*
+ * Accumulate two usages (`TokenUsage.Add`). Required counts always sum;
  * optional counts follow `SumOrNull` — one side null (not reported) keeps the
  * other, both null stays null, so `add(Zero, x)` never folds `x`'s cache or
  * reasoning fields into undefined and real data is never lost.
@@ -57,7 +56,7 @@ export function tokenUsageAdd(a: TokenUsage, b: TokenUsage): TokenUsage {
   };
 }
 
-/**
+/*
  * Sum an optional count across two usages: a missing (undefined = not reported)
  * side keeps the other; only when both are present do they add.
  */
@@ -67,9 +66,8 @@ function sumOrNull(a: number | undefined, b: number | undefined): number | undef
   return a + b;
 }
 
-/**
- * Billable input = cache-miss input + cache-read + cache-write (C#
- * `TokenUsage.BillableInputTokens`). Missing cache fields count as zero here —
+/*
+ * Billable input = cache-miss input + cache-read + cache-write (* `TokenUsage.BillableInputTokens`). Missing cache fields count as zero here —
  * unlike aggregation, this is a *derived billing number*, so zeroing absent
  * components is the intended semantics.
  */
@@ -77,9 +75,8 @@ export function billableInputTokens(usage: TokenUsage): number {
   return usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
 }
 
-/**
- * Prefix-cache hit rate = cache-read ÷ billable input (C#
- * `TokenUsage.CacheHitRate`). Returns `undefined` when there is no billable
+/*
+ * Prefix-cache hit rate = cache-read ÷ billable input (* `TokenUsage.CacheHitRate`). Returns `undefined` when there is no billable
  * input (avoids a division by zero); a usage with no cache read yields 0.
  */
 export function cacheHitRate(usage: TokenUsage): number | undefined {
@@ -92,12 +89,12 @@ export function usageCostZero(): UsageCost {
   return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 }
 
-/** Total USD cost across the four components (C# `UsageCost.Total`). */
+/** Total USD cost across the four components (`UsageCost.Total`). */
 export function usageCostTotal(cost: UsageCost): number {
   return cost.input + cost.output + cost.cacheRead + cost.cacheWrite;
 }
 
-/** Accumulate two costs component-wise (C# `UsageCost.Add`). */
+/** Accumulate two costs component-wise (`UsageCost.Add`). */
 export function usageCostAdd(a: UsageCost, b: UsageCost): UsageCost {
   return {
     input: a.input + b.input,
@@ -107,8 +104,8 @@ export function usageCostAdd(a: UsageCost, b: UsageCost): UsageCost {
   };
 }
 
-/**
- * Accumulate an optional cost across model calls (C# `ReAct.CombineCost`): a
+/*
+ * Accumulate an optional cost across model calls (`ReAct.CombineCost`): a
  * missing side keeps the other, and a turn with no known rates stays
  * `undefined` — never fabricated as zero.
  */
@@ -118,9 +115,9 @@ export function combineCost(acc: UsageCost | undefined, next: UsageCost | undefi
   return usageCostAdd(acc, next);
 }
 
-/**
+/*
  * Convert a {@link TokenUsage} into a {@link UsageCost} using per-million rates
- * (C# `CostCalculator.Calculate`). Each component is billed at its own rate
+ * (`CostCalculator.Calculate`). Each component is billed at its own rate
  * (cache reads/writes are cheaper than fresh input, so mixing them overstates
  * cost); missing cache counts are billed as zero.
  */
@@ -133,8 +130,8 @@ export function calculateCost(rates: ModelCostRates, usage: TokenUsage): UsageCo
   };
 }
 
-/**
- * Facade over the catalog for one model call (C# `LlmRuntime.CalculateCost`):
+/*
+ * Facade over the catalog for one model call (`LlmRuntime.CalculateCost`):
  * resolve the (provider, model) rates and compute the cost. Returns
  * `undefined` — never a zero cost — when the provider or model is unknown or the
  * model has no rates (e.g. subscription models like gpt-6.1-sol).

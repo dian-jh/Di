@@ -10,7 +10,7 @@ import type {
 } from "@di/coding-agent";
 
 /**
- * P6.3a command / model-selection test doubles (the C# `TestDoubles.cs`
+ *
  * FakeLlm / FakeRunner equivalents): a composite advisory model service with
  * per-provider adapters, and a recording host that implements both the command
  * host and the model-selection host seams.
@@ -19,7 +19,7 @@ import type {
 export const testSkill: Skill = {
   name: "backend-tests",
   description: "跑后端测试",
-  instructions: "dotnet test",
+  instructions: "npm test",
   metadata: {},
   allowedTools: [],
   disableModelInvocation: false,
@@ -33,7 +33,7 @@ export interface FakeModelSpec {
   readonly reasoning?: ModelReasoningInfo;
 }
 
-/** One provider adapter (C# `ChatAdapter` in ModelSelectionTests). */
+
 export class FakeAdapter {
   readonly provider: string;
   readonly providerName: string;
@@ -49,7 +49,7 @@ export class FakeAdapter {
   }
 }
 
-/** Composite advisory model service (C# `LlmRuntime` + fake adapters). */
+
 export class FakeModelService implements ModelService {
   private readonly adapters_: FakeAdapter[] = [];
 

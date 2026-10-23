@@ -1,8 +1,7 @@
 import type { Skill } from "./skill.ts";
 
 /**
- * Skill context rendering and cost estimate — mirrors `Core/Skills/SkillContext.cs`
- * plus the system-context assembly in `AgentRunner.RunAsync` at baseline 09f4e08
+ * Renders skill advertisements and active skill instructions for a model turn.
  * (progressive disclosure, the "Advertise" phase): each available skill is
  * advertised as one `- name：description` line (~100 tokens/skill) while the full
  * instructions stay out of the resident context and are loaded on demand via
@@ -11,7 +10,7 @@ import type { Skill } from "./skill.ts";
  * persistent history.
  */
 
-/**
+/*
  * Advertisement block: one `- name：description` line per skill so the model knows
  * what is available (the load_skill candidate list). `disable-model-invocation`
  * skills are excluded (they accept only explicit /skill calls).
@@ -25,9 +24,9 @@ export function buildAdvertisement(skills: readonly Skill[]): string {
 
 /**
  * Estimate the per-turn token cost added by skills: the advertisement of the
- * NOT-active skills (matching `AgentRunner`'s actual injection) plus the full
+ * inactive skills plus the full
  * instructions of the active ones. Roughly 4 chars/token; used for the context
- * cost metric (C# `SkillContext.EstimateTokens`).
+ * instructions of active skills.
  */
 export function estimateSkillTokens(skills: readonly Skill[], activeNames: readonly string[]): number {
   const active = new Set(activeNames);
@@ -40,7 +39,7 @@ export function estimateSkillTokens(skills: readonly Skill[], activeNames: reado
 }
 
 /**
- * Assemble the full skill system context (C# `AgentRunner.RunAsync`): the
+ * Assemble the skill system context: the
  * advertisement of the skills that are NOT active, then the activation body (full
  * instructions) of the active skills, joined by a blank line. Returns `undefined`
  * when there is nothing to disclose. This is the pure computation a host feeds

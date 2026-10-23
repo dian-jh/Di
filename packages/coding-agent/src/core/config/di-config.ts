@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { parseJsonObject } from "./jsonc.ts";
 
-/**
- * Layered config merge. Mirrors `Di.Cli/DiConfig.cs` Load at baseline 09f4e08:
+/*
+ * Layered config merge. Load:
  * default -> user (~/.di/config.json) -> project (<workspace>/.di/config.json)
  * -> environment variables, later layers override earlier ones per key.
  *
@@ -19,7 +19,7 @@ export type ConfigValue = string | number | boolean | null;
 
 /** The four layered config sources (priority low -> high). */
 export interface DiConfigSources {
-  /** Built-in defaults (mirror of the shipped appsettings.json at 09f4e08). */
+  /** Built-in defaults (mirror of the shipped appsettings.json ). */
   readonly defaults: Readonly<Record<string, unknown>>;
   /** User-global config file (~/.di/config.json); undefined disables the layer. */
   readonly userConfigPath: string | undefined;
@@ -37,7 +37,7 @@ export interface DiConfigDeps {
 
 const KEY_DELIMITER = ":";
 
-/** Factory defaults shipped with the program (baseline `Di.Cli/appsettings.json`). */
+/** Factory defaults shipped with the program (current implementation ). */
 export const DEFAULT_CONFIG: Readonly<Record<string, unknown>> = {
   DeepSeek: {
     DefaultReasoningEffort: "high",
@@ -54,7 +54,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Flatten a JSON value into `:`-separated, case-insensitive keys (arrays indexed like .NET). */
+/** Flatten a JSON value into `:`-separated, case-insensitive keys (arrays indexed like.NET). */
 function flattenValue(value: unknown, prefix: string, out: Map<string, ConfigValue>): void {
   if (isPlainObject(value)) {
     for (const [key, child] of Object.entries(value)) {

@@ -6,8 +6,7 @@ import { join } from "node:path";
 import { loadSkillCases } from "@di/coding-agent";
 
 /**
- * P6.3b card — skill case loader (port of C# `Di.Tests/Skills/SkillCaseLoaderTests.cs`
- * at baseline 09f4e08): labeled JSON case file → trigger/exclusion test cases.
+ *
  * File-level errors throw; entry-level errors warn and skip (the same tolerant
  * philosophy as the skill repository).
  */

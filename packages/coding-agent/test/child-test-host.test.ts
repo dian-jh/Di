@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { runProcess } from "@di/coding-agent";
 
 /**
- * P5 process-boundary crash/resume acceptance: an INDEPENDENT child test host —
+ *
  * a real Node process importing the committed @di/coding-agent dist — drives a
  * REAL session store in an isolated temp DI_HOME, executes a tool with a durable
  * side effect, is force-killed (process-tree kill via runProcess), then is

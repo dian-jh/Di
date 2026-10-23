@@ -5,11 +5,11 @@ import {
   type Skill,
 } from "./skill.ts";
 
-/**
+/*
  * 解析 SKILL.md：以 `---` 包裹的 YAML frontmatter + 正文指令。
  *
- * 逐行复刻 `Core/Skills/SkillMarkdown.cs`（baseline 09f4e08）的手写单行 / 单层缩进
- * 解析器——C# 基线并未使用 YAML 库（YamlDotNet 仅见于旧注释），因此支持格式必须与
+ * 逐行复刻 （）的手写单行 / 单层缩进
+ * 解析器——基线并未使用 YAML 库（YamlDotNet 仅见于旧注释），因此支持格式必须与
  * 之逐字一致，不因“换了 YAML 库”而无意变化。严格性（对齐 MS）：受识别字段必须小写且
  * 只能出现一次（重复 → 拒绝）；未知顶层字段忽略（向前兼容）。
  */
@@ -27,17 +27,17 @@ const recognizedKeys = new Set([
 
 const validNamePattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-/** 剥掉值两侧的引号（镜像 C# `.Trim('"', '\'')`）。 */
+/** 剥掉值两侧的引号（镜像 `.Trim('"', '\'')`）。 */
 function stripQuotes(value: string): string {
   return value.replace(/^["']+|["']+$/g, "");
 }
 
-/**
+/*
  * 解析一份 SKILL.md 内容。若提供 expectedName（父目录名 / 文件基名），会校验
  * frontmatter 的 name 与之一致（MS 规范要求）。
  */
 export function parseSkillMarkdown(content: string, expectedName?: string): Skill {
-  // 容忍 BOM 与前导空行（镜像 C# TrimStart((char)0xFEFF, '\r', '\n')）。
+  // 容忍 BOM 与前导空行（镜像 TrimStart((char)0xFEFF, '\r', '\n')）。
   let text = content.replace(/^[\uFEFF\r\n]+/, "");
 
   const firstLineEnd = text.indexOf("\n");

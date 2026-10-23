@@ -1,5 +1,5 @@
-/**
- * Message content blocks (from Di baseline `Core/Llm/ContentBlock.cs`).
+/*
+ * Message content blocks.
  *
  * In-memory vocabulary only. Provider wire DTOs never leak into this union;
  * adapters translate wire formats to/from these blocks. Unknown block types are

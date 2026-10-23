@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 /**
- * P9-release-install-rollback — 10-hour wall-clock soak harness
- * (docs/migration/typescript-core/validation-and-release.md §47-55).
  *
  * Drives the REAL production composition root (createCliHost -> the same
  * AgentSession runner that `di-ts` print/json/rpc modes drive) in an isolated

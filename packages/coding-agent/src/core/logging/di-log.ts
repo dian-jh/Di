@@ -5,8 +5,8 @@ import { DiHome } from "../config/di-home.ts";
 import type { EventBus } from "../events/event-bus.ts";
 import type { LogEvent } from "../events/log-events.ts";
 
-/**
- * Per-day lifecycle log (C# `Core/Logging/DiLog.cs` at 09f4e08, jcode format
+/*
+ * Per-day lifecycle log (, jcode format
  * per docs/modules/logging.md): one `di-YYYY-MM-DD.log` per day (LOCAL-time
  * naming, daily rotation) under `RootDirectory/logs/`; one event per line for
  * the turn lifecycle (run / llm / tool lines); long fields folded + truncated
@@ -19,19 +19,19 @@ import type { LogEvent } from "../events/log-events.ts";
  * TWO INDEPENDENT failure paths (must never share a swallow-exception write
  * helper):
  * - log I/O failure → silent drop of the current line, NEVER throws, NEVER
- *   affects the main flow (the log is a bypass observation);
+ * affects the main flow (the log is a bypass observation);
  * - the checkpoint/session-store path stays fail-closed (a failed checkpoint
- *   write aborts the loop before unstarted side effects — P2.5, tested in
- *   @di/agent) — DiLog has no access to it and never touches it.
+ * write aborts the loop before unstarted side effects —, tested in
+ * @di/agent) — DiLog has no access to it and never touches it.
  *
  * Lines NEVER contain sensitive fields: `redactSensitive` runs on every line
- * (event fields, `log()` messages and proc diagnostics), so token /
+ * (event fields, `log` messages and proc diagnostics), so token /
  * Authorization / Cookie values never reach the log.
  */
 export const LogLevel = { Info: "INFO", Warn: "WARN", Error: "ERROR" } as const;
 export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
 
-/** Run-log configuration (C# `Core/Logging/DiLogOptions.cs` at 09f4e08). */
+/** Run-log configuration. */
 export interface DiLogOptions {
   /** Log root directory; `RootDirectory/logs/` holds one file per day (defaults to DiHome). */
   rootDirectory?: string;
@@ -115,7 +115,7 @@ export class DiLog {
   private writer_: number | null = null; // open fd (append mode)
   private fileKey_: string | null = null; // date key of the currently open file (yyyy-MM-dd)
   private unsubscribe_: (() => void) | null = null;
-  /** Last in-flight model call (C# single-slot duration tracking): read-and-clear on completion. */
+  /** Last in-flight model call (single-slot duration tracking): read-and-clear on completion. */
   private lastModelCall_: { iteration: number; startedAt: Date } | null = null;
   private disposed_ = false;
 
@@ -213,7 +213,7 @@ export class DiLog {
    * Duration of the in-flight model call (ms, wall-clock difference read at the
    * completing event): read-and-clear the single slot; none in flight → null.
    * TS events carry no CreatedAt timestamps, so the completing event is measured
-   * at handle time (divergence from C# `t.CreatedAt - m.CreatedAt`).
+   * at handle time (divergence from ).
    */
   private takeDuration(): number | null {
     const call = this.lastModelCall_;

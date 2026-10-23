@@ -12,9 +12,9 @@ import { errorMessage } from "./common.ts";
 import { drainEvents, EventRenderer, renderAll } from "./event-renderer.ts";
 import { tryLaunchTui, type TuiDecision, type TuiLauncherContext } from "./tui-launcher.ts";
 
-/**
- * Outer REPL loop (the C# `Di.Cli/Repl.cs` counterpart at baseline 09f4e08):
- * read a line → handle slash commands through the shared P6.3a registry → run one
+/*
+ * Outer REPL loop (the counterpart ):
+ * read a line → handle slash commands through the shared registry → run one
  * agent turn. Turn-type commands (/skill <name> <args>, user commands) are
  * executed by THIS REPL's own turn mechanism (the command definition never
  * depends on any frontend). Before each turn the shared skill activation is
@@ -22,7 +22,7 @@ import { tryLaunchTui, type TuiDecision, type TuiLauncherContext } from "./tui-l
  * runner for that turn. A single `signal` cancels the whole session.
  */
 
-/** REPL display configuration (C# `Di.Cli/ReplOptions.cs`). */
+/** REPL display configuration. */
 export interface ReplOptions {
   /** Input prompt. */
   readonly prompt: string;
@@ -170,12 +170,12 @@ export class Repl {
 }
 
 /**
- * Interactive orchestration (C# `CliApp.InteractiveAsync` evolution): default
+ * Interactive orchestration ( evolution): default
  * hands the console to the TS TUI **in-process** — build the
  * {@link LocalAgentRunnerAdapter} and call di-tui's `runInteractive(adapter)`
  * (architecture.md §生产入口; DI direction coding-agent → di-tui). When the local
  * runner is unavailable (terminal not interactive / init failure) it falls back
- * to the legacy spawn TUI (external `--mode rpc` child) then the C# REPL.
+ * to the legacy spawn TUI (external `--mode rpc` child) then the REPL.
  * `--resume` forces the REPL (`skipTui`) so a resumed session enters simple
  * interaction and does NOT auto-request a model (the REPL waits for user input);
  * `DI_UI=repl` (exact) forces the REPL.

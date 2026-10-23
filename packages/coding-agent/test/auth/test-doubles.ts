@@ -1,13 +1,12 @@
 import type { AclAdapter, LockHandle, LockProvider } from "@di/coding-agent";
 
 /**
- * P8b test doubles.
  *
  * The store transaction (lock → re-read inside lock → refresh → validate → atomic
  * replace) is verified with a MOCKED lock: an in-process mutual-exclusion stand-in
  * for the real OS advisory lock. It serializes acquires (a handle is granted only
  * after every earlier holder releases), which is exactly the cross-process
- * guarantee the C# baseline gets from `FileShare.None` and the real lock adapter
+ *
  * would provide via LockFileEx / flock. The default FAIL_CLOSED_LOCK_PROVIDER is
  * never used here — these doubles make the seam observable.
  */

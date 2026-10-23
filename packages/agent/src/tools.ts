@@ -1,8 +1,7 @@
 import type { ToolCall } from "@di/ai";
 
 /**
- * Tool-calling vocabulary (from Di baseline `Core/AgentLoop/IToolExecutor.cs`
- * + docs/migration/typescript-core/loop-and-state.md §"建议公开的最小 loop types").
+ * Tool-calling vocabulary shared by the agent loop and host.
  *
  * Executors/validators belong to @di/agent; the model-facing `ToolSpec` and the
  * `ToolCall` content block are imported from @di/ai to avoid dependency inversion.

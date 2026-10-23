@@ -6,8 +6,8 @@ import { runProcess } from "./process-runner.ts";
 import { ShellSession } from "./shell-session.ts";
 import { errorObservation, okObservation, type CoreTool } from "./types.ts";
 
-/**
- * Platform-default-shell tool (port of `Core/Tools/BashTool.cs` at 09f4e08).
+/*
+ * Platform-default-shell tool.
  * Without a session it executes one command in the platform shell with optional
  * `working_dir`; with a session it shares a persistent terminal whose cwd and
  * environment survive across calls. Both modes support per-call timeout and
@@ -17,52 +17,52 @@ import { errorObservation, okObservation, type CoreTool } from "./types.ts";
  * and disposes its lifetime. One-shot mode remains available for custom tools
  * and tests.
  *
- * C# contract mapping:
+ * contract mapping:
  * - platform default shell -> `runProcess(..., { shell: true })`: Node itself
- *   builds `comspec /d /s /c "<command>"` on Windows (equivalent to C# passing
- *   `rawArguments = $"/d /s /c \"{command}\""` — embedded quotes survive
- *   verbatim, `&` / redirection / `%CD%` work) and `/bin/sh -c <command>` on
- *   POSIX (one arg, equivalent to C# `ShellCommand.Default` args array). All
- *   lifecycle semantics (tree kill, bounded drain, timeout/cancel, startup
- *   failure) come from `runProcess` unchanged.
+ * builds `comspec /d /s /c "<command>"` on Windows (equivalent to passing
+ * `rawArguments = $"/d /s /c \"{command}\""` — embedded quotes survive
+ * verbatim, `&` / redirection / `%CD%` work) and `/bin/sh -c <command>` on
+ * POSIX (one arg, equivalent to `ShellCommand.Default` args array). All
+ * lifecycle semantics (tree kill, bounded drain, timeout/cancel, startup
+ * failure) come from `runProcess` unchanged.
  * - injected custom shell (tests) -> args-array mode
- *   `runProcess(shell, [command], ...)` (C# `new List<string>(PrefixArguments)
- *   { command }`).
+ * `runProcess(shell, [command],...)` (`new List<string>(PrefixArguments)
+ * { command }`).
  *
- * Documented migration differences from C#:
+ * Documented migration differences from:
  * - PromptSnippet/PromptGuidelines reflect the selected execution mode.
  * - `runProcess` diagnostics report `name=<basename(command)>` — i.e. the whole
- *   command line — for shell-mode calls (the underlying process is the shell
- *   wrapping the command). Accepted and noted in the card report.
+ * command line — for shell-mode calls (the underlying process is the shell
+ * wrapping the command). Accepted and noted in the card report.
  */
 
-/** Default per-call timeout in seconds (C# `BashTool.DefaultTimeoutSeconds`). */
+/** Default per-call timeout in seconds (`BashTool.DefaultTimeoutSeconds`). */
 export const BASH_DEFAULT_TIMEOUT_SECONDS = 30;
-/** Hard per-call timeout cap in seconds (C# `BashTool.MaxTimeoutSeconds`). */
+/** Hard per-call timeout cap in seconds (`BashTool.MaxTimeoutSeconds`). */
 export const BASH_MAX_TIMEOUT_SECONDS = 3600;
-/** The platform default shell's model-facing display name (C# `CoreTools.PlatformShellName`). */
+/** The platform default shell's model-facing display name (`CoreTools.PlatformShellName`). */
 export const PLATFORM_SHELL_NAME: "cmd" | "bash" = process.platform === "win32" ? "cmd" : "bash";
 
 export interface BashToolOptions {
-  /**
-   * Custom shell executable (tests only, C# `ShellCommand`): when provided the
-   * command is run in args-array mode; when omitted the platform default shell
-   * is used in `shell: true` mode. No real PowerShell/Python shells here.
-   */
+  /*
+ * Custom shell executable (tests only, `ShellCommand`): when provided the
+ * command is run in args-array mode; when omitted the platform default shell
+ * is used in `shell: true` mode. No real PowerShell/Python shells here.
+ */
   readonly shell?: string;
-  /** Default per-call timeout in seconds (C# `timeout` ctor; default 30). */
+  /** Default per-call timeout in seconds (`timeout` ctor; default 30). */
   readonly timeoutSeconds?: number;
   /** Shared persistent platform shell; cwd and environment survive across calls. */
   readonly session?: ShellSession;
 }
 
-/** Optional string; blank/whitespace is treated as absent (C# `TryGetOptionalString` returns null for it). */
+/** Optional string; blank/whitespace is treated as absent (`TryGetOptionalString` returns null for it). */
 function optionalString(args: Readonly<Record<string, unknown>>, name: string): string | undefined {
   const value = args[name];
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
-/** True when the path contains a character that can never appear in a filesystem path (C# `Path.GetInvalidPathChars` — NUL on every platform, plus control chars 0x00–0x1F on Windows). */
+/** True when the path contains a character that can never appear in a filesystem path (`Path.GetInvalidPathChars` — NUL on every platform, plus control chars 0x00–0x1F on Windows). */
 function hasIllegalPathChars(p: string): boolean {
   if (p.includes("\0")) return true;
   if (process.platform !== "win32") return false;
@@ -72,7 +72,7 @@ function hasIllegalPathChars(p: string): boolean {
   return false;
 }
 
-/**
+/*
  * `createBashTool(baseDirectory, opts?)` returns the platform shell tool
  * (`cmd` on Windows, `bash` otherwise), in one-shot or shared-session mode.
  */
@@ -157,8 +157,8 @@ export function createBashTool(baseDirectory: string, options?: BashToolOptions)
         return errorObservation(`error: 路径参数非法: ${messageOf(error)}`);
       }
       // Async stat (never sync IO on the tool path, tools-and-platform.md); a
-      // missing directory — or a path that is a file, like C# `Directory.Exists`
-      // — is the documented "工作目录不存在" observation (C# Directory.Exists).
+      // A missing directory or a path that points to a file is rejected.
+      // — is the documented "工作目录不存在" observation (Directory.Exists).
       try {
         const dir = await stat(workingDir);
         if (!dir.isDirectory()) {
@@ -169,7 +169,7 @@ export function createBashTool(baseDirectory: string, options?: BashToolOptions)
       }
 
       // Platform default shell -> shell: true mode (Node builds the cmd / sh -c
-      // wrapper, C# rawArguments parity). Injected custom shell -> args array.
+      // wrapper, rawArguments parity). Injected custom shell -> args array.
       const result =
         customShell === undefined
           ? await runProcess(commandResult.value, [], {

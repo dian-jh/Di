@@ -5,20 +5,20 @@ export function normalizeToolPath(path: string, separator = sep): string {
   return path.split(separator).join("/");
 }
 
-/**
+/*
  * Resolve a (possibly relative) tool path against the workspace base directory.
- * Mirrors `Core/Tools/ToolHelpers.ResolvePath`: `Path.Combine(base, path)` +
+ *: `Path.Combine(base, path)` +
  * `Path.GetFullPath`. Absolute paths and `..` are allowed (no sandbox rejection
  * rules are added, per tools-and-platform.md). `path.resolve` normalizes `/`
- * and `\` on Windows and `/` elsewhere, like .NET does.
+ * and `\` on Windows and `/` elsewhere, like.NET does.
  */
 export function resolvePath(baseDirectory: string, path: string): string {
   return resolve(baseDirectory, path);
 }
 
-/**
+/*
  * True when the path contains a character that can never appear in a filesystem
- * path (C# `Path.GetInvalidPathChars` — NUL on every platform, plus control
+ * path (`Path.GetInvalidPathChars` — NUL on every platform, plus control
  * chars 0x00–0x1F on Windows).
  */
 export function hasIllegalPathChars(p: string): boolean {

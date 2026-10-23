@@ -23,7 +23,7 @@ function roundToEven(value: number): number {
   return floor % 2 === 0 ? floor : floor + 1;
 }
 
-/** Context-window reserve and waterline policy, matching Core/ContextManagement/BudgetPolicy.cs. */
+/** Context-window reserve and waterline policy, matching. */
 export class BudgetPolicy {
   readonly window: number;
   readonly outputReserveTokens: number;

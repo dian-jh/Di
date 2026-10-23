@@ -21,18 +21,17 @@ import type {
   DeepSeekWireUsage,
 } from "./wire.ts";
 
-/**
- * DeepSeek ↔ unified vocabulary translation (Di baseline
- * `Core/Providers/DeepSeek/DeepSeekTranslator.cs` + `DeepSeekDefaults.cs`).
+/*
+ * DeepSeek ↔ unified vocabulary translation.
  * All DeepSeek-specific quirks live here — the business and the host never see
  * the wire format (docs/modules/deepseek.md).
  *
  * Request side: {@link toWireRequest} maps the internal AgentMessage/ToolSpec
  * history onto the wire DTO; {@link serializeRequest} emits byte-stable JSON in
- * the C# serializer's field order (unset fields omitted, never `[]`/`null`).
+ * the serializer's field order (unset fields omitted, never `[]`/`null`).
  *
  * Response side: {@link createDeepSeekTranslator} is a stateful closure that
- * plugs into the `TranslateEvent` seam of `sseToModelEvents` (P3.2). It maps one
+ * plugs into the `TranslateEvent` seam of `sseToModelEvents`. It maps one
  * raw `data:` line onto {@link ProviderChunk}s, synthesizing block boundaries
  * for DeepSeek's delta stream, skipping bad JSON lines (never crashing), and
  * treating `[DONE]` as the no-op terminal marker. Transport failures remain
@@ -40,17 +39,17 @@ import type {
  * {@link mapHttpErrorBody} into {@link DeepSeekError}.
  */
 
-/** DeepSeek protocol constants (from `Core/Providers/DeepSeek/DeepSeekDefaults.cs`). */
+/** DeepSeek protocol constants. */
 export const deepSeekDefaults = {
   baseUrl: "https://api.deepseek.com",
   chatCompletionsPath: "/chat/completions",
   maxTokensLimit: 393_216,
   stopLimit: 16,
-  /**
-   * Response-header wait timeout in seconds (C# `RequestTimeoutSeconds` = 60):
-   * the server must start responding within this window or the request fails
-   * with a retryable `TIMEOUT`. Not a total-duration timeout.
-   */
+  /*
+ * Response-header wait timeout in seconds (`RequestTimeoutSeconds` = 60):
+ * the server must start responding within this window or the request fails
+ * with a retryable `TIMEOUT`. Not a total-duration timeout.
+ */
   requestTimeoutSeconds: 60,
 } as const;
 
@@ -70,7 +69,7 @@ const ToolType = "function";
 
 const ToolChoiceAuto = "auto";
 
-/** Stable, machine-readable error codes (mirrors `Core/Llm/LlmErrorCodes.cs`). */
+/** Stable, machine-readable error codes. */
 export const deepSeekErrorCodes = {
   missingCredential: "MISSING_CREDENTIAL",
   unsupportedOption: "UNSUPPORTED_OPTION",
@@ -89,12 +88,12 @@ export const deepSeekErrorCodes = {
 // Request side
 // ---------------------------------------------------------------------------
 
-/**
+/*
  * Map a unified {@link ModelRequest} onto the DeepSeek wire DTO.
  * `model` is the provider model id bound to the adapter. Unset collections stay
  * omitted (byte-stable prefix cache); `stream:true` + `include_usage` are always
  * requested; `tool_choice` defaults to `auto` when tools are present (the unified
- * vocabulary has no tool-choice option, matching the C# default).
+ * vocabulary has no tool-choice option, matching the default).
  */
 export function toWireRequest(request: ModelRequest, model: string): DeepSeekWireRequest {
   const hasTools = request.tools !== undefined && request.tools.length > 0;
@@ -247,9 +246,9 @@ function buildThinking(reasoningEffort: string | undefined): DeepSeekWireThinkin
 }
 
 /**
- * Serialize a wire request to byte-stable JSON in the C# serializer's field
- * order (`JsonNamingPolicy.SnakeCaseLower` + `WhenWritingNull`), so unset
- * fields never appear as `null`/`[]` and the request prefix stays cacheable.
+ * Serialize wire fields in provider order with snake_case names. Optional
+ * properties are added only when defined, so absent values do not become
+ * `null` or empty arrays and the request prefix stays stable for caching.
  */
 export function serializeRequest(wire: DeepSeekWireRequest): string {
   const body: Record<string, unknown> = {
@@ -322,8 +321,8 @@ function serializeWireToolCall(call: DeepSeekWireToolCall): Record<string, unkno
  * stream. Stateful (blocks open across events) and plugs into the P3.2
  * `TranslateEvent` seam of `sseToModelEvents`.
  *
- * Block index allocation is fixed so the assembled content order matches the C#
- * assembler (reasoning → text → tool calls sorted by wire index):
+ * Fixed indices keep assembled content ordered as reasoning, text, then tool
+ * calls sorted by the provider's wire index:
  * reasoning = 0, text = 1, tool call with wire index n = 2 + n.
  * A terminal finish chunk closes all open blocks before the `finish` chunk.
  */
@@ -452,11 +451,10 @@ export function mapUsage(usage: DeepSeekWireUsage): TokenUsage {
 // ---------------------------------------------------------------------------
 
 /**
- * Map a non-2xx HTTP error body onto a structured {@link LlmFailure} (Di
- * baseline `DeepSeekAdapter.ParseDeepSeekError` + `MapErrorCode`). 429 →
- * RATE_LIMITED; 401/403 → MISSING_CREDENTIAL; otherwise the body's `code` /
- * `type`, falling back to INVALID_REQUEST. Retry/backoff policy is later card
- * P3.5 — this only produces the failure fact.
+ * Map a non-2xx HTTP response to a structured {@link LlmFailure}. HTTP 429
+ * becomes `RATE_LIMITED`, and 401/403 become `MISSING_CREDENTIAL`; other
+ * statuses use the body's `code` or `type`, falling back to `INVALID_REQUEST`.
+ * The result carries status and Retry-After for the retry policy to classify.
  */
 export function mapHttpErrorBody(
   status: number,

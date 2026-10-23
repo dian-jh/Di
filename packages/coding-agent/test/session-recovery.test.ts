@@ -9,10 +9,6 @@ import { textOfMessage } from "@di/ai";
 import { loadRecovery, SessionDataError, SessionStore } from "@di/coding-agent";
 
 /**
- * P5 recovery reader / validation + resume state machine
- * (docs/migration/typescript-core/sessions-and-compatibility.md §"原子性、恢复
- * 状态机与错误处理" / §"测试证据与迁移 TDD 矩阵"; C# baseline
- * `Core/Sessions/SessionRecovery.cs` `Load`).
  *
  * Every corruption/unknown case is red by ASSERTION: recovery must fail closed
  * with the exact state-machine outcome, carry a physical line number where one
@@ -77,7 +73,7 @@ test("assistant-only prefix recovers with an explicit not-executed observation",
   }
 });
 
-test("each checkpoint prefix boundary is safe (C# LoadRecovery_EachToolCheckpointPrefixIsSafe)", () => {
+test("each checkpoint prefix boundary is safe", () => {
   const root = newRoot();
   try {
     const store = new SessionStore({ rootDirectory: root });

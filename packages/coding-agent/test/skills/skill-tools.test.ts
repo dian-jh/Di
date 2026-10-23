@@ -14,9 +14,7 @@ import {
 } from "@di/coding-agent";
 
 /**
- * P6.2b unit 6 (load_skill, the Load phase) + unit 7 (metadata audit). Ports
- * `Di.Tests/Skills/SkillToolsTests.cs` against `Core/Skills/SkillTools.cs` at
- * baseline 09f4e08: load_skill loads a skill's FULL instructions by name on
+ *
  * demand (never resident in the ad); unknown names / missing / invalid arguments
  * return `error:`-prefixed text; a directory hint is attached so the skill's
  * bundled files resolve relative to it. Unit 7: `allowed-tools` is parsed

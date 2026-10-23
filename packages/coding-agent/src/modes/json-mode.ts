@@ -5,9 +5,8 @@ import type { TextReader, TextWriter } from "../cli/io.ts";
 import { appendTurn, applySkills, errorMessage, resolvePrompt, startSession } from "./common.ts";
 import { usageCostTotal } from "./event-renderer.ts";
 
-/**
- * Headless JSON single-shot mode (the JSON half of C# `Di.Cli/modes/PrintMode.cs`
- * at baseline 09f4e08; --mode json): runs one turn then emits EXACTLY ONE JSON
+/*
+ * Headless JSON single-shot mode (the JSON half of *; --mode json): runs one turn then emits EXACTLY ONE JSON
  * document on stdout (script friendly) — no human-readable events, no stray
  * lines. Wire shape is snake_case; nullable keys (cost) are omitted, never null;
  * failures exit 1 with `{"error":{"code":...,"message":...}}` (usage / model_error
@@ -62,7 +61,7 @@ export async function runJsonMode(
   return 0;
 }
 
-/** JSON error document: `{"error": {"code": ..., "message": ...}}` (script parseable). */
+/** JSON error document: `{"error": {"code":..., "message":...}}` (script parseable). */
 function writeErrorJson(stdout: TextWriter, code: string, message: string): void {
   stdout.writeLine(JSON.stringify({ error: { code, message } }));
 }

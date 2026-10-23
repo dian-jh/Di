@@ -1,5 +1,5 @@
-/**
- * Minimal environment snapshot (Di baseline `Core/AgentLoop/EnvironmentSnapshot.cs`):
+/*
+ * Minimal environment snapshot:
  * only the working directory + a self-serve hint. No git process is spawned and no
  * repo state (branch / changes / commits) is injected — the model fetches those via
  * bash when it actually needs them ("minimal injection + self-serve").

@@ -12,9 +12,7 @@ import {
 } from "@di/coding-agent";
 
 /**
- * P6.2a unit 3 — repository discovery + same-source conflicts. Mirrors
- * `Di.Tests/Skills/SkillRepositoryTests.cs` and `Core/Skills/SkillRepository.cs`
- * at baseline 09f4e08: directory-style `<root>/<name>/SKILL.md` loads before
+ *
  * flat-style `<root>/<name>.md`; within a single source a same-name directory×
  * flat conflict warns and the later-loaded flat form wins; cross-source overrides
  * (later source wins) are designed priority and never warn; bad files are skipped
@@ -187,7 +185,7 @@ test("project flat overrides user flat", () => {
 });
 
 test("same-source flat and directory same name: flat wins and warns", () => {
-  // C# `Load_FlatFileAndDirectory_SameName_FlatWins`: directory loads first,
+  // When flat and directory sources share a name, the directory loads first,
   // flat loads later within the same source, so the later flat form overrides
   // with a same-source conflict warning.
   const root = tempRoot();

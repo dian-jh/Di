@@ -7,8 +7,7 @@ import { join } from "node:path";
 import { ShellSession } from "@di/coding-agent";
 
 /**
- * P4-shell-session card — the persistent `ShellSession` (port of
- * `Core/Tools/ShellSession.cs` at 09f4e08): a long-lived shell process driven
+ *
  * through stdin/stdout where cwd, environment variables and virtual-env state
  * survive across calls. Per the contract (tools-and-platform.md §"持久 shell
  * 会话协议"): lazy spawn, random nonce marker round-trip, stdin encoding, bounded

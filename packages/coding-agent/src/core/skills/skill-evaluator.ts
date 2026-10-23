@@ -3,15 +3,14 @@ import type { Skill } from "./skill.ts";
 import { estimateSkillTokens } from "./skill-context.ts";
 import type { SkillTestCase } from "./skill-case-loader.ts";
 
-/**
- * Matcher quality/cost metrics over a labeled case set (C#
- * `Core/Skills/SkillEvaluator.cs` at baseline 09f4e08). Three acceptance classes:
+/*
+ * Matcher quality/cost metrics over a labeled case set. Three acceptance classes:
  * - trigger tests = cases whose `expectedSkills` is non-empty and are hit by the
- *   matcher (they contribute to precision / recall);
+ * matcher (they contribute to precision / recall);
  * - exclusion tests = cases whose `expectedSkills` is empty and must NOT be hit
- *   (they contribute to the no-match rate);
+ * (they contribute to the no-match rate);
  * - execution tests = beyond the matcher's scope, verified by each skill's own
- *   workflow.
+ * workflow.
  */
 
 /** Quality and context-cost metrics for one matcher run over a case set. */
@@ -26,8 +25,8 @@ export interface SkillMetrics {
   readonly averageContextTokens: number;
 }
 
-/**
- * Evaluate the matcher over the labeled cases (C# `SkillEvaluator.Evaluate`).
+/*
+ * Evaluate the matcher over the labeled cases (`SkillEvaluator.Evaluate`).
  * Activated/wanted sets use the matched skill names; the context cost uses
  * `estimateSkillTokens` with the activated names (the same estimate the
  * production context injection uses).

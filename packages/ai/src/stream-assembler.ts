@@ -3,9 +3,9 @@ import type { AssistantMessage } from "./types/messages.ts";
 import type { FinishReason, ModelResponse, TokenUsage, UsageCost } from "./types/model.ts";
 import type { ModelEvent } from "./types/stream.ts";
 
-/**
- * P3 provider chunk assembler (Di baseline `Core/Llm/ChatAssembler.cs` +
- * `Core/Llm/ChatModelClient.cs`; TS contract per architecture.md
+/*
+ * provider chunk assembler (+
+ *; TS contract per architecture.md
  * §"AI Provider 流与模型事件分层" and models-and-auth.md).
  *
  * The low-level provider chunk vocabulary is consumed only here — it never leaks
@@ -21,17 +21,17 @@ export type ProviderBlockStart =
   | { readonly type: "tool-call" }
   | { readonly type: "opaque"; readonly blockType: string; readonly rawJson: string };
 
-/**
- * Low-level provider stream protocol (from Di baseline `Core/Llm/StreamChunk.cs`).
+/*
+ * Low-level provider stream protocol.
  *
  * Protocol obligations on the emitting adapter:
  * - `usage` precedes `finish`; nothing may follow `finish`.
  * - tool-call `arguments` travel as raw JSON text deltas and are never parsed or
- *   reshaped here; only the complete block reaches the agent loop.
+ * reshaped here; only the complete block reaches the agent loop.
  * - a block `index` is allocated in first-seen order and reused for every delta
- *   of the same block; each index appears at most once in a stream.
+ * of the same block; each index appears at most once in a stream.
  * - in-band terminal errors use `finish` with an error/aborted reason; transport
- *   failures instead throw out of the adapter before any `finish`.
+ * failures instead throw out of the adapter before any `finish`.
  */
 export type ProviderChunk =
   | { readonly type: "blockStart"; readonly index: number; readonly block: ProviderBlockStart }
@@ -43,7 +43,7 @@ export type ProviderChunk =
   | { readonly type: "usage"; readonly usage: TokenUsage }
   | { readonly type: "finish"; readonly reason: FinishReason };
 
-/**
+/*
  * Structured protocol violation raised by {@link ProviderStreamAssembler}.
  * `code` is a stable, machine-readable discriminator. It is distinct from
  * in-band terminal failures, which ride on `completed.response.finishReason`.
@@ -64,13 +64,13 @@ export interface ProviderStreamAssemblerOptions {
   readonly model: string;
   /** Request start in Unix milliseconds; defaults to construction time. */
   readonly timestamp?: number;
-  /**
-   * Optional per-call cost resolver (Di baseline `LlmRuntime.CalculateCost`):
-   * receives the final usage and returns the {@link UsageCost}, or `undefined`
-   * when the model/provider has no known rates. A missing resolver or an
-   * `undefined` result leaves {@link ModelResponse.cost} absent — never
-   * fabricated as zero (models-and-auth.md §Token 与缓存计量).
-   */
+  /*
+ * Optional per-call cost resolver (`LlmRuntime.CalculateCost`):
+ * receives the final usage and returns the {@link UsageCost}, or `undefined`
+ * when the model/provider has no known rates. A missing resolver or an
+ * `undefined` result leaves {@link ModelResponse.cost} absent — never
+ * fabricated as zero (models-and-auth.md §Token 与缓存计量).
+ */
   readonly cost?: (usage: TokenUsage) => UsageCost | undefined;
 }
 
@@ -81,16 +81,16 @@ type OpenBlock =
   | { readonly kind: "tool-call"; id?: string; name?: string; arguments: string }
   | { readonly kind: "opaque"; readonly blockType: string; readonly rawJson: string };
 
-/**
+/*
  * Assembles a {@link ProviderChunk} sequence into a {@link ModelEvent} sequence,
  * assembling content per block `index` (multiple interleaved blocks never share
  * a buffer).
  *
  * - `add` returns zero or more delta events; it throws {@link AssemblerError} on
- *   invalid sequencing.
+ * invalid sequencing.
  * - `finish` returns exactly one `completed` carrying the complete
- *   {@link ModelResponse}. It throws rather than fabricating a success when the
- *   stream ended without a `finish` chunk (missing terminal).
+ * {@link ModelResponse}. It throws rather than fabricating a success when the
+ * stream ended without a `finish` chunk (missing terminal).
  */
 export class ProviderStreamAssembler {
   private readonly open = new Map<number, OpenBlock>();

@@ -18,19 +18,19 @@ import {
 } from "@di/coding-agent";
 
 /**
- * P6.3c mode-test doubles (the C# `Di.Cli.Tests/cli/TestDoubles.cs` counterparts):
+ *
  * a fake model service, a fake turn runner that publishes AgentLoopEvent deltas to
- * an in-memory bus (exactly like C# `FakeRunner`), the failure runners
+ *
  * (ThrowingRunner / ErrorRunner / BlockingRunner / DeltaRunner / ToolRunner /
- * SoftStopRunner), and a `buildHost` composition mirroring C# `CliHost`.
+ *
  */
 
-/** One full skill (C# `new Skill { ... }`). */
+
 export function skill(name: string, description: string, instructions = ""): Skill {
   return { name, description, instructions, metadata: {}, allowedTools: [], disableModelInvocation: false, directory: "" };
 }
 
-/** A `CliArgs` with safe defaults (C# `new CliArgs { ... }`). */
+
 export function makeArgs(partial: Partial<CliArgs> = {}): CliArgs {
   return {
     positionals: [],
@@ -56,7 +56,7 @@ export function makeArgs(partial: Partial<CliArgs> = {}): CliArgs {
 /** Split an NDJSON input string into lines; `""` is EOF (no lines). */
 export function inputLines(input: string): string[] {
   if (input === "") return [];
-  // C# raw-string-literal semantics: the newlines framing the content are not content.
+
   const trimmed = input.replace(/^\n/, "").replace(/\n$/, "");
   return trimmed.replace(/\r\n/g, "\n").split("\n");
 }
@@ -66,7 +66,7 @@ export function outputLines(output: string): string[] {
   return output.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
 }
 
-/** Base runner implementing the shared host seams (C# `IAgentRunner` subset). */
+
 export class FakeRunnerBase implements TurnRunner, ModelSelectionHost {
   currentModel = "deepseek-flash";
   activeSkills: readonly Skill[] = [];
@@ -99,7 +99,7 @@ export class FakeRunnerBase implements TurnRunner, ModelSelectionHost {
   }
 }
 
-/** Publishes TextDelta + TurnCompleted and returns a configurable result (C# `FakeRunner`). */
+
 export class FakeRunner extends FakeRunnerBase {
   bus?: EventBus;
   emitReasoning = false;
@@ -237,7 +237,7 @@ export class BlockingRunner extends FakeRunnerBase {
   }
 }
 
-/** Records skill snapshots and reset calls; returns an empty result (C# `ClearHistoryRunner`). */
+/** Records skill snapshots and reset calls; returns an empty result. */
 export class ClearHistoryRunner extends FakeRunnerBase {
   skillSnapshots: Skill[][] = [];
 
@@ -268,7 +268,7 @@ export class SoftStopRunner extends FakeRunnerBase {
   }
 }
 
-/** Fake model service answering the advisory catalog (C# `FakeLlm`). */
+/** Fake model service answering the advisory catalog. */
 export class FakeLlm implements ModelService {
   private readonly models_: readonly ModelInfo[];
 
@@ -311,7 +311,7 @@ export interface BuildHostOptions {
 }
 
 /**
- * Compose a full `CliHost` mirroring the C# `CliHost` constructor: a ModelSelection
+ * Compose a full `CliHost`: a ModelSelection
  * over the runner (which implements the ModelSelectionHost seam), an event bus, a
  * builtin command registry, and optional session store / effort / REPL options.
  */
@@ -320,7 +320,7 @@ export function buildHost<T extends TurnRunner & ModelSelectionHost = FakeRunner
 ): { host: CliHost; runner: T; bus: EventBus } {
   const bus = options.bus ?? new EventBus();
   const runner = (options.runner ?? new FakeRunner()) as T;
-  // Wire the fake runners' publish sink to the host bus (C# `new FakeRunner { Bus = bus }`).
+  // Wire the fake runners' publish sink to the host bus.
   const publishable = runner as { bus?: EventBus };
   publishable.bus = bus;
   const service = options.service ?? new FakeLlm([]);

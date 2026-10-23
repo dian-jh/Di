@@ -16,12 +16,12 @@ export class DiHome {
     this.rootDirectory = rootDirectory;
   }
 
-  /**
-   * Resolve the default home: DI_HOME env wins, otherwise <userHome>/.di.
-   * A blank/whitespace-only DI_HOME falls back to the default (mirrors .NET
-   * `string.IsNullOrWhiteSpace`). A non-blank value is used verbatim — relative
-   * values stay relative, no absolute normalization (mirrors `Path.Combine`).
-   */
+  /*
+ * Resolve the default home: DI_HOME env wins, otherwise <userHome>/.di.
+ * A blank/whitespace-only DI_HOME falls back to the default (.NET
+ * `string.IsNullOrWhiteSpace`). A non-blank value is used verbatim — relative
+ * values stay relative, no absolute normalization (`Path.Combine`).
+ */
   static fromEnvironment(env: Readonly<DiHomeEnvironment>, userHome: string): DiHome {
     const value = env.DI_HOME;
     const root = value !== undefined && value.trim().length > 0 ? value : join(userHome, ".di");

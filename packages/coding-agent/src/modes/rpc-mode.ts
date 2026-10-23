@@ -19,7 +19,7 @@ import {
   zeroUsage,
 } from "./wire.ts";
 
-/**
+/*
  * RPC mode (--mode rpc): an NDJSON over stdin/stdout session driver
  * (docs/tui-rpc.md is the wire-protocol authority; the TS TUI consumer
  * `tui/src/rpc/codec.ts` is the reference for the exact shapes). Requests are
@@ -27,11 +27,11 @@ import {
  * `shutdown` can arrive mid-turn (stdin is a pipe, no console Ctrl+C). Failures
  * are messages, not crashes: run_failed / result.stop_reason "error"; a parse
  * failure emits an `error` line and continues; stdin EOF finishes the current
- * turn then exits 0. Serialization mirrors PrintMode / SessionLog: snake_case,
+ * turn then exits 0. Serialization PrintMode / SessionLog: snake_case,
  * null keys omitted, native UTF-8 (JSON.stringify).
  *
- * P6.3c busy envelope: a turn in progress rejects `set_model` with `error: busy`
- * and `command` model/thinking with `command_error: busy` (the C# pre-check);
+ * busy envelope: a turn in progress rejects `set_model` with `error: busy`
+ * and `command` model/thinking with `command_error: busy` (the pre-check);
  * a `ModelSelectionError.code === "busy"` from a command handler maps to the same
  * `command_error: busy` envelope.
  */
@@ -266,7 +266,7 @@ async function forwardEvents(consumer: EventConsumer, stdout: TextWriter, seq: S
   }
 }
 
-/** Best-effort drain of events the forwarder did not consume (C# `Drain`). */
+/** Best-effort drain of events the forwarder did not consume. */
 function drain(consumer: EventConsumer, stdout: TextWriter, seq: SeqCounter): void {
   let event = consumer.tryRead();
   while (event !== null) {

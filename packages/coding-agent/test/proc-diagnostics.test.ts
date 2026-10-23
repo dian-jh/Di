@@ -3,13 +3,11 @@ import assert from "node:assert/strict";
 import { ProcessDiagnostics, runProcess } from "@di/coding-agent";
 
 /**
- * P7a card — closing the P6.4 `ProcessDiagnostics` emission seam in the process
- * runner (C# `Core/Tools/ProcessRunner.cs` at baseline 09f4e08): the runner
+ *
  * produces bypass `proc: start / start_failed / running / timeout / exited`
  * diagnostic lines through the static hook. Default hook is null (no-op); the
  * host (composition root) wires it to `DiLog.log`.
  *
- * Divergence from C#: Node has no cross-platform `Process.TotalProcessorTime`
  * equivalent, so the lines carry elapsed_ms / exit / timeout_s / cwd / cmd but
  * NO `cpu_ms` field.
  */

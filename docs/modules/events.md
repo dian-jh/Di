@@ -1,95 +1,13 @@
-# Common.Events —— 进程内事件总线
+# 事件
 
-> 模块文档。回答"事件总线解决什么问题、怎么用、事件从哪来到哪去"。
-> 上一级入口：`docs/README.md`；生产者/消费者见 `docs/modules/agent-loop.md` 与 `docs/cli.md`。
+`packages/agent/src/types.ts` 定义 agent loop 对外的 `AgentEvent` 联合类型，包括文本和推理增量、
+工具调用增量、工具开始/完成、回合完成、运行失败和软停止。事件保留 camelCase 的内部类型。
 
-## 目的与职责
+宿主的 `packages/coding-agent/src/core/events/event-bus.ts` 导出 `EventBus` 与 `EventConsumer`：
+发布方同步入队，消费者以异步迭代读取，并可释放订阅。CLI 模式从总线读取事件，渲染或转换成
+TUI/RPC wire 形状。`log-events.ts` 定义日志生命周期事件；`model-call-probe.ts` 为模型调用
+发布诊断事件。
 
-进程内**事件总线**：把 harness 核心（ReAct 循环）与 UI / 日志等旁路消费方解耦。
-ReAct 只**发布**事件、不渲染；CLI 从总线**消费**并流式渲染；日志、遥测可挂同一总线旁路观察。
-参考微软 eShopOnContainers / .NET 官方事件总线模型。
-
-## 实现原理
-
-- **两种消费模式**（各自独立、互不影响）：
-  - **订阅（push）**：`Subscribe`（按处理器类型 / 实例 / 委托三种重载），fan-out，每个订阅者收到每条事件，
-    适合日志、安全、遥测等旁路观察。返回 `IDisposable` 退订令牌。
-  - **消费（pull）**：`CreateConsumer` → `await foreach`，通过无界通道拉取有序事件流。
-    当前无容量限制或背压，消费慢于发布时会累积内存；消费者应及时读取并在结束后释放。
-- **多态派发**：事件沿继承链向上投递——订阅 / 消费基类（如 `AgentLoopEvent`）收到其全部具体子类事件；
-  同一处理器注册在具体类型与基类两层时会收到两次事件，应只订阅最需要的层级。
-- **异常隔离**：单个订阅者抛异常不中断其它订阅者；`EventBusOptions.OnHandlerError` 配置错误接收器后
-  转发并吞掉，未配置则在发布结束后抛出（见 §代码入口）。
-
-## 当前 TypeScript 代码入口
-
-| 文件（仓库根相对路径） | 职责 |
-|---|---|
-| `packages/coding-agent/src/core/events/event-bus.ts` | host event buffering and subscription |
-| `packages/coding-agent/src/core/events/log-events.ts` / `model-call-probe.ts` | run/model lifecycle events and model-call observation |
-| `packages/agent/src/types.ts` | agent-domain event vocabulary |
-| `packages/coding-agent/src/modes/event-renderer.ts` / `rpc-mode.ts` | CLI rendering and RPC event mapping |
-| `packages/agent/test/agent-loop.test.ts` / `packages/coding-agent/test/logging/di-log.test.ts` | loop event and subscriber behavior coverage |
-
-下表是固定 C# 迁移基线位置，供事件语义与线协议差异核对。
-
-## C# 基线代码入口（行为参考）
-
-| 文件（相对仓库根） | 职责 |
-|---|---|
-| `Common/Events/IEventBus.cs` | 总线接口：`PublishAsync` / `Subscribe`（3 重载）/ `CreateConsumer` |
-| `Common/Events/InMemoryEventBus.cs` | 内存实现：push 订阅 + pull 通道双路径 |
-| `Common/Events/Event.cs` / `Common/Events/IEvent.cs` | 事件基类（Id / CreatedAt / CorrelationId）与标记接口 |
-| `Common/Events/IEventHandler.cs` | push 订阅者契约（`HandleAsync`） |
-| `Common/Events/IEventConsumer.cs` | pull 消费者契约（`ConsumeAsync` / `TryRead`，Dispose 退订） |
-| `Common/Events/EventBusOptions.cs` | 异常处理回调（`OnHandlerError`） |
-| `Common/Events/EventBusServiceCollectionExtensions.cs` | DI 注册扩展 |
-
-## 关键符号
-
-- `IEventBus` / `InMemoryEventBus`
-- `IEventHandler<TEvent>`（push）、`IEventConsumer<TEvent>`（pull）
-- `Event`（基类，record）、`IEvent`（标记接口）
-- `EventBusOptions`
-- 领域事件：`AgentLoopEvent` 及其具体事件（`Core/AgentLoop/AgentLoopEvent.cs`）——下表是领域事件
-  的**唯一权威表**；`docs/cli.md` §2.2 只做契约视角复述，改动以本表为准。
-
-| 事件 | 负载 | 含义 |
-|---|---|---|
-| `TextDelta` | `Delta` | 模型流式增量文本（逐字） |
-| `ReasoningDelta` | `Delta` | 推理内容增量（M1 新增，转发 `ModelEvent.ReasoningDelta`；TUI 展示思考） |
-| `ToolCallDelta` | `ToolCallId` / `Name` / `Arguments` | 工具调用增量（M1 新增，转发 `ModelEvent.ToolCallDelta`；`Arguments` 为迄今累计的原始 JSON 串，可能未完成） |
-| `ToolStarted` / `ToolCompleted` | 调用 / 观察（含 `IsError`） | 工具生命周期 |
-| `TurnCompleted` | 迭代号、`TokenUsage`、`UsageCost?`、`FinishReason` | 一次模型调用结束 |
-| `RunFailed` | `LlmFailure` | 循环层失败（不可重试） |
-| `Interrupted` | 无 | 软停止已生效：回合将在相位边界收敛（见 `docs/interrupt.md`） |
-
-> **生命周期事件不在上表**：`RunStarted` / `ModelCallStarted`（`Core/AgentLoop/RunEvents.cs`）
-> 只继承 `Event`、**不继承 AgentLoopEvent**——RPC 的 `EventPayload` 与 TUI codec 对未知类型/
-> kind 是总开关抛错（防静默结构错误），这两个事件只被日志消费，不应扩进线协议。
-> 映射与原因见 `docs/modules/logging.md`（§关键约束）。
-
-## 调用关系（数据流）
-
-```
-ReAct（Core/AgentLoop/ReAct.cs）── PublishAsync(AgentLoopEvent)
-        │   IEventBus（InMemoryEventBus）
-        ├─ push 订阅：日志 / 遥测旁路（IEventHandler）
-        └─ pull 消费：Repl.RunTurnAsync 建消费者
-            └─ EventRenderer（Di.Cli/EventRenderer.cs）流式渲染
-```
-
-回合边界用 `IEventConsumer.TryRead` 排空：一次运行结束后把本回合全部事件取走、不等待新事件。
-
-## 已实现能力与测试
-
-| 能力 | 落点 | 测试 |
-|---|---|---|
-| push 订阅 + pull 消费、多态派发、退订令牌 | `InMemoryEventBus` | `Di.Tests/Events/EventBusTests.cs` |
-| 异常隔离（坏订阅者不拖垮循环） | `EventBusOptions.OnHandlerError` | `Di.Tests/Events/EventBusTests.cs` |
-| 循环 / UI 解耦（事件实时渲染） | `Di.Cli/Repl.cs`（`RunTurnAsync`）+ `EventRenderer` | `Di.Cli.Tests/ReplTests.cs`、`Di.Cli.Tests/EventRendererTests.cs` |
-
-## 关联文档
-
-- `docs/modules/agent-loop.md` —— 事件生产者（ReAct）与领域事件定义
-- `docs/cli.md` —— 事件消费方（EventRenderer 渲染、回合边界排空）
+关键入口：`packages/agent/src/types.ts`（`AgentEvent`）、
+`packages/coding-agent/src/core/events/event-bus.ts`（`EventBus`、`EventConsumer`）。RPC 字段见
+[`docs/tui-rpc.md`](../tui-rpc.md)。

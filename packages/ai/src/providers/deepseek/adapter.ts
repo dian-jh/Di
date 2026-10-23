@@ -12,14 +12,13 @@ import {
   DeepSeekError,
 } from "./translator.ts";
 
-/**
- * DeepSeek {@link ChatModel} adapter (Di baseline
- * `Core/Providers/DeepSeek/DeepSeekAdapter.cs`). Owns the HTTP/SSE transport and
- * plugs the P3.3 wire translator into the P3.2 `TranslateEvent` seam.
+/*
+ * DeepSeek {@link ChatModel} adapter. Owns the HTTP/SSE transport and
+ * plugs the wire translator into the `TranslateEvent` seam.
  *
  * Auth header and base URL are per-request (never global). The host injects the
  * resolved API key and the fetch implementation (@di/ai is Web-API-only).
- * Retry/backoff lives in the P3.5 {@link RetryingChatModel} wrapper — this
+ * Retry/backoff lives in the {@link RetryingChatModel} wrapper — this
  * adapter throws structured errors but does not retry. It does own the
  * response-header wait timeout (default 60s) and maps fetch-level connection
  * failures to a retryable `CONNECTION` {@link DeepSeekError}.
@@ -36,11 +35,10 @@ export interface DeepSeekAdapterOptions {
   /** Idle deadline between SSE frames, forwarded to `sseToModelEvents`. */
   readonly idleTimeoutMs?: number;
   /**
-   * Response-header wait timeout in ms (C# `DeepSeekDefaults.RequestTimeoutSeconds`,
-   * default 60s): the server must start responding within this window or the
-   * request fails with a retryable `TIMEOUT` {@link DeepSeekError}. `<= 0`
-   * disables the timer. This is NOT a total-duration timeout — a long-thinking
-   * stream is bounded only by `idleTimeoutMs` between SSE frames.
+   * Response-header wait deadline in milliseconds (default 60 seconds). A
+   * timeout produces a retryable `TIMEOUT` {@link DeepSeekError}; `<= 0`
+   * disables it. This does not limit the response body: `idleTimeoutMs` bounds
+   * the gap between SSE frames.
    */
   readonly headerTimeoutMs?: number;
 }
@@ -107,13 +105,10 @@ export class DeepSeekAdapter implements ChatModel {
   }
 
   /**
-   * Send the request with a response-header wait timeout (C#
-   * `DeepSeekAdapter.SendAsync`). `fetch` settles as soon as the response headers
-   * arrive, so a timer that aborts the request is exactly a header-wait timeout —
-   * it never touches the (already streaming) body. Caller cancellation always
-   * wins over the timer; a fetch-level network failure (connection refused / DNS
-   * / reset) maps to a retryable `CONNECTION` {@link DeepSeekError} so the retry
-   * wrapper can classify it.
+   * Wait for response headers under `headerTimeoutMs`. `fetch` resolves when the
+   * headers arrive, so this deadline cannot interrupt an already-streaming
+   * body. Caller cancellation takes precedence; other fetch failures become
+   * retryable `CONNECTION` errors for the retry wrapper.
    */
   private async fetchWithHeaderTimeout(
     url: string,

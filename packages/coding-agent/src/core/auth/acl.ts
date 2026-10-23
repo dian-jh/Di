@@ -3,11 +3,11 @@ import { promisify } from "node:util";
 import { chmod as fsChmod, stat as fsStat } from "node:fs/promises";
 import { userInfo } from "node:os";
 
-/**
- * Owner-only ACL adapter (P8b).
+/*
+ * Owner-only ACL adapter.
  *
  * Windows: set + read back a current-user-only DACL via the `icacls` subprocess
- * (P8-auth-storage probe §3b proved readback works). Node `stat.mode` on NTFS is
+ * ( §3b proved readback works). Node `stat.mode` on NTFS is
  * NEVER used as the verification channel — the probe (§3a/§3b) proved it always
  * reads `0o100666` regardless of the real DACL, so it cannot distinguish a
  * restricted file from an open one.
@@ -44,7 +44,7 @@ export interface AclAdapter {
 type RunCommand = (file: string, args: readonly string[]) => Promise<{ stdout: Buffer | string }>;
 
 export interface AclAdapterOptions {
-  /** Windows account name for the icacls grant; defaults to `os.userInfo().username`. */
+  /** Windows account name for the icacls grant; defaults to `os.userInfo.username`. */
   readonly winUser?: string;
   /** Override the effective platform (testability). Defaults to `process.platform`. */
   readonly platform?: NodeJS.Platform;

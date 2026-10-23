@@ -3,7 +3,7 @@ import { mkdir, open as fsOpen } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { dirname } from "node:path";
 
-/**
+/*
  * Cross-process OS advisory lock seam for CredentialStore transactions.
  * `NativeOsLockProvider` holds LockFileEx (Windows) or flock (POSIX) across the
  * complete read/refresh/commit transaction. Kernel handle release after process
@@ -34,12 +34,12 @@ export interface LockHandle {
 }
 
 export interface LockProvider {
-  /**
-   * Acquire a cross-process exclusive lock scoped to `path`.
-   *
-   * The returned handle is held across the ENTIRE transaction (read, refresh,
-   * commit). Failures must be recoverable errors that preserve credentials.
-   */
+  /*
+ * Acquire a cross-process exclusive lock scoped to `path`.
+ *
+ * The returned handle is held across the ENTIRE transaction (read, refresh,
+ * commit). Failures must be recoverable errors that preserve credentials.
+ */
   acquire(path: string, opts?: LockAcquireOptions): Promise<LockHandle>;
 }
 

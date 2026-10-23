@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * P7b-3 — crash/resume through the REAL CLI production chain
+ *
  * (`CliApp → createCliHost → loadRecovery → restoreHistory → RPC ready`), NOT a
  * test host / fake runner / direct loadRecovery call.
  *

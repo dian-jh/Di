@@ -1,9 +1,8 @@
 import type { LlmFailure } from "../types/model.ts";
 import { SseStreamError } from "../sse.ts";
 
-/**
- * Retry/timeout policy for model streams (Di baseline
- * `Core/Llm/RetryingChatModel.cs` `RetryPolicyOptions` + `LlmException.IsRetryable`;
+/*
+ * Retry/timeout policy for model streams (* `RetryPolicyOptions` + `LlmException.IsRetryable`;
  * models-and-auth.md §重试边界).
  *
  * The policy is provider-neutral: it classifies structured failures by their
@@ -13,23 +12,23 @@ import { SseStreamError } from "../sse.ts";
  * "is this failure worth a retry" and "how long to wait".
  */
 
-/** Defaults mirroring the C# `RetryPolicyOptions` / `DeepSeekDefaults`. */
+/** Defaults mirroring the `RetryPolicyOptions` / `DeepSeekDefaults`. */
 export const RETRY_DEFAULTS = {
-  /** Total attempts including the first (C# `MaxAttempts` = 3). */
+  /** Total attempts including the first (`MaxAttempts` = 3). */
   maxAttempts: 3,
-  /** First retry delay in ms when the provider sends no Retry-After (C# `InitialBackoff` = 500ms). */
+  /** First retry delay in ms when the provider sends no Retry-After (`InitialBackoff` = 500ms). */
   initialBackoffMs: 500,
-  /** Backoff cap in ms; also caps Retry-After so a hostile header cannot stall a turn (C# `MaxBackoff` = 30s). */
+  /** Backoff cap in ms; also caps Retry-After so a hostile header cannot stall a turn (`MaxBackoff` = 30s). */
   maxBackoffMs: 30_000,
-  /** Exponential backoff multiplier per attempt (C# `BackoffMultiplier` = 2). */
+  /** Exponential backoff multiplier per attempt (`BackoffMultiplier` = 2). */
   backoffMultiplier: 2,
-  /** Jitter fraction applied to every wait, ±`jitterRatio` (C# ±20%). */
+  /** Jitter fraction applied to every wait, ±`jitterRatio` (±20%). */
   jitterRatio: 0.2,
 } as const;
 
-/**
+/*
  * Retry configuration for one model call. Every field is optional; the
- * C#-mirroring defaults in {@link RETRY_DEFAULTS} fill the gaps.
+ * defaults in {@link RETRY_DEFAULTS} fill the gaps.
  */
 export interface RetryPolicyOptions {
   /** Total attempts including the first; `1` means "no retry". Default 3. */
@@ -58,9 +57,8 @@ export function resolveRetryOptions(options: RetryPolicyOptions = {}): Required<
   };
 }
 
-/**
- * Whether an {@link LlmFailure} is worth retrying (mirrors C#
- * `LlmException.IsRetryable`): 408/429/5xx HTTP statuses, or a
+/*
+ * Whether an {@link LlmFailure} is worth retrying (* `LlmException.IsRetryable`): 408/429/5xx HTTP statuses, or a
  * `TIMEOUT` / `CONNECTION` / `RATE_LIMITED` code. Credential and invalid-request
  * failures are never retried (they cannot succeed on a second attempt).
  */
@@ -76,7 +74,7 @@ export function isRetryableFailure(failure: LlmFailure): boolean {
   );
 }
 
-/**
+/*
  * Extract the {@link LlmFailure} carried by a structured provider error
  * (provider-neutral: any error whose `failure` field looks like an
  * `LlmFailure`). Returns `undefined` for plain errors and transport errors that
@@ -93,13 +91,13 @@ export function failureOf(error: unknown): LlmFailure | undefined {
   return undefined;
 }
 
-/**
+/*
  * Whether a thrown error is retryable. Recognizes:
  * - {@link SseStreamError} `"connection"` (stream read failed / EOF without a
- *   terminal finish) and `"timeout"` (SSE idle timeout); `"aborted"` is never
- *   retried;
+ * terminal finish) and `"timeout"` (SSE idle timeout); `"aborted"` is never
+ * retried;
  * - any error carrying an {@link LlmFailure} (DeepSeekError and future provider
- *   errors) via {@link failureOf}, judged by {@link isRetryableFailure}.
+ * errors) via {@link failureOf}, judged by {@link isRetryableFailure}.
  */
 export function isRetryableError(error: unknown): boolean {
   if (error instanceof SseStreamError) {
@@ -109,8 +107,8 @@ export function isRetryableError(error: unknown): boolean {
   return failure !== undefined && isRetryableFailure(failure);
 }
 
-/**
- * How long to wait before the next attempt (C# `RetryingChatModel.SleepAsync`):
+/*
+ * How long to wait before the next attempt (`RetryingChatModel.SleepAsync`):
  * the provider's Retry-After (`failure.providerRetryAfterMs`) when present, else
  * exponential backoff `initial * multiplier^(attempt-1)`. Both are capped at
  * `maxBackoffMs` and jittered by ±`jitterRatio`. `attempt` is the 1-based number

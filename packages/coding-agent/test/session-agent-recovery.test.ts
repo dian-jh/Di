@@ -10,8 +10,7 @@ import type { ToolExecutor, ToolObservation } from "@di/agent";
 import { AgentSession, loadRecovery, SessionStore } from "@di/coding-agent";
 
 /**
- * P5 in-process recovery integration with AgentSession (C# baseline
- * `Core/AgentLoop/AgentRunner.cs` `RunAsync` catch / `RestoreHistory` /
+ *
  * `ResetHistory` / `_recoveryBlockedReason`).
  *
  * - after a model error the same host reloads the durable checkpoint into memory

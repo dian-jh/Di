@@ -11,16 +11,13 @@ import {
 } from "@di/coding-agent";
 
 /**
- * P5 checkpoint envelope + message/block codec
- * (docs/migration/typescript-core/sessions-and-compatibility.md §"Di 文件布局与
- * 逐行 envelope" / §"实时 checkpoint record 与完整示例"; C# baseline
- * `Core/Sessions/SessionLog.cs` `Append` / `SerializeCheckpointMessage` /
+ *
  * `SerializeCheckpointBlock`).
  *
  * The writer must emit a stable `{timestamp, ordinal, type, payload}` envelope
  * (null omitted, snake_case, raw UTF-8), map the in-memory `tool-call` block to
  * the wire `tool_call`, and REJECT any block it cannot serialize (never the
- * C#-baseline `{type:"unknown"}` asymmetry). The reader must round-trip the
+ *
  * whitelisted block set and reject unknown roles/blocks with line numbers.
  */
 
@@ -34,7 +31,7 @@ test("envelope serializes with stable key order, ordinal and raw UTF-8", () => {
   assert.ok(!line.includes("\\u"));
 });
 
-test("nowUtcIso emits the C#-style UTC millisecond timestamp with Z", () => {
+test("nowUtcIso emits the -style UTC millisecond timestamp with Z", () => {
   const value = nowUtcIso();
   assert.match(value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   // UTC, not local time: a fresh Date is within a few seconds of the string.
@@ -122,7 +119,7 @@ test("parseCheckpointMessage round-trips messages and rejects unknown roles", ()
     content: "r",
     isError: true,
   });
-  // is_error absent defaults to false (C# TryGetProperty), never a throw.
+
   assert.deepEqual(parseCheckpointMessage({ role: "tool", call_id: "c1", text: "r" }, 5), {
     role: "tool",
     toolCallId: "c1",

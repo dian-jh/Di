@@ -13,11 +13,11 @@ function isToolCall(block: ContentBlock): block is ToolCall {
 }
 
 /**
- * Cross-language session fixtures (docs/migration/typescript-core/sessions-and-compatibility.md
+ *
  * §"Fixture 的构造与精确预期"). Each fixture directory carries a manifest.json with
  * `input_file` / `expected_status` / `expected_messages` / `expected_error_class` /
  * `expected_error_mentions` / `expected_model_calls` / `expected_executor_calls` /
- * `expected_side_effect_count`. The expectations come from the C# baseline and the
+ *
  * leaf contract — never generated from a fresh TS writer output.
  *
  * loadRecovery is pure file reading: it must NEVER invoke a model or an executor,

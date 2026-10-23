@@ -1,13 +1,13 @@
 import { parentPort } from "node:worker_threads";
 
-/**
+/*
  * Regex worker for the grep tool.
  *
- * Each bounded regex job runs on a dedicated worker thread (P4-regex-probe):
+ * Each bounded regex job runs on a dedicated worker thread:
  * a synchronous JS regex cannot be interrupted on the main thread (probe
  * experiment B froze the whole event loop), so a pathological
  * (catastrophic-backtracking) pattern must live on a thread the parent can
- * `worker.terminate()`. The parent keeps one worker per grep call, posts a job
+ * `worker.terminate`. The parent keeps one worker per grep call, posts a job
  * per file, and terminates/rebuilds it on timeout or abort.
  *
  * The worker compiles the RegExp once per job and tests it against the batch of

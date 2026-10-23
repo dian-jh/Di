@@ -6,8 +6,8 @@ import { hasIllegalPathChars, resolvePath } from "./paths.ts";
 import { runProcess } from "./process-runner.ts";
 import { errorObservation, okObservation, type CoreTool } from "./types.ts";
 
-/**
- * The Python tool (port of `Core/Tools/PythonTool.cs` at 09f4e08): executes code
+/*
+ * The Python tool: executes code
  * via `python -c <code>` in a standalone process whose default working directory
  * is the system temp dir. Process-level isolation only — NOT an OS sandbox, and
  * no filesystem/network restriction is claimed. stdin starts at EOF (redirected
@@ -15,24 +15,24 @@ import { errorObservation, okObservation, type CoreTool } from "./types.ts";
  * forced to UTF-8 on both ends (`PYTHONIOENCODING=utf-8` pinned + UTF-8 decode).
  */
 
-/** Default per-call timeout in seconds (C# `PythonTool.DefaultTimeoutSeconds`). */
+/** Default per-call timeout in seconds (`PythonTool.DefaultTimeoutSeconds`). */
 export const PYTHON_DEFAULT_TIMEOUT_SECONDS = 30;
 
 export interface PythonToolOptions {
-  /** Default per-call timeout in seconds (C# `timeout` ctor; default 30). */
+  /** Default per-call timeout in seconds (`timeout` ctor; default 30). */
   readonly timeoutSeconds?: number;
-  /** Default working directory (C# `sandboxDirectory`; default the system temp dir). */
+  /** Default working directory (`sandboxDirectory`; default the system temp dir). */
   readonly sandboxDirectory?: string;
 }
 
-/** Optional string; blank/whitespace is treated as absent (C# `TryGetOptionalString`). */
+/** Optional string; blank/whitespace is treated as absent (`TryGetOptionalString`). */
 function optionalString(args: Readonly<Record<string, unknown>>, name: string): string | undefined {
   const value = args[name];
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
-/**
- * Create the Python tool. `executable` defaults to `python` on PATH (C# ctor
+/*
+ * Create the Python tool. `executable` defaults to `python` on PATH (ctor
  * default); a nonexistent executable is a startup-failure observation.
  */
 export function createPythonTool(executable?: string, options?: PythonToolOptions): CoreTool {
@@ -83,7 +83,7 @@ export function createPythonTool(executable?: string, options?: PythonToolOption
       // Python output encoding drifts with the environment (PYTHONIOENCODING /
       // PYTHONUTF8 / Python version can all make it write UTF-8 instead of OEM
       // bytes, garbling Chinese on a GBK machine). Pin both ends to UTF-8 so the
-      // behavior is machine-independent (C# `ProcessEncoding` note).
+      // behavior is machine-independent ( note).
       const result = await runProcess(
         pythonExecutable,
         ["-c", codeResult.value],
@@ -93,7 +93,7 @@ export function createPythonTool(executable?: string, options?: PythonToolOption
           outputEncoding: "utf-8",
           timeoutMs: defaultTimeoutSeconds * 1000,
           signal,
-          // C# redirectInput: true — stdin is a pipe closed immediately to EOF,
+          // redirectInput: true — stdin is a pipe closed immediately to EOF,
           // so the code can never touch the caller's terminal.
           stdio: ["pipe", "pipe", "pipe"],
           closeStdin: true,

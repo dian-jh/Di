@@ -13,11 +13,10 @@ import { textOfMessage } from "@di/ai";
 import type { ToolObservation } from "./tools.ts";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.ts";
 
-/**
- * ReAct loop (Di baseline `Core/AgentLoop/ReAct.cs` `RunCoreAsync`; contract per
- * docs/migration/typescript-core/loop-and-state.md §"一回合精确时序").
+/*
+ * ReAct loop (`RunCoreAsync`; contract per
  *
- * P2.1 landed the tool-free answer path; P2.2 adds the tool phase: after the
+ * landed the tool-free answer path; adds the tool phase: after the
  * model returns tool call(s), each call is validated, the pre-execution hook and
  * hard-signal check gate it, the checkpoint intent is written, `toolStarted` is
  * emitted, the tool executes (a throwing tool becomes an `isError` observation,
@@ -26,19 +25,19 @@ import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from ".
  * written before the next model call. Multiple tools in one round execute in
  * order. `finalOutputTool` returns the raw arguments as the answer;
  * `maxIterations` stops the loop and does not execute tools on the final turn.
- * P2.3 adds the context-budget guard: before each model call the exact request
+ * adds the context-budget guard: before each model call the exact request
  * the model would see is estimated (injected `estimateRequestTokens`); when the
  * estimate crosses `contextTokenBudget` — or the budget is 0 — the loop returns
  * `context_limit` with the full trajectory and accumulated usage preserved (an
  * explicit pause, never an auto-trim or summary).
- * P2.4 adds soft-stop (`interruptRequested`) at both phase boundaries (loop top
+ * adds soft-stop (`interruptRequested`) at both phase boundaries (loop top
  * ahead of the context guard, and right after the model returns tool calls
  * before any tool starts) returning `interrupted` with the partial answer, the
  * preserved trajectory/usage and the `interrupted` event; hard cancel stays an
  * `AbortSignal` (loop top + pre-tool `throwIfAborted`, mid-stream/mid-tool
  * `AbortError` propagates as a rejection and is never turned into an `isError`
  * observation).
- * P2.5 isolates observer errors: the event sink is an observation side channel,
+ * isolates observer errors: the event sink is an observation side channel,
  * never the control plane — a throwing/rejecting `events` listener is caught,
  * ordered through `onObserverError(error, event)` (whose own throw/rejection is
  * swallowed), and must never stall the loop, block an already-authorized tool or
@@ -65,7 +64,7 @@ export class LoopError extends Error {
 /** Identity element for {@link addUsage}: a model call with nothing reported. */
 const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
-/**
+/*
  * Run one agent turn against an injected {@link ChatModel}.
  *
  * The loop alternates model and tool phases until the model answers without
@@ -307,7 +306,7 @@ function buildModelRequest(request: AgentRequest, trajectory: readonly AgentMess
 /**
  * Await the observer sink to preserve event order. The sink is an observation
  * side channel, never the control plane (loop-and-state.md §"事件 sink 是观测
- * 旁路，不是控制面"; C# `ReAct.Emit` is fire-and-forget and the event bus
+ * 旁路，不是控制面";  is fire-and-forget and the event bus
  * isolates subscriber exceptions). A throwing/rejecting listener is caught and
  * handed — in order — to the `onObserverError` diagnostic callback; if that
  * callback itself throws synchronously or rejects, its error is swallowed too.
@@ -381,7 +380,7 @@ function lastAssistantText(trajectory: readonly AgentMessage[]): string {
 }
 
 /**
- * Phase-boundary soft stop (C# `ReAct.StopInterrupted`): a normal convergence, NOT
+ * Phase-boundary soft stop: a normal convergence, NOT
  * an exception. Preserves the partial answer (last assistant visible text), the
  * full trajectory and the usage/cost accrued so far, emits the `interrupted`
  * event for the UI, and never starts a pending tool or another model call.
@@ -431,7 +430,7 @@ function shouldPauseForContextLimit(
  * Explicit pause (loop-and-state.md §AgentSession 历史与恢复): return the full
  * trajectory and already-accumulated usage, never auto-trim or summarize. The
  * answer is the last current-turn assistant text after the user (past the history
- * prefix), mirroring C# `StopContextLimit` — an old history assistant answer is
+ * prefix), mirroring  — an old history assistant answer is
  * never reported as the current answer.
  */
 function stopContextLimit(
@@ -452,7 +451,7 @@ function stopContextLimit(
   };
 }
 
-/** C# `StopContextLimit` answer: skip history + current user, last assistant text after them. */
+/**  answer: skip history + current user, last assistant text after them. */
 function contextLimitAnswer(trajectory: readonly AgentMessage[], history: readonly AgentMessage[]): string {
   const firstCurrentTurn = Math.min(trajectory.length, history.length + 1);
   for (let i = trajectory.length - 1; i >= firstCurrentTurn; i--) {
@@ -495,7 +494,7 @@ function sumOrNull(a: number | undefined, b: number | undefined): number | undef
   return a + b;
 }
 
-/** Accumulate cost; a missing side keeps the other (null-safe per C# CombineCost). */
+/** Accumulate cost; a missing side keeps the other (null-safe per CombineCost). */
 function combineCost(acc: UsageCost | undefined, next: UsageCost | undefined): UsageCost | undefined {
   if (next === undefined) return acc;
   if (acc === undefined) return next;

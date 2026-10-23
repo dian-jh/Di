@@ -5,14 +5,14 @@ import { hasIllegalPathChars, resolvePath } from "./paths.ts";
 import { ShellSession, powershellSessionShell } from "./shell-session.ts";
 import { errorObservation, okObservation, type CoreTool } from "./types.ts";
 
-/**
- * The PowerShell tool (port of `Core/Tools/PowerShellTool.cs` at 09f4e08), same
- * dual-mode design as C#:
+/*
+ * The PowerShell tool, same
+ * dual-mode design as:
  * - persistent-session mode (a {@link ShellSession} with the PowerShell shell is
- *   injected): cd / variables / environment persist across calls; `working_dir`
- *   is not in the schema and is ignored if the model passes it anyway.
+ * injected): cd / variables / environment persist across calls; `working_dir`
+ * is not in the schema and is ignored if the model passes it anyway.
  * - one-shot mode (no session): every call runs in a fresh temporary PowerShell
- *   session with an optional `working_dir`.
+ * session with an optional `working_dir`.
  *
  * Timeout: default 30s, hard cap 3600s, per-call `timeout` override. A timeout
  * kills the session tree and the next call self-heals (the persistent session is
@@ -20,25 +20,25 @@ import { errorObservation, okObservation, type CoreTool } from "./types.ts";
  * engine's OEM-encoded stderr decoded by smart decode (never CLIXML pollution).
  */
 
-/** Default per-call timeout in seconds (C# `PowerShellTool.DefaultTimeoutSeconds`). */
+/** Default per-call timeout in seconds (`PowerShellTool.DefaultTimeoutSeconds`). */
 export const POWERSHELL_DEFAULT_TIMEOUT_SECONDS = 30;
-/** Hard per-call timeout cap in seconds (C# `PowerShellTool.MaxTimeoutSeconds`). */
+/** Hard per-call timeout cap in seconds (`PowerShellTool.MaxTimeoutSeconds`). */
 export const POWERSHELL_MAX_TIMEOUT_SECONDS = 3600;
 
 export interface PowerShellToolOptions {
-  /** Default per-call timeout in seconds (C# `timeout` ctor; default 30). */
+  /** Default per-call timeout in seconds (`timeout` ctor; default 30). */
   readonly timeoutSeconds?: number;
   /** A shared persistent PowerShell session; when present the tool is in session mode. */
   readonly session?: ShellSession;
 }
 
-/** Optional string; blank/whitespace is treated as absent (C# `TryGetOptionalString`). */
+/** Optional string; blank/whitespace is treated as absent (`TryGetOptionalString`). */
 function optionalString(args: Readonly<Record<string, unknown>>, name: string): string | undefined {
   const value = args[name];
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
-/**
+/*
  * Create the PowerShell tool. `baseDirectory` is the one-shot fallback working
  * directory; inject a `session` for persistent-session mode.
  */
@@ -103,7 +103,7 @@ export function createPowerShellTool(baseDirectory: string, options?: PowerShell
       const timeoutMs = (timeoutArg ?? defaultTimeoutSeconds) * 1000;
 
       // Session mode: the command runs in the shared persistent session; cwd/env
-      // survive across calls, so `working_dir` is deliberately ignored (C#).
+      // survive across calls, so `working_dir` is deliberately ignored.
       if (session !== undefined) {
         const result = await session.execute(commandResult.value, timeoutMs, signal);
         return result.error === null
@@ -112,7 +112,7 @@ export function createPowerShellTool(baseDirectory: string, options?: PowerShell
       }
 
       // One-shot mode: a fresh temporary PowerShell session carries the command,
-      // its working directory pinned at spawn time (C# `new ShellSession(...)`).
+      // its working directory pinned at spawn time.
       const workingDirArg = optionalString(parsed.value, "working_dir");
       let workingDir: string;
       try {

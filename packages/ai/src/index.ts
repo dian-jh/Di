@@ -1,9 +1,9 @@
-/**
+/*
  * @di/ai — public entry.
  *
  * Provider-neutral message/model vocabulary. Cross-package consumers must import
  * only these public exports (never `../src`). The ownership table in
- * docs/migration/typescript-core/architecture.md is authoritative.
+ *
  */
 
 export type {
@@ -42,7 +42,7 @@ export type {
   ChatModel,
 } from "./types/model.ts";
 
-// Usage aggregation and cost computation (P3 card 4: TokenUsage Add/SumOrNull,
+// Usage aggregation and cost computation ( TokenUsage Add/SumOrNull,
 // per-provider catalog rates, unknown cost stays absent — never fabricated zero).
 export type { ModelCostRates } from "./usage.ts";
 export {
@@ -75,7 +75,7 @@ export type {
 } from "./sse.ts";
 export { SseEventParser, SseStreamError, parseSseStream, sseToModelEvents } from "./sse.ts";
 
-// Retry/timeout policy (P3 card 5: bounded retry, Retry-After, header-wait and
+// Retry/timeout policy ( bounded retry, Retry-After, header-wait and
 // SSE idle timeouts, first-ModelEvent retry boundary, cancellation never retries).
 export type { RetryPolicyOptions, RetrySleep } from "./retry/index.ts";
 export {
@@ -89,7 +89,7 @@ export {
   defaultRetrySleep,
 } from "./retry/index.ts";
 
-// DeepSeek provider adapter (P3.3 request/response translation).
+// DeepSeek provider adapter ( request/response translation).
 export {
   deepSeekDefaults,
   deepSeekErrorCodes,
@@ -120,7 +120,7 @@ export type {
   DeepSeekWireUsage,
 } from "./providers/deepseek/index.ts";
 
-// ChatGPT Responses provider adapter (P8a request/response translation). The
+// ChatGPT Responses provider adapter ( request/response translation). The
 // module-internal `toWireRequest` / `serializeRequest` / `mapHttpErrorBody`
 // names are re-exported under provider-scoped aliases to avoid colliding with
 // the DeepSeek exports above.

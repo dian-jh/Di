@@ -1,17 +1,14 @@
 /**
  * client 集成测试：用真实 `node` 子进程跑假后端（test/fixtures/fake-rpc-backend.mjs），
- * 验证 ready 握手、prompt 请求 → 事件流 + result、异常退出、优雅关闭，以及二进制解析。
+ * 验证 ready 握手、prompt 请求 → 事件流 + result、异常退出与优雅关闭。
  * 不依赖真实 `di` 后端。
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { CommandError, RpcClient, resolveDiBin } from "../src/rpc/client.ts";
+import { CommandError, RpcClient } from "../src/rpc/client.ts";
 import type { AgentEvent, AgentResult, ReadyMessage } from "../src/rpc/protocol.ts";
 
 const BACKEND = fileURLToPath(new URL("./fixtures/fake-rpc-backend.mjs", import.meta.url));
@@ -199,44 +196,5 @@ describe("RpcClient：关闭", () => {
     await client.connect();
     await client.stop();
     assert.equal(client.state, "closed");
-  });
-});
-
-describe("resolveDiBin（二进制解析）", () => {
-  it("优先使用 DI_BIN", () => {
-    assert.equal(resolveDiBin({ DI_BIN: "C:\\tools\\di.exe", PATH: "" }), "C:\\tools\\di.exe");
-  });
-
-  it("在 PATH 中找到 di（win32 用 .exe 后缀）", () => {
-    const dir = mkdtempSync(join(tmpdir(), "di-path-"));
-    const ext = process.platform === "win32" ? ".exe" : "";
-    writeFileSync(join(dir, `di${ext}`), "");
-    try {
-      const found = resolveDiBin({ PATH: dir, HOME: "/nonexistent", USERPROFILE: "/nonexistent" });
-      assert.equal(found, join(dir, `di${ext}`));
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("回退到 ~/.di/bin 下的 di", () => {
-    const home = mkdtempSync(join(tmpdir(), "di-home-"));
-    const binDir = join(home, ".di", "bin");
-    mkdirSync(binDir, { recursive: true });
-    const ext = process.platform === "win32" ? ".exe" : "";
-    writeFileSync(join(binDir, `di${ext}`), "");
-    try {
-      const found = resolveDiBin({ PATH: "/nonexistent", HOME: home, USERPROFILE: home });
-      assert.equal(found, join(binDir, `di${ext}`));
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
-
-  it("都找不到 → undefined", () => {
-    assert.equal(
-      resolveDiBin({ PATH: "/nonexistent/dir", HOME: "/nonexistent", USERPROFILE: "/nonexistent" }),
-      undefined,
-    );
   });
 });

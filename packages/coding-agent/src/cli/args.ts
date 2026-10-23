@@ -1,18 +1,18 @@
-/**
+/*
  * CLI argument parsing — pure data mapping (string[] → CliArgs + diagnostics).
- * Mirrors `Di.Cli/cli/CliArgs.cs` at baseline 09f4e08 (the language-neutral
+ * (the language-neutral
  * contract part of the CLI shell, see docs/cli.md §3.2). The parser does no I/O
  * and touches no console; the result is handed to `CliMode.resolve` to decide
  * the running mode. Rules:
  * - everything after `--` is positional (no flag parsing);
  * - value flags (--model/-m --provider --mode --thinking --resume --stats
- *   --skill-eval) require a following token that does not start with `-`,
- *   otherwise a "缺值" diagnostic is reported (pessimistic: never swallow a flag
- *   as a value);
+ * --skill-eval) require a following token that does not start with `-`,
+ * otherwise a "缺值" diagnostic is reported (pessimistic: never swallow a flag
+ * as a value);
  * - --list-models optionally consumes the next non-flag token as a pattern;
  * - --mode validates its value domain (interactive / print / json / rpc);
  * - unknown flags are recorded in `unknownFlags` AND diagnosed as errors
- *   (pessimistic: never silently ignored).
+ * (pessimistic: never silently ignored).
  */
 
 export interface CliArgs {
@@ -63,9 +63,9 @@ export interface CliArgsParseResult {
 
 const KNOWN_MODES = ["interactive", "print", "json", "rpc"] as const;
 
-/**
+/*
  * Pure argument parser (Pi's `cli/args.ts` counterpart). Exact error strings
- * match the C# baseline so any language rewrite produces the same observable
+ * match the so any language rewrite produces the same observable
  * output.
  */
 export const CliArgsParser = {

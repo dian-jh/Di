@@ -1,4 +1,4 @@
-// P5 child test host fixture.
+
 //
 // A real independent Node process that imports the committed @di/coding-agent
 // dist and drives a REAL session store in an isolated DI_HOME, exactly like a

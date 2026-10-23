@@ -1,45 +1,44 @@
 # di-tui — Di 终端界面（TypeScript 前端）
 
-TS TUI 作为 `di --mode rpc`（C# 后端）的前端，通过子进程 + NDJSON over stdin/stdout 协议驱动
-harness 核心。协议唯一权威：[`docs/tui-rpc.md`](../docs/tui-rpc.md)；设计与里程碑见
-[`docs/tui.md`](../docs/tui.md)。UI 与核心互不认识对方代码，只认协议。
+生产 CLI 通过本地 `RunnerPort` adapter 调用 `runInteractive`。独立启动本包时，通过子进程
+与 TypeScript 后端的 `--mode rpc` 交换 NDJSON。协议见
+[`docs/tui-rpc.md`](../docs/tui-rpc.md)，组件与端口边界见 [`docs/tui.md`](../docs/tui.md)。
 
 ## 环境要求
 
 - Node.js ≥ 22.19（npm 包 `@earendil-works/pi-tui` 的 engines 要求）
-- 可用的 `di` 二进制（见下文"如何找到 di"）
+- 已构建或安装的 `@di/coding-agent` 后端
 
 ## 构建 / 运行
 
 ```bash
-cd tui
-npm install      # 安装依赖（首次）
-npm run build    # tsc 编译到 dist/
-npm start        # node dist/main.js 启动 TUI
+npm ci                  # 仓库根目录安装锁定依赖
+npm run build           # 构建全部 workspace（包含后端）
+npm start -w di-tui      # 启动独立 RPC TUI
 ```
 
 测试（无需真实终端 / 真实后端）：
 
 ```bash
-npm test         # node --test test/*.test.ts
+npm test -w di-tui
 ```
 
 ## 如何找到 di
 
-启动时按以下顺序解析 `di` 可执行文件路径：
+`src/rpc/backend-launcher.ts` 的 `buildBackendLauncher` 按以下顺序选择启动器：
 
 1. 环境变量 `DI_BIN`（显式指定，优先级最高）
-2. PATH 上的 `di`（win32 上会尝试 `di`、`di.exe`、`di.cmd`、`di.bat`）
-3. `~/.di/bin/di.exe`（win32；其他平台为 `~/.di/bin/di`）
+2. 工作区的 `packages/coding-agent/dist/cli/main.js`
+3. 安装在同级 `node_modules` 下的 `@di/coding-agent/dist/cli/main.js`
 
 示例：
 
 ```bash
-DI_BIN="C:\path\to\di.exe" npm start
+DI_BIN="/path/to/rpc-backend" npm start -w di-tui
 ```
 
-若都找不到，启动会报错并退出码 1。若找到的 `di` 是旧版本（不支持 `--mode rpc`），后端进程会在
-握手前退出，TUI 会打印清晰的错误说明——需要先升级到支持 RPC 的版本。
+TypeScript 入口通过当前 Node 可执行文件启动；显式 `DI_BIN` 会直接接收 `--mode rpc` 参数。
+若没有可用入口，启动报错并返回退出码 1。
 
 ## 使用
 
@@ -64,7 +63,4 @@ src/
 test/                 # node --test 单元 / 集成测试（不依赖终端）
 ```
 
-## 里程碑状态
-
-M1（本目录）：C# RPC 后端 + TS TUI MVP（inline 聊天：流式文本、工具行、提示输入、Ctrl+C 中断）。
-M2+ 计划见 `docs/tui.md` §5（全屏视口、工具折叠、Markdown 主题等）。
+验证事实及尚未完成的发布门槛见 [`docs/typescript-validation.md`](../docs/typescript-validation.md)。

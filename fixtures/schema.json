@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://di.local/fixtures/schema.json",
   "title": "Di TypeScript Core cross-language fixture",
-  "description": "Shared input/expected contract between the C# baseline (09f4e08) and the TypeScript core. Expected values are derived from the baseline tests or leaf docs, never from generated TS output. The authoritative human-readable documentation is fixtures/README.md.",
+  "description": "Input and expected output contract for TypeScript agent tests. See fixtures/README.md.",
   "type": "object",
   "required": ["id", "scenario", "description", "input", "expected"],
   "properties": {
@@ -13,7 +13,6 @@
     "source": {
       "type": "object",
       "properties": {
-        "baseline": { "type": "string" },
         "tests": { "type": "array", "items": { "type": "string" } },
         "docs": { "type": "string" }
       }

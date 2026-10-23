@@ -3,9 +3,8 @@ import type { UsageCost } from "@di/ai";
 import type { TextWriter } from "../cli/io.ts";
 import { EventConsumer } from "../core/events/event-bus.ts";
 
-/**
- * Renders AgentLoopEvents and AgentResult into terminal text (the C#
- * `Di.Cli/EventRenderer.cs` counterpart at baseline 09f4e08): TextDelta appends
+/*
+ * Renders AgentLoopEvents and AgentResult into terminal text (the * counterpart ): TextDelta appends
  * in real time (streaming), other events each become a line; RenderResult prints
  * the meta footnote and, for non-streamed answers (final_output_tool /
  * max_iterations), the final text so a capped run is never silent. ReasoningDelta
@@ -13,7 +12,7 @@ import { EventConsumer } from "../core/events/event-bus.ts";
  * redirect, keeping captured output clean).
  */
 
-/** One turn's accumulated cost in USD (C# `UsageCost.Total`). */
+/** One turn's accumulated cost in USD (`UsageCost.Total`). */
 export function usageCostTotal(cost: UsageCost): number {
   return cost.input + cost.output + cost.cacheRead + cost.cacheWrite;
 }
@@ -34,7 +33,7 @@ export async function renderAll(consumer: EventConsumer, renderer: EventRenderer
   }
 }
 
-/** Drain whatever the render task did not consume (C# `Drain`). */
+/** Drain whatever the render task did not consume. */
 export function drainEvents(consumer: EventConsumer, renderer: EventRenderer): void {
   let event = consumer.tryRead();
   while (event !== null) {

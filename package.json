@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Di TypeScript Core migration workspace (root)",
+  "description": "Di TypeScript workspace (root)",
   "engines": {
     "node": ">=22.19"
   },

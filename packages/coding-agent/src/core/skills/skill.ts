@@ -1,8 +1,8 @@
-/**
+/*
  * Skill model and SKILL.md format error.
  *
- * Mirrors `Core/Skills/Skill.cs` and the format errors of
- * `Core/Skills/SkillMarkdown.cs` at baseline 09f4e08. Fields align with the
+ * and the format errors of
+ *. Fields align with the
  * Microsoft Agent Framework SKILL.md spec (learn.microsoft.com/agent-framework/
  * agents/skills).
  */
@@ -35,6 +35,6 @@ export interface Skill {
   readonly allowedTools: readonly string[];
   /** disable-model-invocation：true 时该 skill 不进广告/自动匹配，只接受显式调用。 */
   readonly disableModelInvocation: boolean;
-  /** skill 所在目录（SKILL.md 父目录 / 扁平 .md 文件所在目录）。由仓库加载填充。 */
+  /** skill 所在目录（SKILL.md 父目录 / 扁平.md 文件所在目录）。由仓库加载填充。 */
   readonly directory: string;
 }

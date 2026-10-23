@@ -9,8 +9,7 @@ import type {
 import { AssemblerError, ProviderStreamAssembler } from "@di/ai";
 
 /**
- * P3 card 1 red list — ProviderChunk → ModelEvent assembler (Di baseline
- * `Core/Llm/ChatAssembler.cs` + `Core/Llm/ChatModelClient.cs`, TS contract in
+ *
  * architecture.md §"AI Provider 流与模型事件分层" and models-and-auth.md):
  * chunk splitting/merging, multi-byte splits, tool-call argument fragmentation,
  * missing terminal, invalid sequencing.
@@ -228,7 +227,7 @@ test("fills in tool-call id and name when they arrive on later deltas", () => {
   ]);
 });
 
-test("applies C# defaults for tool calls missing id, name, and arguments", () => {
+test("applies default values for tool calls missing id, name, and arguments", () => {
   const events = run([
     { type: "blockStart", index: 0, block: { type: "tool-call" } },
     { type: "toolCallDelta", index: 0, name: "only_name", argumentsDelta: "" },
@@ -404,7 +403,7 @@ test("carries model id, timestamp, and monotonic duration on the completed respo
   assert.equal(completed.timestamp, 1_700_000_000_123);
   assert.ok(typeof completed.durationMs === "number");
   assert.ok(completed.durationMs >= 0);
-  // cost computation is a later P3 card; it must not be fabricated here.
+
   assert.equal(completed.cost, undefined);
 });
 

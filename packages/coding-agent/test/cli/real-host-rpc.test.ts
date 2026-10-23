@@ -23,7 +23,7 @@ import {
 import { inputLines, makeArgs, outputLines } from "../modes/test-host.ts";
 
 /**
- * P7b-2 card — RPC protocol integration tests against the REAL composition-root
+ *
  * backend (`createCliHost`: AgentSession + real tools + real SessionStore + DiLog
  * + ModelSelection), mirroring the fake-Runner protocol suite
  * (test/modes/rpc-mode.test.ts). "Same RPC scenarios, same observed behavior on

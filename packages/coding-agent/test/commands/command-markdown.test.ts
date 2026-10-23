@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { CommandFormatException, parseCommandMarkdown } from "@di/coding-agent";
 
 /**
- * P6.3a card — user-command Markdown (port of C# `CommandMarkdownTests.cs`):
+ *
  * `~/.di/commands/<name>.md` frontmatter strictness mirrors `SkillMarkdownTests`
  * (required field / duplicate field / unknown field / BOM-CRLF).
  */

@@ -2,26 +2,26 @@ import { readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { Dirent } from "node:fs";
 
-/**
+/*
  * Recursive file enumeration shared by the search tools (glob, later grep).
  *
- * Ported from `Core/Tools/ToolHelpers.EnumerateFiles` at 09f4e08:
+ * Ported from:
  * - directories named like build outputs / dependencies / VCS / caches are
- *   skipped by name (case-insensitive), so a scan of a huge home directory
- *   cannot crawl AppData/Temp/caches forever (2026-10-15 incident regression)
+ * skipped by name (case-insensitive), so a scan of a huge home directory
+ * cannot crawl AppData/Temp/caches forever (2026-10-15 incident regression)
  * - unreadable subdirectories are skipped, never failing the whole walk
  * - symlink/junction subdirectories are not descended into (their cycles would
- *   hang a naive walk); the search root itself may be a symlink and is still
- *   traversed
+ * hang a naive walk); the search root itself may be a symlink and is still
+ * traversed
  * - only files are yielded, never directories
  *
  * The walk is truly async and cancellable: each directory read is an awaited
  * async fs call and `signal` is checked at every boundary, so an abort lands
- * while the scan is running (execution-plan P4 gate: a synchronous scan wrapped
+ * while the scan is running (execution-plan gate: a synchronous scan wrapped
  * in a Promise is NOT acceptable).
  */
 
-/** Directory names excluded by `isExcludedDirectoryName` (C# ExcludedDirectoryNames). */
+/** Directory names excluded by `isExcludedDirectoryName` (ExcludedDirectoryNames). */
 const EXCLUDED_DIRECTORY_NAMES = new Set([
   "obj",
   "bin",
@@ -41,15 +41,15 @@ const EXCLUDED_DIRECTORY_NAMES = new Set([
   ".cache",
 ]);
 
-/**
+/*
  * Case-insensitive check by directory name. Lowercasing is used (not
- * locale-aware uppercasing), mirroring C# `StringComparer.OrdinalIgnoreCase`.
+ * locale-aware uppercasing), mirroring `StringComparer.OrdinalIgnoreCase`.
  */
 export function isExcludedDirectoryName(name: string): boolean {
   return EXCLUDED_DIRECTORY_NAMES.has(name.toLowerCase());
 }
 
-/**
+/*
  * Yield the absolute path of every file under `root`, depth-first.
  * `signal` aborts the walk by throwing AbortError at the next boundary.
  */
@@ -74,7 +74,7 @@ export async function* enumerateFiles(root: string, signal?: AbortSignal): Async
       } else if (entry.isFile()) {
         yield child;
       } else if (entry.isSymbolicLink()) {
-        // C# GetFiles includes symlink-to-file entries; symlink/junction
+        // GetFiles includes symlink-to-file entries; symlink/junction
         // directories are NOT descended into. Broken links are skipped.
         if (await isSymlinkToFile(child)) yield child;
       }
@@ -86,7 +86,7 @@ export async function* enumerateFiles(root: string, signal?: AbortSignal): Async
   }
 }
 
-/** Follow a symlink: true when it resolves to a regular file (C# GetFiles). */
+/** Follow a symlink: true when it resolves to a regular file (GetFiles). */
 async function isSymlinkToFile(path: string): Promise<boolean> {
   try {
     const target = await stat(path); // follows the link

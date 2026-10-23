@@ -12,7 +12,7 @@ import type { RetryPolicyOptions } from "./policy.ts";
 /** A retry wait honoring the caller's AbortSignal (inject for deterministic tests). */
 export type RetrySleep = (ms: number, signal?: AbortSignal) => Promise<void>;
 
-/**
+/*
  * Default wait: a plain timer raced against the AbortSignal. When the signal
  * fires mid-wait the wait rejects with an `"aborted"` {@link SseStreamError} and
  * the timer is cleared (it never outlives the wait).
@@ -37,9 +37,9 @@ export const defaultRetrySleep: RetrySleep = async (ms, signal) => {
   });
 };
 
-/**
+/*
  * {@link ChatModel} decorator applying a bounded retry policy to one model call
- * (Di baseline `Core/Llm/RetryingChatModel.cs`, boundary fixed per
+ * (, boundary fixed per
  * models-and-auth.md §重试边界).
  *
  * Retrying happens entirely in the transport: the agent loop never sees a retry,
@@ -51,15 +51,15 @@ export const defaultRetrySleep: RetrySleep = async (ms, signal) => {
  *
  * Rules:
  * - retryable failures are HTTP 408/429/5xx, `RATE_LIMITED`, `TIMEOUT` /
- *   `CONNECTION` failure codes, and {@link SseStreamError} codes `"connection"`
- *   / `"timeout"` (SSE idle timeout);
+ * `CONNECTION` failure codes, and {@link SseStreamError} codes `"connection"`
+ * / `"timeout"` (SSE idle timeout);
  * - the wait is the provider's Retry-After (`failure.providerRetryAfterMs`) when
- *   present, else exponential backoff — both capped at `maxBackoffMs`, with
- *   ±`jitterRatio` jitter;
+ * present, else exponential backoff — both capped at `maxBackoffMs`, with
+ * ±`jitterRatio` jitter;
  * - caller cancellation (AbortSignal) never retries; an abort during the wait
- *   propagates as an `"aborted"` error;
+ * propagates as an `"aborted"` error;
  * - once any `ModelEvent` has been yielded downstream, a later stream failure is
- *   rethrown untouched (no re-enumeration, no replayed prefix).
+ * rethrown untouched (no re-enumeration, no replayed prefix).
  */
 export class RetryingChatModel implements ChatModel {
   private readonly inner: ChatModel;

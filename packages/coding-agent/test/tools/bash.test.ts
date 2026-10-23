@@ -8,9 +8,7 @@ import { join } from "node:path";
 import { createBashTool, createToolExecutor, OUTPUT_MAX_BYTES } from "@di/coding-agent";
 
 /**
- * P4.5 card — one-shot `createBashTool`, the platform-default-shell execution
- * tool. Ports the one-shot subset of `Di.Tests/Tools/BashToolTests.cs` at
- * baseline 09f4e08 (all WithSession cases belong to the future ShellSession
+ *
  * card and are intentionally absent): output capture, exit codes, stderr merge,
  * timeout termination (default + per-call override), working directory, bad
  * shell, argument/JSON errors and long-output truncation — plus the pessimistic
@@ -136,14 +134,14 @@ test("⑪ nonexistent working directory returns an error", async () => {
   assert.ok(obs.text.includes("目录不存在"), obs.text);
 });
 
-test("⑪b blank working_dir falls back to the base directory (C# TryGetOptionalString)", async () => {
+test("⑪b blank working_dir falls back to the base directory", async () => {
   const obs = await run("echo blank-ok", { workingDir: "   " });
   assert.ok(obs.text.startsWith("exit: 0"), obs.text);
   assert.ok(obs.text.includes("blank-ok"), obs.text);
   assert.ok(!obs.text.includes("目录不存在"), obs.text);
 });
 
-test("⑪c working_dir pointing at a file is 目录不存在 (C# Directory.Exists)", async () => {
+test("⑪c working_dir pointing at a file is 目录不存在", async () => {
   writeFileSync(join(base, "afile.txt"), "x");
   const obs = await run("echo x", { workingDir: "afile.txt" });
   assert.ok(obs.text.startsWith("error:"), obs.text);
