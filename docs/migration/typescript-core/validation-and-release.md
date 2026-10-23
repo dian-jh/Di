@@ -111,19 +111,19 @@ dotnet run --project <temp-harness>/Reference.csproj -- read <ts-writer-session.
 
 平台检查点：Windows 验证 CRLF 输入仍只按 LF JSONL framing、输出严格 UTF-8/no BOM、路径有空格/反斜线、子进程被强制终止后句柄释放；macOS/Linux 验证 chmod/executable packaging、shell 子进程退出、临时目录权限。session JSON 字段与换行应平台一致，cwd/path 是显式值不做 golden 固定。
 
-## 安装、切换、用户数据与回退
+## 安装与命令切换
 
-迁移完成前保持 C# 旧分支/旧命令可运行。新包先使用架构文档确定的迁移命令 `di-ts`，不覆盖系统已有 `di`。旧、新实现测试用不同临时 `DI_HOME`；安装/升级脚本不能移动、删除、重写 `~/.di/config.json`、旧 session、skills、commands 或凭据。任何会覆盖现有配置的操作都不得作为自动 gate。
+C# 源码分支继续保留作为行为参考。新包提供 `di-ts`；用户显式选择 TypeScript 为本机默认命令时，可运行 `install.ps1 -UseAsDefault -RemoveCSharp`。该操作是针对指定 DI_HOME 的本机命令迁移，不表示跨平台发布门槛已经通过。旧、新实现测试用不同临时 `DI_HOME`；安装/升级脚本不能移动、删除、重写 `~/.di/config.json`、旧 session、skills、commands 或凭据。
 
 发布验收应留下可审阅证据：安装/卸载、默认/项目配置优先级、C# 与 TS 已知 session 子集双向 fixture、RPC/TUI 启动与持续交互、`--resume` 各模式组合、clear、ContextLimit、错误信息、SIGINT/进程结束与日志写入边界。provider 联网 smoke 不进 PR CI；如发布范围需要真实 provider 验证，使用隔离环境/账户、临时 `DI_HOME` 和受控 secrets，不复用或暴露个人/生产凭据。发布动作仍按用户已授权的范围执行；本文不新增额外批准流程。
 
 建议迁移分支/工作区与基线分开：`migration/typescript-core` worktree 是可变的实现现场，只用于当前工作；review 基线始终用 pinned SHA 的 `git show` 或独立只读 worktree。切换失败时保留新 session 数据，启动旧 C# branch/worktree 继续工作；不要尝试用旧二进制恢复新 schema，除非双向测试明确证明该具体记录子集兼容。若转换工具后续出现，应先写新文件、完整校验并保留源文件，禁止原地覆写。
 
-发布关卡采用逐步升级：先 CI 通过和本地隔离验收；再以新命令并行试用；完成 session/配置兼容和回退证据后再切换默认入口。`install.ps1` 当前安装并行命令 `di-ts`，保留既有 C# `di`；CI 不自动安装到用户目录或切换默认入口。
+发布关卡仍要求 CI、隔离验收、兼容证据和受支持平台验证；其状态见迁移进度记录。用户显式选择本机默认命令时，无须等待这些发布关卡，也不代表它们已完成。CI 不会自动安装到用户目录或更改默认入口。
 
-`install.ps1` 使用当前平台的 npm，POSIX 需 `pwsh`，会为 `di-ts` 设置执行权限、实际运行该 shim 的 `--info`，并打印 PATH 指令而不修改 shell profile。smoke 的临时 `DI_HOME` 和 API 环境变量结束后恢复原值。`packages/coding-agent/test/cli/install-runtime.test.ts` 验证安装的私有运行时、原生依赖和既有用户文件字节保留。
+`install.ps1` 使用当前平台的 npm，POSIX 需 `pwsh`，会为 `di-ts` 和默认 `di` 设置执行权限、实际运行 TS shim 的 `--info`，并打印 PATH 指令而不修改 shell profile。只有 `-UseAsDefault` 才会令 `di` 指向 TS；Windows 有 `di.exe` 时必须同时指定 `-RemoveCSharp`，且 `di.com`、`di.bat` 或 `di.ps1` 会阻止切换。`-RemoveCSharp` 必须与 `-UseAsDefault` 一起使用，并在 TS smoke 成功后仅移除 Windows `bin/di.exe`、`bin/di`、`bin/di.exe.bak-*`、`bin/di-csharp.exe`，或 POSIX `bin/di-csharp`；POSIX 原 `bin/di` 由 TS shim 替换。不会通配删除其他 exe，也不会清理 TS runtime 或用户数据。若存在旧 `.di-cli-selection.json`，只在清理操作成功时移除，避免留下无效回退声明。smoke 的临时 `DI_HOME` 和 API 环境变量结束后恢复原值。`packages/coding-agent/test/cli/install-runtime.test.ts` 验证私有运行时、默认 TS 入口、C# 启动器清理幂等性、无关 exe 和既有用户数据保留。
 
-已并行安装 TS 和旧 C# 启动器时，可显式使用 `tools/select-cli.ps1 -Runtime typescript|csharp -DiHome <目录>` 验证切换。工具仅管理显式目录的 `bin`，将原 C# 启动器保留在同目录的 `di-csharp.exe` / `di-csharp`，以 `.di-cli-selection.json` 的 SHA256 检查拥有的 shim 和备份；回退恢复原始文件并保留 `di-ts`。备份冲突、优先级启动器冲突、内容变动或未归属 shim 均拒绝覆盖。此工具不替代发布门槛，也不处理 shell 函数/alias 或其他 PATH 目录中的同名命令。隔离测试见 `packages/coding-agent/test/cli/select-cli.test.ts`；现有 Windows 单文件 C# 发行物已做复制、改名运行、TS 调用及恢复后的真实进程演练，其他 apphost 布局需独立验证。
+`tools/select-cli.ps1` 仅用于未执行清理的旧并行安装，可在旧 C# 备份仍存在时切换/回退。执行 `-UseAsDefault -RemoveCSharp` 会删除其 `.di-cli-selection.json` 状态和工具管理的 C# 备份，之后 selector 无法回退；恢复旧 C# 命令需重新部署发行包。该操作只影响显式 `DI_HOME/bin` 中列明的旧启动文件，不处理 shell 函数/alias 或 PATH 其他位置的同名命令。原隔离切换测试仍见 `packages/coding-agent/test/cli/select-cli.test.ts`。
 
 ## 文档与实现交付条件
 

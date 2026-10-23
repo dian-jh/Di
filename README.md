@@ -1,6 +1,6 @@
 # Di
 
-Di 是本地编程助手，后续开发以 TypeScript 为主线，CLI 命令为 `di-ts`。C# 分支保留作为行为参考和回退；迁移发布门槛完成前，`di-ts` 与既有 C# 命令 `di` 并行安装。
+Di 是本地编程助手，TypeScript CLI 是当前全局 `di` 命令的目标实现。C# 源码分支保留作为行为参考；默认安装仍可并行保留旧启动器，显式迁移时可将 `di` 切到 TypeScript 并清除受管理的 C# 发布启动器。
 
 ## Install the TypeScript CLI
 
@@ -17,7 +17,7 @@ pwsh -NoProfile -File ./install.ps1
 export PATH="$HOME/.di/bin:$PATH"
 ```
 
-安装脚本会构建 TypeScript workspace，将私有运行时安装到 `~/.di/ts-cli`，并在 `~/.di/bin` 创建 `di-ts` 启动器。它会保留已有的 `~/.di/bin/di` 或 `di.exe`，不会迁移或改写配置、会话、skills、commands 或凭据。Windows 默认将 `~/.di/bin` 加入用户 PATH，之后请打开新终端；使用 `-SkipPathUpdate` 可保持 PATH 不变。POSIX 设置启动器执行权限并打印 PATH 指令，不改写 shell profile。
+安装脚本会构建 TypeScript workspace，将私有运行时安装到 `~/.di/ts-cli`，并在 `~/.di/bin` 创建 `di-ts` 启动器。显式迁移命令 `-UseAsDefault -RemoveCSharp` 会在 TS `--info` smoke 成功后令全局 `di` 启动 TypeScript，并删除 `bin` 下的旧 C# 启动包；它不会修改配置、会话、skills、commands、凭据或无关 bin 文件。Windows 默认将 `~/.di/bin` 加入用户 PATH，之后请打开新终端；使用 `-SkipPathUpdate` 可保持 PATH 不变。POSIX 设置启动器执行权限并打印 PATH 指令，不改写 shell profile。
 
 只构建而不安装：
 
@@ -27,9 +27,17 @@ npm run build
 node .\packages\coding-agent\dist\cli\main.js --info
 ```
 
-使用 `di-ts` 启动 TypeScript CLI。迁移发布门槛完成前，普通 `di` 命令仍指向现有 C# CLI。
+使用 `di-ts` 启动 TypeScript CLI；显式迁移后，`di` 与 `di-ts` 都启动 TypeScript CLI。
 
-已有 C# `di` 且 TS 已并行安装时，显式入口切换和回退工具为 `tools/select-cli.ps1 -Runtime typescript|csharp -DiHome <目录>`。它保留原启动器并校验备份；正式切换前请核对[发布验收状态](docs/migration/typescript-core/progress.md)。安装脚本不会自动选择默认实现，详细行为见[安装与回退](docs/migration/typescript-core/validation-and-release.md#安装切换用户数据与回退)。
+在 Windows PowerShell 中显式安装为默认命令并清理旧 C# 启动器：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -UseAsDefault -RemoveCSharp
+```
+
+POSIX 使用 `pwsh -NoProfile -File ./install.ps1 -UseAsDefault -RemoveCSharp`。
+
+此命令只处理 `~/.di/bin` 中的已知旧 C# 启动器：Windows 的 `di.exe`、`di`、`di.exe.bak-*`、`di-csharp.exe`，或 POSIX 的 `di-csharp`（POSIX `di` 会被替换为 TS shim）；不会移除仓库 C# 源码或无关 exe。该显式清理会删除旧 selector 状态，因此之后不能用 selector 回退，需重新部署 C# 发行包。详见[安装与命令切换](docs/migration/typescript-core/validation-and-release.md#安装与命令切换)。
 
 ## Use
 

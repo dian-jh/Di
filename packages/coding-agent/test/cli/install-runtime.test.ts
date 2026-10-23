@@ -116,3 +116,64 @@ test("isolated install copies runtime dependencies, launches di-ts, and preserve
   );
 
 });
+
+test("explicit default install removes only managed C# launchers and keeps user data across repeats", (t) => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "di-install-default-"));
+  const diHome = join(tempRoot, "di-home");
+  const bin = join(diHome, "bin");
+  mkdirSync(bin, { recursive: true });
+  const csharpNames = process.platform === "win32"
+    ? ["di.exe", "di", "di.exe.bak-20261016-124909", "di.exe.bak-20261019-103922", "di-csharp.exe"]
+    : ["di", "di-csharp"];
+  for (const name of csharpNames) writeFileSync(join(bin, name), `C# package ${name}`);
+  writeFileSync(join(bin, ".di-cli-selection.json"), '{"version":1,"runtime":"typescript"}');
+  const unrelatedExe = join(bin, "other-tool.exe");
+  writeFileSync(unrelatedExe, "unrelated executable");
+  const sentinels = [
+    [join(diHome, "config.json"), "{\"keep\":true}"],
+    [join(diHome, "sessions", "session.jsonl"), "session sentinel"],
+    [join(diHome, "auth", "credentials.json"), "auth sentinel"],
+  ] as const;
+  for (const [file, contents] of sentinels) {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, contents);
+  }
+  t.after(() => {
+    assert.equal(dirname(resolve(tempRoot)), resolve(tmpdir()), "cleanup target must be the unique fixture directory");
+    rmSync(resolve(tempRoot), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  });
+  const shell = process.env.DI_TEST_POWERSHELL ?? (process.platform === "win32" ? "powershell.exe" : "pwsh");
+  const shellArgs = process.platform === "win32" && process.env.DI_TEST_POWERSHELL === undefined
+    ? ["-NoProfile", "-ExecutionPolicy", "Bypass"] : ["-NoProfile"];
+  const args = [...shellArgs, "-File", installer, "-DiHome", diHome, "-SkipBuild", "-UseAsDefault", "-RemoveCSharp", ...(process.platform === "win32" ? ["-SkipPathUpdate"] : [])];
+  for (let run = 0; run < 2; run++) {
+    const install = spawnSync(shell, args, { cwd: repoRoot, encoding: "utf8", windowsHide: true, timeout: 120_000 });
+    assert.equal(install.error, undefined, `installer could not start: ${install.error?.message ?? ""}`);
+    assert.equal(install.status, 0, `default install run ${run + 1} failed\n${install.stdout}\n${install.stderr}`);
+    for (const name of csharpNames) {
+      if (process.platform !== "win32" && name === "di") {
+        assert.equal(existsSync(join(bin, name)), true, "POSIX di must now be the TypeScript shim");
+      } else {
+        assert.equal(existsSync(join(bin, name)), false, `managed C# launcher ${name} must be removed`);
+      }
+    }
+    assert.deepEqual(readFileSync(unrelatedExe, "utf8"), "unrelated executable", "other executables must remain untouched");
+    for (const [file, contents] of sentinels) assert.deepEqual(readFileSync(file, "utf8"), contents, `${file} must remain unchanged`);
+    assert.equal(existsSync(join(bin, ".di-cli-selection.json")), false, "the default installation must not claim a rollback state");
+  }
+  const launcher = join(bin, process.platform === "win32" ? "di.cmd" : "di");
+  const cli = spawnSync(process.platform === "win32" ? shell : launcher,
+    process.platform === "win32" ? [...shellArgs, "-Command", `& '${launcher.replaceAll("'", "''")}' --info`] : ["--info"],
+    { cwd: tempRoot, encoding: "utf8", windowsHide: true, timeout: 30_000, env: { ...process.env, DI_HOME: diHome, DEEPSEEK_API_KEY: "" } });
+  assert.equal(cli.error, undefined, `global di shim could not start: ${cli.error?.message ?? ""}`);
+  assert.equal(cli.status, 0, `global di --info must run the installed TS CLI\n${cli.stdout}\n${cli.stderr}`);
+  assert.match(cli.stdout, /TypeScript|Node|@di\/coding-agent/i, "--info output must identify the TS CLI");
+
+  const freshHome = join(tempRoot, "fresh-di-home");
+  const fresh = spawnSync(shell, [...shellArgs, "-File", installer, "-DiHome", freshHome, "-SkipBuild", "-UseAsDefault", "-RemoveCSharp", ...(process.platform === "win32" ? ["-SkipPathUpdate"] : [])], {
+    cwd: repoRoot, encoding: "utf8", windowsHide: true, timeout: 120_000,
+  });
+  assert.equal(fresh.error, undefined, `fresh installer could not start: ${fresh.error?.message ?? ""}`);
+  assert.equal(fresh.status, 0, `fresh default install without C# package failed\n${fresh.stdout}\n${fresh.stderr}`);
+  assert.ok(existsSync(join(freshHome, "bin", process.platform === "win32" ? "di.cmd" : "di")), "fresh install must create a TypeScript di launcher");
+});
