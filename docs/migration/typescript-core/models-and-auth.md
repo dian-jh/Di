@@ -25,7 +25,7 @@ Di 当前已有 DeepSeek 与 ChatGPT provider。迁移是协议保真重写：�
 |---|---|---|
 | `Core/Llm/ChatMessage.cs`, `ContentBlock.cs`, `ChatRole.cs`：`ChatMessage`、`IContentBlock`、`OpaqueBlock` | `packages/ai/src/types/messages.ts`, `content.ts`（未来） | 映射架构契约 `AgentMessage`/message union、`ContentBlock`；未知块无损回放，不混入 provider wire DTO |
 | `Core/Llm/StreamChunk.cs`：`StreamChunk.BlockStart/TextDelta/ReasoningDelta/ToolCallDelta/BlockEnd/ResponseInfo/Usage/Finish` | `packages/ai/src/types/stream.ts`（未来） | 迁移为 provider 内部低层 `ProviderChunk`；保留 index、原始 argument delta、可空 response id、显式终态 |
-| `Core/Llm/IChatModel.cs`：`IChatModel`, `ModelRequest`, `ModelResponse`, `ModelEvent` | `packages/ai/src/model.ts`（未来） | 采用架构契约 `ChatModel.stream(request, signal?): AsyncIterable<ModelEvent>`；共享请求/事件名以架构文档为准 |
+| `Core/Llm/IChatModel.cs`：`IChatModel`, `ModelRequest`, `ModelResponse`, `ModelEvent` | `packages/ai/src/types/model.ts`、`packages/ai/src/types/stream.ts` | `ChatModel.stream(request, signal?): AsyncIterable<ModelEvent>`；共享请求/事件由这些源文件定义 |
 | `Core/Llm/ChatAdapter.cs`, `LlmRuntime.cs`, `ILlmService.cs` | `packages/ai/src/providers/` 与 `model.ts`（未来） | 实现统一 `ChatModel` 接口及 provider registry；宿主注入认证参数 |
 | `Core/Llm/ChatModelClient.cs`, `ChatAssembler.cs` | `packages/ai/src/stream-assembler.ts`（未来） | `ProviderChunk → assembler → ModelEvent`：向上游及时发 text/reasoning/tool-call delta，最后发 `completed` 并携带完整 `ModelResponse`；低层 chunk 不暴露给 loop |
 | `Core/Llm/RetryingChatModel.cs` | `packages/ai/src/retry/`（未来） | 仅在一次模型流尚未触发任何工具执行前重试；不能重放已开始执行工具的 Agent 回合 |
@@ -218,14 +218,17 @@ Streams、`node:crypto` 和小型自有 DTO。Pi 包可作为对照源码，不�
 6. credential storage 依赖采用精确版本 `koffi@2.14.1`（MIT）：Windows 通过 `CreateFileW` +
    `LockFileEx`，POSIX 通过 Node `FileHandle.fd` + libc `flock`。Koffi 发布包包含 Windows/Linux/macOS
    预编译构建；本机 Node 24.16 / Windows x64 已验证 FFI ABI、双进程互斥、持锁进程强杀后自动释放，
-   以及双进程合成 refresh 仅消费一次轮换 token。Linux/macOS 的 `flock` 分支尚未本机验收；不据此
-   宣称这些平台已验收。运行时缺失 FFI、无法打开/取得/释放锁时均 fail closed，凭据保持不变。
+   以及双进程合成 refresh 仅消费一次轮换 token。Linux/macOS 的 `flock` 分支也已通过三平台 CI 的真实
+   子进程互斥、持锁进程终止与合成 refresh 测试；真实账户 smoke 的平台范围见 `progress.md`。
+   运行时缺失 FFI、无法打开/取得/释放锁时均 fail closed，凭据保持不变。
    不得用 mkdir/lockfile TTL、PID-only 判断、内存 mutex 或只记录 ACL warning 的实现替代。
-   DeepSeek 的 Windows `UseSystemProxy` 使用固定版本 `undici@7.25.0`（MIT，Node >=20.18.1），
+   DeepSeek 的 Windows `UseSystemProxy` 使用固定版本 `undici@7.30.1`（MIT，Node >=20.18.1），
    通过 `ProxyAgent` 路由当前用户静态 HTTP/HTTPS 代理；本机 Node 24.16 loopback 已验证 CONNECT、
    成功响应、代理错误和取消。Internet Settings 与 `Connections\\DefaultConnectionSettings` flags
    由只读 `reg.exe query` 读取；PAC/WPAD 经 Windows PowerShell 的系统代理解析器处理，支持取消及 15 秒超时，未知 flags/解析错误 fail closed；真实 PAC/WPAD 网络环境尚待验收。WinHTTP Koffi 输出指针
-   探针在本机曾异常退出，生产路径不使用该未验证 FFI。
+   探针在本机曾异常退出，生产路径不使用该未验证 FFI。POSIX 环境代理支持 HTTP/HTTPS/SOCKS5，
+   ChatGPT 与显式启用系统代理的 DeepSeek 共用路由器；支持边界及环境变量规则见
+   [`DeepSeek 模块文档`](../../modules/deepseek.md#usesystemproxy-in-the-typescript-host)。
 7. 最后才接 `@di/coding-agent`。停止条件：任一 provider fixture、跨进程竞争、权限拒绝、retry 安全门失败，
    不得标记模型/auth 阶段完成。
 
