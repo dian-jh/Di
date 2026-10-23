@@ -37,15 +37,64 @@ $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $TargetBin = Join-Path $DiHome "bin"
 $TsHome = Join-Path $DiHome "ts-cli"
 $TsNodeModules = Join-Path $TsHome "node_modules"
+$InstallId = [guid]::NewGuid().ToString("N")
+$StageHome = "$TsHome.stage-$InstallId"
+$BackupHome = "$TsHome.backup-$InstallId"
+$PreviousHome = Join-Path $DiHome "ts-cli.previous"
 $PlatformIsWindows = $env:OS -eq "Windows_NT"
+$DefaultShimName = if ($PlatformIsWindows) { "di.cmd" } else { "di" }
+$TsShimName = if ($PlatformIsWindows) { "di-ts.cmd" } else { "di-ts" }
+$DefaultShim = Join-Path $TargetBin $DefaultShimName
+$TsShim = Join-Path $TargetBin $TsShimName
 $CliEntry = Join-Path (Join-Path (Join-Path (Join-Path (Join-Path $RepoRoot "packages") "coding-agent") "dist") "cli") "main.js"
 $InstalledEntry = Join-Path (Join-Path (Join-Path (Join-Path (Join-Path $TsNodeModules "@di") "coding-agent") "dist") "cli") "main.js"
+$PreviousEntry = Join-Path (Join-Path (Join-Path (Join-Path (Join-Path (Join-Path $PreviousHome "node_modules") "@di") "coding-agent") "dist") "cli") "main.js"
+
+New-Item -ItemType Directory -Force -Path $DiHome | Out-Null
+$InstallLockPath = Join-Path $DiHome ".di-install.lock"
+try {
+    $InstallLock = [System.IO.File]::Open($InstallLockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+}
+catch {
+    throw "Another installation is using $DiHome (lock: $InstallLockPath): $($_.Exception.Message)"
+}
+
+try {
+
+function Move-PathToAbsentDestination($source, $destination, [switch]$Force) {
+    if (Test-Path -LiteralPath $destination) {
+        throw "Refusing to move $source because destination already exists: $destination"
+    }
+    if ($Force) { Move-Item -LiteralPath $source -Destination $destination -Force }
+    else { Move-Item -LiteralPath $source -Destination $destination }
+}
 
 if ($PlatformIsWindows) {
     $shadowingExe = Join-Path $TargetBin "di.exe"
     if (Test-Path -LiteralPath $shadowingExe -PathType Leaf) {
         throw "Existing executable blocks the default di launcher: $shadowingExe. Remove or rename it before installing."
     }
+}
+
+function Test-ManagedShim($path) {
+    if (-not (Test-Path -LiteralPath $path)) { return $true }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    $content = [IO.File]::ReadAllText($path)
+    if ($path -eq $DefaultShim) {
+        if ($PlatformIsWindows) { return ($content -match 'di-ts\.cmd') }
+        return ($content -match '\$DIR/di-ts')
+    }
+    if ($PlatformIsWindows) { return ($content -match 'ts-cli\\node_modules\\@di\\coding-agent') }
+    return ($content -match 'ts-cli/node_modules/@di/coding-agent')
+}
+
+foreach ($shimPath in @($DefaultShim, $TsShim)) {
+    if (-not (Test-ManagedShim $shimPath)) {
+        throw "Refusing to overwrite an unmanaged launcher: $shimPath"
+    }
+}
+if ((Test-Path -LiteralPath $PreviousHome) -and -not (Test-Path -LiteralPath $PreviousEntry -PathType Leaf)) {
+    throw "Refusing to replace an unmanaged previous runtime: $PreviousHome"
 }
 
 $writtenFiles = New-Object System.Collections.Generic.List[string]
@@ -60,6 +109,20 @@ function Copy-Tree($src, $dst) {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
     Copy-Item -Force -Recurse $src $dst
     $writtenFiles.Add($dst)
+}
+
+function Copy-PackageRuntime($src, $dst) {
+    if (-not (Test-Path -LiteralPath (Join-Path $src "package.json") -PathType Leaf)) {
+        throw "Runtime package metadata missing: $(Join-Path $src 'package.json')"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $src "dist") -PathType Container)) {
+        throw "Runtime package dist missing: $(Join-Path $src 'dist')"
+    }
+    New-Item -ItemType Directory -Force -Path $dst | Out-Null
+    Copy-Item -LiteralPath (Join-Path $src "package.json") -Destination (Join-Path $dst "package.json") -Force
+    Copy-Item -LiteralPath (Join-Path $src "dist") -Destination (Join-Path $dst "dist") -Recurse -Force
+    $writtenFiles.Add((Join-Path $dst "package.json"))
+    $writtenFiles.Add((Join-Path $dst "dist"))
 }
 
 Write-Host "=== di TypeScript installer ==="
@@ -94,128 +157,205 @@ else {
     }
 }
 
-# --------------------------------------------------- 2/5 install TS runtime
-Write-Host "[2/5] Installing TS CLI runtime to $TsHome (recreated on reinstall)..."
-if (Test-Path $TsHome) { Remove-Item -Recurse -Force $TsHome }
-New-Item -ItemType Directory -Force -Path $TsHome | Out-Null
-Copy-Tree (Join-Path (Join-Path $RepoRoot "packages") "coding-agent") (Join-Path (Join-Path $TsNodeModules "@di") "coding-agent")
-Copy-Tree (Join-Path (Join-Path $RepoRoot "packages") "ai") (Join-Path (Join-Path $TsNodeModules "@di") "ai")
-Copy-Tree (Join-Path (Join-Path $RepoRoot "packages") "agent") (Join-Path (Join-Path $TsNodeModules "@di") "agent")
-Copy-Tree (Join-Path $RepoRoot "tui") (Join-Path $TsNodeModules "di-tui")
-# Third-party runtime deps (all leaf packages at the repo root node_modules):
-Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "jsonc-parser") (Join-Path $TsNodeModules "jsonc-parser")
-Copy-Tree (Join-Path (Join-Path (Join-Path $RepoRoot "node_modules") "@earendil-works") "pi-tui") (Join-Path (Join-Path $TsNodeModules "@earendil-works") "pi-tui")
-Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "marked") (Join-Path $TsNodeModules "marked")
-Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "get-east-asian-width") (Join-Path $TsNodeModules "get-east-asian-width")
-Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "iconv-lite") (Join-Path $TsNodeModules "iconv-lite")
-Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "safer-buffer") (Join-Path $TsNodeModules "safer-buffer")
-Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "koffi") (Join-Path $TsNodeModules "koffi")
-Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "undici") (Join-Path $TsNodeModules "undici")
-if (-not (Test-Path $InstalledEntry)) {
-    throw "installed CLI entry missing after copy: $InstalledEntry"
+# --------------------------------------------------- 2/5 stage TS runtime
+Write-Host "[2/5] Staging TS CLI runtime at $StageHome ..."
+$stageNodeModules = Join-Path $StageHome "node_modules"
+$stageEntry = Join-Path (Join-Path (Join-Path (Join-Path (Join-Path $stageNodeModules "@di") "coding-agent") "dist") "cli") "main.js"
+try {
+    New-Item -ItemType Directory -Force -Path $stageHome | Out-Null
+    Copy-PackageRuntime (Join-Path (Join-Path $RepoRoot "packages") "coding-agent") (Join-Path (Join-Path $stageNodeModules "@di") "coding-agent")
+    Copy-PackageRuntime (Join-Path (Join-Path $RepoRoot "packages") "ai") (Join-Path (Join-Path $stageNodeModules "@di") "ai")
+    Copy-PackageRuntime (Join-Path (Join-Path $RepoRoot "packages") "agent") (Join-Path (Join-Path $stageNodeModules "@di") "agent")
+    Copy-PackageRuntime (Join-Path $RepoRoot "tui") (Join-Path $stageNodeModules "di-tui")
+    # Third-party runtime dependencies are copied as complete packages.
+    Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "jsonc-parser") (Join-Path $stageNodeModules "jsonc-parser")
+    Copy-Tree (Join-Path (Join-Path (Join-Path $RepoRoot "node_modules") "@earendil-works") "pi-tui") (Join-Path (Join-Path $stageNodeModules "@earendil-works") "pi-tui")
+    Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "marked") (Join-Path $stageNodeModules "marked")
+    Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "get-east-asian-width") (Join-Path $stageNodeModules "get-east-asian-width")
+    Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "iconv-lite") (Join-Path $stageNodeModules "iconv-lite")
+    Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "safer-buffer") (Join-Path $stageNodeModules "safer-buffer")
+    Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "koffi") (Join-Path $stageNodeModules "koffi")
+    Copy-Tree (Join-Path (Join-Path $RepoRoot "node_modules") "undici") (Join-Path $stageNodeModules "undici")
+
+    if (-not (Test-Path -LiteralPath $stageEntry -PathType Leaf)) { throw "staged CLI entry missing: $stageEntry" }
+    Write-Host "[3/5] Smoke testing the complete staged runtime..."
+    $smokeHome = Join-Path ([System.IO.Path]::GetTempPath()) ("di-ts-install-smoke-" + [guid]::NewGuid().ToString("N"))
+    $oldDiHome = [Environment]::GetEnvironmentVariable("DI_HOME", "Process")
+    $oldDeepSeekApiKey = [Environment]::GetEnvironmentVariable("DEEPSEEK_API_KEY", "Process")
+    try {
+        $env:DI_HOME = $smokeHome
+        $env:DEEPSEEK_API_KEY = ""
+        & node $stageEntry --info
+        $smokeExit = $LASTEXITCODE
+    }
+    finally {
+        Remove-Item -Recurse -Force $smokeHome -ErrorAction SilentlyContinue
+        [Environment]::SetEnvironmentVariable("DI_HOME", $oldDiHome, "Process")
+        [Environment]::SetEnvironmentVariable("DEEPSEEK_API_KEY", $oldDeepSeekApiKey, "Process")
+    }
+    if ($smokeExit -ne 0) { throw "staged CLI --info smoke test failed (exit $smokeExit)" }
+}
+catch {
+    $stageError = $_
+    Remove-Item -LiteralPath $stageHome -Recurse -Force -ErrorAction SilentlyContinue
+    throw $stageError
 }
 
-# ----------------------------------------------------- 3/5 install launchers
-Write-Host "[3/5] Installing di-ts launchers to $TargetBin ..."
+# --------------------------------------------------- 4/5 stage launchers
+Write-Host "[4/5] Preparing launchers and PATH update..."
+$stageTsShim = "$TsShim.stage-$InstallId"
+$stageDefaultShim = "$DefaultShim.stage-$InstallId"
+$pathBefore = [Environment]::GetEnvironmentVariable("Path", "User")
+$pathAfter = $pathBefore
+try {
 New-Item -ItemType Directory -Force -Path $TargetBin | Out-Null
-
-# Windows launcher: di-ts.cmd (native .cmd shim; npm-style shims are .cmd too).
-$cmdContent = "@echo off`n" +
-"where node >nul 2>&1`n" +
-"if errorlevel 1 (`n" +
-"  echo di-ts: node not found on PATH. Install Node.js 22.19 or newer first. 1>&2`n" +
-"  exit /b 1`n" +
-")`n" +
-"node `"%~dp0..\ts-cli\node_modules\@di\coding-agent\dist\cli\main.js`" %*`n" +
-"exit /b %ERRORLEVEL%`n"
-Write-TextFile (Join-Path $TargetBin "di-ts.cmd") $cmdContent
-
-# POSIX launcher: di-ts (shim for later non-Windows runs; written now so the
-# install layout is cross-platform, but the POSIX soak is a later run).
-$shContent = "#!/bin/sh`n" +
-"DIR=`"`$(CDPATH= cd -- `"`$(dirname -- `"`$0`")`" && pwd)`"`n" +
-"exec node `"`$DIR/../ts-cli/node_modules/@di/coding-agent/dist/cli/main.js`" `"`$@`"`n"
-Write-TextFile (Join-Path $TargetBin "di-ts") $shContent
-$posixLauncher = Join-Path $TargetBin "di-ts"
+if ($PlatformIsWindows) {
+    $tsContent = "@echo off`r`nwhere node >nul 2>&1`r`nif errorlevel 1 (`r`n  echo di-ts: node not found on PATH. Install Node.js 22.19 or newer first. 1>&2`r`n  exit /b 1`r`n)`r`nnode `"%~dp0..\ts-cli\node_modules\@di\coding-agent\dist\cli\main.js`" %*`r`nexit /b %ERRORLEVEL%`r`n"
+    $defaultContent = "@echo off`r`ncall `"%~dp0di-ts.cmd`" %*`r`nexit /b %ERRORLEVEL%`r`n"
+}
+else {
+    $tsContent = "#!/bin/sh`nDIR=`"`$(CDPATH= cd -- `"`$(dirname -- `"`$0`")`" && pwd)`"`nexec node `"`$DIR/../ts-cli/node_modules/@di/coding-agent/dist/cli/main.js`" `"`$@`"`n"
+    $defaultContent = "#!/bin/sh`nDIR=`"`$(CDPATH= cd -- `"`$(dirname -- `"`$0`")`" && pwd)`"`nexec `"`$DIR/di-ts`" `"`$@`"`n"
+}
+Write-TextFile $stageTsShim $tsContent
+Write-TextFile $stageDefaultShim $defaultContent
 if (-not $PlatformIsWindows) {
-    & chmod 755 $posixLauncher
-    if ($LASTEXITCODE -ne 0) { throw "Could not mark POSIX launcher executable: $posixLauncher" }
+    & chmod 755 $stageTsShim $stageDefaultShim
+    if ($LASTEXITCODE -ne 0) { throw "Could not mark staged launchers executable." }
 }
 
-Write-Host "  Data safety: config.json / sessions / skills / commands / auth under $DiHome are NOT touched by this script."
-
-# ------------------------------------------------------- 4/5 PATH (optional)
-Write-Host "[4/5] Ensuring $TargetBin is on the user PATH (idempotent)..."
 if ($PlatformIsWindows -and -not $SkipPathUpdate) {
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     $normTarget = $TargetBin.TrimEnd("\")
-    $already = $userPath -split ";" | Where-Object { $_ -and $_.TrimEnd("\") -ieq $normTarget }
-    if ($already) {
-        Write-Host "  $TargetBin already on user PATH, skipping."
+    $already = $pathBefore -split ";" | Where-Object { $_ -and $_.TrimEnd("\") -ieq $normTarget }
+    if (-not $already) { $pathAfter = if ([string]::IsNullOrWhiteSpace($pathBefore)) { $normTarget } else { "$pathBefore;$normTarget" } }
+}
+}
+catch {
+    $prepareError = $_
+    Remove-Item -LiteralPath $StageHome -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stageTsShim -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stageDefaultShim -Force -ErrorAction SilentlyContinue
+    throw $prepareError
+}
+
+# ---------------------------------------------------- 5/5 commit or restore
+Write-Host "[5/5] Switching to the validated runtime..."
+$runtimeBackedUp = $false
+$runtimeInstalled = $false
+$shimBackups = New-Object System.Collections.Generic.List[object]
+$shimInstalled = New-Object System.Collections.Generic.List[string]
+$pathAttempted = $false
+try {
+    foreach ($shimPath in @($DefaultShim, $TsShim)) {
+        if (-not (Test-ManagedShim $shimPath)) { throw "Launcher changed during install; refusing to replace it: $shimPath" }
     }
-    else {
-        $newPath = if ([string]::IsNullOrWhiteSpace($userPath)) { $normTarget } else { "$userPath;$normTarget" }
-        [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-        Write-Host "  Appended $TargetBin to user PATH (takes effect in a new terminal)."
+    if (Test-Path -LiteralPath $TsHome) {
+        Move-PathToAbsentDestination $TsHome $BackupHome
+        $runtimeBackedUp = $true
     }
+    Move-PathToAbsentDestination $StageHome $TsHome
+    $runtimeInstalled = $true
+
+    foreach ($item in @(@{ Source = $stageTsShim; Destination = $TsShim }, @{ Source = $stageDefaultShim; Destination = $DefaultShim })) {
+        $backup = "$($item.Destination).backup-$InstallId"
+        if (Test-Path -LiteralPath $item.Destination) {
+            Move-PathToAbsentDestination $item.Destination $backup
+            $shimBackups.Add(@{ Original = $item.Destination; Backup = $backup })
+        }
+        Move-PathToAbsentDestination $item.Source $item.Destination
+        $shimInstalled.Add($item.Destination)
+    }
+
+    if ($PlatformIsWindows -and -not $SkipPathUpdate -and $pathAfter -ne $pathBefore) {
+        $pathAttempted = $true
+        [Environment]::SetEnvironmentVariable("Path", $pathAfter, "User")
+    }
+}
+catch {
+    $commitError = $_
+    $recoveryErrors = New-Object System.Collections.Generic.List[string]
+    if ($pathAttempted) {
+        try { [Environment]::SetEnvironmentVariable("Path", $pathBefore, "User") }
+        catch { $recoveryErrors.Add("restore user PATH: $($_.Exception.Message)") }
+    }
+    foreach ($installedShim in $shimInstalled) {
+        try {
+            Remove-Item -LiteralPath $installedShim -Force
+            if (Test-Path -LiteralPath $installedShim) { throw "destination remains after removal: $installedShim" }
+        }
+        catch { $recoveryErrors.Add("remove new launcher ${installedShim}: $($_.Exception.Message)") }
+    }
+    foreach ($savedShim in $shimBackups) {
+        try { Move-PathToAbsentDestination $savedShim.Backup $savedShim.Original -Force }
+        catch { $recoveryErrors.Add("restore launcher $($savedShim.Original): $($_.Exception.Message)") }
+    }
+    if ($runtimeInstalled) {
+        try {
+            Remove-Item -LiteralPath $TsHome -Recurse -Force
+            if (Test-Path -LiteralPath $TsHome) { throw "destination remains after removal: $TsHome" }
+        }
+        catch { $recoveryErrors.Add("remove failed runtime ${TsHome}: $($_.Exception.Message)") }
+    }
+    if ($runtimeBackedUp) {
+        try { Move-PathToAbsentDestination $BackupHome $TsHome }
+        catch { $recoveryErrors.Add("restore runtime ${TsHome}: $($_.Exception.Message)") }
+    }
+    $recoveryText = if ($recoveryErrors.Count) { " Recovery issues: $($recoveryErrors -join '; ')." } else { " Previous runtime and launchers restored." }
+    throw "Install switch failed: $($commitError.Exception.Message).$recoveryText"
+}
+finally {
+    Remove-Item -LiteralPath $StageHome -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stageTsShim -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stageDefaultShim -Force -ErrorAction SilentlyContinue
+}
+
+if ($runtimeBackedUp) {
+    $priorPrevious = "$PreviousHome.backup-$InstallId"
+    try {
+        if (Test-Path -LiteralPath $PreviousHome) { Move-PathToAbsentDestination $PreviousHome $priorPrevious }
+        Move-PathToAbsentDestination $BackupHome $PreviousHome
+        Remove-Item -LiteralPath $priorPrevious -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  Previous runtime retained at $PreviousHome"
+    }
+    catch {
+        Write-Warning "New runtime is active, but previous-version rotation was incomplete: $($_.Exception.Message). Recoverable backup: $BackupHome"
+    }
+}
+foreach ($savedShim in $shimBackups) { Remove-Item -LiteralPath $savedShim.Backup -Force -ErrorAction SilentlyContinue }
+Write-Host "  Data safety: config.json / sessions / skills / commands / auth under $DiHome are NOT touched by this script."
+if ($PlatformIsWindows -and -not $SkipPathUpdate) {
+    if ($pathAfter -eq $pathBefore) { Write-Host "  $TargetBin already on user PATH, skipping." }
+    else { Write-Host "  Appended $TargetBin to user PATH (takes effect in a new terminal)." }
 }
 elseif (-not $PlatformIsWindows) {
     Write-Host "  Shell profiles are not modified. Add this directory to PATH if desired:"
     Write-Host ("    export PATH=`"{0}:`$PATH`"" -f $TargetBin)
-    Write-Host "  The installer continues without changing the current user environment."
 }
-else {
-    Write-Host "  Skipped (-SkipPathUpdate). Invoke di-ts by full path: $(Join-Path $TargetBin 'di-ts.cmd')"
-}
+else { Write-Host "  Skipped (-SkipPathUpdate). Invoke di by full path: $DefaultShim" }
 
-# ----------------------------------------------- 5/5 smoke test + evidence
-Write-Host "[5/5] Smoke test: di-ts --info (isolated TEMP DI_HOME, no real config touched)..."
-$smokeHome = Join-Path ([System.IO.Path]::GetTempPath()) ("di-ts-install-smoke-" + [guid]::NewGuid().ToString("N"))
-$smokeExit = -1
-$oldDiHome = [Environment]::GetEnvironmentVariable("DI_HOME", "Process")
-$oldDeepSeekApiKey = [Environment]::GetEnvironmentVariable("DEEPSEEK_API_KEY", "Process")
-$env:DI_HOME = $smokeHome
-$env:DEEPSEEK_API_KEY = ""
-$smokeLauncher = if ($PlatformIsWindows) { Join-Path $TargetBin "di-ts.cmd" } else { Join-Path $TargetBin "di-ts" }
-try {
-    & $smokeLauncher --info
-    $smokeExit = $LASTEXITCODE
-}
-finally {
-    Remove-Item -Recurse -Force $smokeHome -ErrorAction SilentlyContinue
-    [Environment]::SetEnvironmentVariable("DI_HOME", $oldDiHome, "Process")
-    [Environment]::SetEnvironmentVariable("DEEPSEEK_API_KEY", $oldDeepSeekApiKey, "Process")
-}
-if ($smokeExit -ne 0) { throw "di-ts --info smoke test failed (exit $smokeExit)" }
-
-# Install the default global command alongside the explicit alias.
-Write-Host "[default] Installing the global di shim for TypeScript..."
-$defaultShim = if ($PlatformIsWindows) { Join-Path $TargetBin "di.cmd" } else { Join-Path $TargetBin "di" }
-if (Test-Path -LiteralPath $defaultShim -PathType Leaf) {
-    $oldContent = [IO.File]::ReadAllText($defaultShim)
-    $isOurShim = if ($PlatformIsWindows) { $oldContent -match 'di-ts\.cmd' } else { $oldContent -match '\$DIR/di-ts' }
-    if (-not $isOurShim) { throw "Refusing to overwrite an unmanaged di launcher: $defaultShim" }
-}
-if ($PlatformIsWindows) {
-    $defaultContent = "@echo off`r`ncall `"%~dp0di-ts.cmd`" %*`r`nexit /b %ERRORLEVEL%`r`n"
-} else {
-$defaultContent = "#!/bin/sh`nDIR=`"`$(CDPATH= cd -- `"`$(dirname -- `"`$0`")`" && pwd)`"`nexec `"`$DIR/di-ts`" `"`$@`"`n"
-}
-Write-TextFile $defaultShim $defaultContent
-if (-not $PlatformIsWindows) {
-    & chmod 755 $defaultShim
-    if ($LASTEXITCODE -ne 0) { throw "Could not mark TypeScript di launcher executable: $defaultShim" }
-}
 Write-Host ""
 Write-Host "=== Install evidence ==="
 Write-Host "  di-ts launchers:   $(Join-Path $TargetBin 'di-ts.cmd') / $(Join-Path $TargetBin 'di-ts')"
 Write-Host "  TS runtime root:   $TsHome"
 Write-Host "  CLI entry:         $InstalledEntry"
-Write-Host "  Smoke test:        di-ts --info exit $smokeExit"
+Write-Host "  Smoke test:        staged di-ts --info exit $smokeExit"
 Write-Host "  Files written:"
-foreach ($f in $writtenFiles) { Write-Host "    $f" }
+foreach ($f in $writtenFiles) {
+    $evidencePath = $f
+    if ($f.StartsWith($StageHome, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $relativePath = $f.Substring($StageHome.Length).TrimStart([char[]]@("\", "/"))
+        $evidencePath = Join-Path $TsHome $relativePath
+    }
+    elseif ($f -ieq $stageTsShim) { $evidencePath = $TsShim }
+    elseif ($f -ieq $stageDefaultShim) { $evidencePath = $DefaultShim }
+    Write-Host "    $evidencePath"
+}
 Write-Host "  Untouched:         config.json, sessions, skills, commands, auth and unrelated bin files"
 Write-Host ""
 Write-Host "Done. In a new terminal:"
 Write-Host "  di-ts --info      # TypeScript CLI"
 Write-Host "  di --info         # TypeScript CLI (default command)"
+}
+finally {
+    if ($InstallLock) { $InstallLock.Dispose() }
+}

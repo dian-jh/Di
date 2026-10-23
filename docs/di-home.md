@@ -18,6 +18,21 @@
 `packages/coding-agent/src/core/sessions/session-log.ts` 的 `SessionStore` 实现，认证存储由
 `packages/coding-agent/src/core/auth/credential-store.ts` 实现。
 
+## 安装与升级
+
+`install.ps1` 管理 `bin/` 启动脚本、`ts-cli/` 当前运行时和 `ts-cli.previous/` 上一版。
+工作区包只安装 `package.json` 与 `dist/`，第三方运行依赖完整复制，源码、测试及本机测试产物不进入安装。
+
+安装器持有 `.di-install.lock` 的独占文件句柄，拒绝同一目录的并发安装；锁文件可以保留，句柄在退出时释放。
+新版本先写入独立暂存目录，以隔离 `DI_HOME` 执行 `--info`。验证成功后才切换运行时和启动脚本，
+最后更新 PATH。复制或验证失败不会替换旧版；切换或 PATH 更新失败时恢复旧运行时及启动脚本。
+移动操作拒绝已存在的目标，避免把备份误放进未能清理的目录。
+
+成功升级保留上一版运行时；备份轮换或清理失败会告警，不破坏已经启用的新版本。若系统阻止恢复，
+错误会列出恢复问题，原备份保留供排查。此流程处理可捕获的安装失败，不承诺断电或强制终止时多个目录
+同时切换。配置、凭据、会话、skills、commands 和无关启动脚本不属于安装器替换范围。
+回归测试在 `packages/coding-agent/test/cli/install-runtime.test.ts`。
+
 ## 合并顺序与格式
 
 `packages/coding-agent/src/core/config/di-config.ts` 的 `DiConfig.load` 按以下顺序合并：

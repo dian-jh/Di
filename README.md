@@ -19,6 +19,9 @@ export PATH="$HOME/.di/bin:$PATH"
 
 安装器将私有运行时放入 `~/.di/ts-cli`，并在 `~/.di/bin` 创建 `di` 启动器。Windows 默认把该目录加入用户 PATH；用 `-SkipPathUpdate` 可跳过。POSIX 系统会设置启动器执行权限并打印 PATH 指令。
 
+升级先验证新运行时，失败时保留原版本；成功升级后，上一版保存在 `~/.di/ts-cli.previous`。
+安装范围与失败恢复行为见 [`docs/di-home.md`](docs/di-home.md)。
+
 只构建而不安装：
 
 ```sh
