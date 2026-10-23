@@ -127,15 +127,16 @@ test("launcher switch failure restores the previous runtime and both shims", { s
   const injection = [
     "function Move-Item {",
     "  param([string]$LiteralPath, [string]$Destination, [switch]$Force)",
-    "  if ($LiteralPath -match '\\.stage-[^\\\\/]+$' -and $Destination -match '[\\\\/]di(\\.cmd)?$') { throw 'injected launcher publish failure' }",
+    "  if ($LiteralPath -eq $stageDefaultShim) { Write-Output 'DI_INSTALL_FAILPOINT'; throw 'injected launcher publish failure' }",
     "  Microsoft.PowerShell.Management\\Move-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force",
     "}",
     "",
   ].join("\n");
-  writeFileSync(fixtureInstaller, originalScript.replace('$ErrorActionPreference = "Stop"', `$ErrorActionPreference = "Stop"\n${injection}`));
+  writeFileSync(fixtureInstaller, originalScript.replace('$ErrorActionPreference = "Stop"', () => `$ErrorActionPreference = "Stop"\n${injection}`));
 
   const second = runFixtureInstaller(paths.fixtureRoot, paths.diHome);
   assert.notEqual(second.status, 0, "injected failure publishing the default shim must abort install");
+  assert.ok(second.stdout.split(/\r?\n/).includes("DI_INSTALL_FAILPOINT"), "fixture must reach the launcher publish failpoint");
   assert.match(`${second.stdout}\n${second.stderr}`, /injected launcher publish failure/);
   assert.deepEqual(readFileSync(currentEntry), snapshots[0], "runtime must be restored after launcher publish failure");
   assert.deepEqual(readFileSync(tsShim), snapshots[1], "di-ts shim must be restored byte-for-byte");
@@ -154,9 +155,9 @@ test("simulated PATH persistence failure rolls back runtime and shims without to
   const snapshots = [readFileSync(currentEntry), readFileSync(tsShim), readFileSync(defaultShim)];
   const fixtureInstaller = join(paths.fixtureRoot, "install.ps1");
   let script = readFileSync(fixtureInstaller, "utf8");
-  script = script.replace('$PlatformIsWindows -and -not $SkipPathUpdate -and $pathAfter -ne $pathBefore', "$true");
-  script = script.replace('[Environment]::SetEnvironmentVariable("Path", $pathAfter, "User")', "throw 'injected PATH persistence failure'");
-  script = script.replace('[Environment]::SetEnvironmentVariable("Path", $pathBefore, "User")', "$null = $pathBefore");
+  script = script.replace('$PlatformIsWindows -and -not $SkipPathUpdate -and $pathAfter -ne $pathBefore', () => "$true");
+  script = script.replace('[Environment]::SetEnvironmentVariable("Path", $pathAfter, "User")', () => "throw 'injected PATH persistence failure'");
+  script = script.replace('[Environment]::SetEnvironmentVariable("Path", $pathBefore, "User")', () => "$null = $pathBefore");
   writeFileSync(fixtureInstaller, script);
 
   const result = runFixtureInstaller(paths.fixtureRoot, paths.diHome);
