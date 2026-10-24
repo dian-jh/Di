@@ -3,6 +3,14 @@
 本页区分当前分支验证与历史固定候选的长测，不把单元测试或短测等同于长时间验收。验证命令定义在仓库根
 `package.json`；跨平台工作流位于 `.github/workflows/typescript-core.yml`。
 
+截至 2026-10-24，产品代码、默认 CLI、安装器及 CI 已切换到 TypeScript；受 Git 跟踪的文件中
+没有 C# 源码、项目文件或 .NET 构建链路。原 `docs/migration/typescript-core/` 迁移计划与台账
+已在 `9442588` 删除。本页仍保留，因为发布验收尚未全部完成，不代表运行时仍依赖旧实现。
+
+当前候选 `3acfe4faef286e187fc5cd156024beeba6d2d603` 的
+[GitHub Actions](https://github.com/dian-jh/Di/actions/runs/39978630488) 六个组合全部通过，
+涵盖 build、typecheck、unit 和 compat；该 CI 不包含真实模型 smoke 或 10 小时 soak。
+
 提交 `94425883dce18f992fb7f372136fdf9cef5b28ed` 已移除历史实现。其
 [GitHub Actions](https://github.com/dian-jh/Di/actions/runs/39967453843) 在 Windows、macOS、Ubuntu ×
 Node 22.19/24 六个组合中，build、typecheck、unit、compat 均通过。
@@ -59,14 +67,24 @@ compat 为 32 pass / 1 macOS skip。真实一分钟回归完成 153 轮、51 次
   因 RSS 最大增量 80,384,000 B、首末两小时 RSS 峰值差 76,251,136 B 超过冻结阈值而失败；
   恢复 p95 为 9,394 ms，低于 60,000 ms。阈值未调整，该失败仍需定位。
 - 候选 `0faa697dc7654c4c5eefa9cb463e1170973e8866` 的 10 小时 soak 曾在
-  2026-10-23 07:58:08Z 启动。截至 14:22:39Z 的样本，运行约 6.4 小时，65,964 轮、
-  0 失败、0 子进程残留。首样本 RSS 为 93,069,312 B，全程峰值 223,838,208 B，增量
-  130,768,896 B 已超过冻结的 20,971,520 B 门槛；这不能单独证明内存泄漏，仍需分析峰值时的
-  heap、外部内存和进程 private bytes。该运行尚未满 10 小时，最终 checker 尚无结果，不能视为通过。
+  2026-10-23 07:58:08Z 启动，现已完整结束：36,000,264 ms、102,936 轮、343 次恢复，
+  回合及恢复均无失败。最终 checker 失败，唯一失败项为 RSS 最大增量：首样本 93,069,312 B，
+  全程峰值 223,838,208 B，增量 130,768,896 B 超过冻结的 20,971,520 B 门槛。
+  最终 RSS 回落至 107,982,848 B，首末两小时 RSS 峰值趋势门通过；恢复 p95 为 8,105 ms，
+  handles、子进程及其他门槛通过。这些结果不能单独证明泄漏，也不能将本次验收记为通过；
+  恢复子进程计数仍受前述旧工具缺陷限制。
   原始样本与监督器记录位于
   `%TEMP%/di-migration-final-soak-20261023/run-0faa697-20261023T0725Z/candidate-0faa697-full/`。
+- 当前候选 `3acfe4f` 在干净工作区完成 35 分钟预热：6,427 轮、21 次恢复全部成功，
+  supervisor 退出码 0、runner `completed=true`，结束时工具及恢复子进程存活数均为 0。
+  72 个样本的 RSS 最大增量为 1,523,712 B；预热不能代替 10 小时验收。
+  仓库外的 `%TEMP%/di-stability-install-20261023/queued-validation.mjs` 在预热输出流已结束后
+  再次结束该流，报 `Cannot call end after a stream was finished`，队列因此退出，未启动 full 阶段。
+  这是调度脚本失败；不能把空的 `phases` 记录当作产品预热失败，也不能声称长测仍在排队运行。
+  原始产物位于 `%TEMP%/di-stability-install-20261023/candidate-3acfe4f-serial/`；
+  需修正编排后重新执行完整长测，冻结阈值不变。
 - 候选 `78282657e43185268dff5199454ecf2924151129` 的队列曾处于 waiting；不得将排队或预热
-  视为 soak 结果。这两个候选均早于 `9442588`，不能替代当前分支的验收。最终发布仍需固定实际
+  视为 soak 结果。`0faa697` 与 `78282657` 均早于 `9442588`，不能替代当前分支的验收。最终发布仍需固定实际
   release SHA 并从干净工作区运行。三平台最终候选 10 小时 soak、macOS CFNetwork 自动代理解析和
   真实 PAC/WPAD 网络验收尚未完成；Windows 发布与 macOS 自动代理能力应分别说明支持边界。
 
