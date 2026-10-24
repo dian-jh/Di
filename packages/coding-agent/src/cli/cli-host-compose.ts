@@ -182,7 +182,7 @@ export async function createCliHost(
       createGrepTool(workspace),
       createBashTool(workspace, { session: platformSession }),
       createPowerShellTool(workspace, { session: powershellSession }),
-      createPythonTool(workspace),
+      createPythonTool(undefined, { sandboxDirectory: workspace }),
     ];
   })();
   const toolSpecs = tools.map((tool) => tool.spec);

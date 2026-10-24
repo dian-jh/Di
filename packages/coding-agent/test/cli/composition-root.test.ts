@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 
 import type { ChatModel, ContentBlock, ModelEvent, ModelRequest, ModelResponse } from "@di/ai";
 import { textOfMessage } from "@di/ai";
@@ -116,6 +117,7 @@ class CatalogService implements ModelService {
 }
 
 interface BuildHostOptions {
+  defaultTools?: boolean;
   diHome: string;
   workspace: string;
   model?: ChatModel;
@@ -139,7 +141,7 @@ async function buildHost(opts: BuildHostOptions): Promise<CliHost> {
       ...(opts.config !== undefined ? { config: opts.config } : {}),
       modelFactory: opts.modelFactory ?? (() => model),
       modelService: opts.modelService ?? new CatalogService(opts.contextWindow),
-      tools: createFileTools(opts.workspace),
+      ...(opts.defaultTools ? {} : { tools: createFileTools(opts.workspace) }),
       skills: opts.skills ?? [],
     },
   );
@@ -452,6 +454,30 @@ test("composition root: print mode through CliApp drives the real host end to en
     assert.ok(log.includes("di starting pid="), "the run log is written through the real host");
     assert.ok(log.includes("di exiting"), "the dispose chain runs after the mode body");
   } finally {
+    rmSync(diHome, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("composition root: default Python tool launches Python rather than the workspace", {
+  skip: spawnSync("python", ["--version"], { stdio: "ignore", timeout: 5000 }).status !== 0,
+}, async () => {
+  const diHome = mkdtempSync(join(tmpdir(), "di-python-home-"));
+  const workspace = mkdtempSync(join(tmpdir(), "di-python-ws-"));
+  let host: CliHost | undefined;
+  try {
+    const model = new ScriptedModel([
+      { text: "", toolCalls: [{ id: "python1", name: "python", arguments: JSON.stringify({ code: "import os; print('python-ok'); print(os.getcwd())" }) }] },
+      { text: "done" },
+    ]);
+    host = await buildHost({ diHome, workspace, model, defaultTools: true });
+    const result = await host.runner.runTurn("check Python");
+    const observation = result.trajectory.find(message => message.role === "tool");
+    assert.ok(observation);
+    assert.match(textOfMessage(observation), /exit: 0\npython-ok/);
+    assert.ok(textOfMessage(observation).includes(workspace));
+  } finally {
+    host?.dispose?.();
     rmSync(diHome, { recursive: true, force: true });
     rmSync(workspace, { recursive: true, force: true });
   }

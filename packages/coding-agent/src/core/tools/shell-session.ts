@@ -397,16 +397,16 @@ export class ShellSession {
 
     try {
       if (this.shell.sessionKind === "cmd") {
-        await writeStdin(process.stdin, `prompt ${this.tag_}$G\n`);
+        await writeStdin(process.stdin, `prompt ${this.tag_}$G\n`, lifecycle.signal);
       }
       if (this.shell.sessionKind === "powershell") {
         // Suppress PS 5.1's CLIXML progress stream on redirected stdout and zero
         // $LASTEXITCODE (unset is empty, which would break the marker line parse).
         // Deliberately do NOT touch [Console]::OutputEncoding — changing it makes
         // stdin read as OEM and garbles Chinese commands (comment).
-        await writeStdin(process.stdin, "$ProgressPreference='SilentlyContinue'; $global:LASTEXITCODE=0;\n");
+        await writeStdin(process.stdin, "$ProgressPreference='SilentlyContinue'; $global:LASTEXITCODE=0;\n", lifecycle.signal);
       }
-      await writeStdin(process.stdin, `echo ${ready}\n`);
+      await writeStdin(process.stdin, `echo ${ready}\n`, lifecycle.signal);
 
       const found = await this.readUntilReady_(ready, lifecycle.signal);
       if (found && !lifecycle.signal.aborted) {
@@ -476,21 +476,23 @@ export class ShellSession {
       // forge the current command's completion marker.
       this.marker_ = "DI_END_" + randomUUID().replaceAll("-", "");
       this.exitMarker_ = this.marker_ + "_exit";
-      const input = command + "\n" + this.markerLine_() + "\n";
-      await writeStdin(process.stdin, this.inputEncoder_?.(input) ?? input);
+      // Parse PowerShell commands independently of the transport. Unbalanced
+      // quotes/braces must produce an error rather than swallow the exit marker.
+      const executableCommand = this.shell.sessionKind === "powershell"
+        ? `$global:LASTEXITCODE=0; try { . ([scriptblock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(command, "utf8").toString("base64")}')))) } catch { $global:LASTEXITCODE=1; [Console]::Error.WriteLine($_.Exception.Message) }`
+        : command;
+      const input = executableCommand + "\n" + this.markerLine_() + "\n";
+
+      const abortPipes = (): void => {
+        process.stdin?.destroy();
+        process.stdout?.destroy();
+        process.stderr?.destroy();
+      };
+      lifecycle.signal.addEventListener("abort", abortPipes, { once: true });
+      if (lifecycle.signal.aborted) abortPipes();
+      await writeStdin(process.stdin, this.inputEncoder_?.(input) ?? input, lifecycle.signal);
 
       stderrDrain = this.drainStderr_(stderr).catch(() => {});
-      // Abort (timeout / external) destroys the pipes: the feeders end their
-      // queues, the pending reads resolve null and the command reader returns.
-      lifecycle.signal.addEventListener(
-        "abort",
-        () => {
-          process.stdout?.destroy();
-          process.stderr?.destroy();
-        },
-        { once: true },
-      );
-
       const exitCode = await this.readUntilExitLine_(stdout, this.exitMarker_, lifecycle.signal);
 
       if (lifecycle.signal.aborted) {
@@ -668,7 +670,7 @@ export class ShellSession {
 
     while (true) {
       if (signal.aborted) return -1;
-      const chunk = await this.stdoutQueue_.read();
+      const chunk = await this.stdoutQueue_.read(signal);
       if (chunk === null) {
         // Stream ended without the exit line. On abort the pipes were destroyed
         // (the process may still be alive) — return immediately, never wait. Only
@@ -725,7 +727,7 @@ export class ShellSession {
       }
       if (line.length > 512) break; // guard: an exit line is never this long
       if (signal.aborted) break;
-      const chunk = await this.stdoutQueue_.read();
+      const chunk = await this.stdoutQueue_.read(signal);
       if (chunk === null) break;
       line = Buffer.concat([line, chunk]);
     }
@@ -851,20 +853,22 @@ function startsWithAt(raw: Uint8Array, offset: number, len: number, prefix: Uint
 }
 
 /** Write one line to the child's stdin, honoring backpressure (errors benign). */
-async function writeStdin(stdin: Writable | null, text: string | Uint8Array): Promise<void> {
-  if (stdin === null) return;
+async function writeStdin(stdin: Writable | null, text: string | Uint8Array, signal?: AbortSignal): Promise<void> {
+  if (stdin === null || stdin.destroyed || signal?.aborted) return;
   if (stdin.write(text)) return;
   await new Promise<void>((resolve) => {
-    const onDrain = (): void => {
-      stdin.removeListener("error", onError);
+    const finish = (): void => {
+      stdin.removeListener("error", finish);
+      stdin.removeListener("drain", finish);
+      stdin.removeListener("close", finish);
+      signal?.removeEventListener("abort", finish);
       resolve();
     };
-    const onError = (): void => {
-      stdin.removeListener("drain", onDrain);
-      resolve();
-    };
-    stdin.once("drain", onDrain);
-    stdin.once("error", onError);
+    stdin.once("drain", finish);
+    stdin.once("error", finish);
+    stdin.once("close", finish);
+    signal?.addEventListener("abort", finish, { once: true });
+    if (stdin.destroyed || signal?.aborted) finish();
   });
 }
 
