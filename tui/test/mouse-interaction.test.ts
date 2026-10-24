@@ -73,6 +73,39 @@ describe("Windows mouse reporting after input initialization", () => {
 });
 
 describe("alternate-screen mouse input", () => {
+  it("selects and copies answer text without collapsing the turn", async () => {
+    const terminal = new FakeTerminal();
+    const copied: string[] = [];
+    const tui = new TuiAltScreen(terminal, undefined, undefined, {
+      mouse: true,
+      copySelection: async (text) => { copied.push(text); return true; },
+    });
+    const state = new TurnStateMachine();
+    const view = new ChatView(tui, () => {});
+    state.startTurn("prompt");
+    state.applyEvent({ kind: "text_delta", delta: "selectable answer" });
+    view.sync(state);
+    tui.start();
+    view.focusInput();
+    tui.renderNow(true);
+    try {
+      const lines = tui.getScreenLines().map(line => line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ""));
+      const row = lines.findIndex(line => line.includes("selectable answer"));
+      assert.ok(row >= 0);
+      const col = lines[row]!.indexOf("selectable");
+      terminal.send(`\x1b[<0;${col + 1};${row + 1}M`);
+      terminal.send(`\x1b[<32;${col + 10};${row + 1}M`);
+      terminal.send(`\x1b[<0;${col + 10};${row + 1}m`);
+      await Promise.resolve();
+      assert.equal(tui.hasActiveSelection(), true);
+      assert.deepEqual(copied, ["selectable"]);
+      tui.renderNow(true);
+      assert.ok(tui.getScreenLines().some(line => line.includes("answer")));
+    } finally {
+      tui.stop();
+    }
+  });
+
   it("dispatches complete SGR click pairs repeatedly without focusing away from the editor", () => {
     const terminal = new FakeTerminal();
     const tui = new TuiAltScreen(terminal, undefined, undefined, { mouse: true });
@@ -95,6 +128,8 @@ describe("alternate-screen mouse input", () => {
       return row + 1;
     };
     const clickAtRow = (row: number) => {
+      // Exercise independent clicks rather than a rapid double/triple-click selection.
+      tui.resetTextSelection();
       terminal.send(`\x1b[<0;2;${row}M`);
       terminal.send(`\x1b[<0;2;${row}m`);
       tui.renderNow(true);

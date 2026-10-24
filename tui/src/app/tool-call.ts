@@ -30,8 +30,7 @@ class ToolCallComponent implements Component {
   invalidate(): void { this.view.invalidate(); }
   handleInput(data: string): void { if (data === "\r" || data === " ") this.view.toggle(); }
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-    if (event.type === "press" && event.button === "left") return { handled: true, render: false };
-    if (event.type === "click" && event.button === "left") { this.view.toggle(); return { handled: true, render: true }; }
+    if (event.type === "click" && event.button === "left" && event.y === 0) { this.view.toggle(); return { handled: true, render: true }; }
     return undefined;
   }
 }

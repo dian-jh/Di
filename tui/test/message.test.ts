@@ -66,8 +66,7 @@ describe("ToolCallView：默认折叠与键盘切换", () => {
     } as const);
     const toggleWithPair = () => {
       const pressed = view.component.handleMouse?.(event("press"));
-      assert.equal(pressed?.handled, true);
-      assert.equal(pressed?.render, false);
+      assert.equal(pressed, undefined, "press remains available for text selection");
       view.component.handleMouse?.(event("release"));
       view.component.handleMouse?.(event("click"));
     };
@@ -184,8 +183,7 @@ describe("Thinking 折叠", () => {
     } as const);
 
     const press1 = group.handleMouse(gesture("press", 2));
-    assert.equal(press1?.handled, true, "press must register a target so the TUI can synthesize click on release");
-    assert.equal(press1?.render, false, "press capture must not repaint or steal focus");
+    assert.equal(press1, undefined, "press remains available for text selection");
     group.handleMouse(gesture("release", 2));
     group.handleMouse(gesture("click", 2));
     assert.ok(fold.render(80).join("\n").includes("reasoning text"));

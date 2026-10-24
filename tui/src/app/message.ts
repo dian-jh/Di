@@ -103,13 +103,8 @@ export class TurnGroup implements Component {
     if (data === "\r" || data === " ") this.toggle();
   }
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-    // TuiAltScreen synthesizes `click` only for a press target it captured first.
-    // Capture primary-button presses without focusing or repainting; release then
-    // produces one click which follows the same nested child coordinates.
-    if (event.type === "press" && event.button === "left") {
-      return { handled: true, render: false };
-    }
-    if (event.y === 0 && event.type === "click") {
+    // Unhandled presses allow text selection; stationary releases still produce clicks.
+    if (event.y === 0 && event.type === "click" && event.button === "left") {
       selectedTurnGroup = turnGroups.indexOf(this);
       turnGroups.forEach((group, index) => group.setSelected(index === selectedTurnGroup));
       this.toggle();
@@ -152,7 +147,6 @@ class FoldableText implements Component {
   invalidate(): void { this.label.invalidate(); this.content.invalidate(); }
   handleInput(data: string): void { if (data === "\r" || data === " ") this.toggle(); }
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-    if (event.type === "press" && event.button === "left" && event.y === 0) return { handled: true, render: false };
     if (event.type === "click" && event.button === "left" && event.y === 0) { this.toggle(); return { handled: true, render: true }; }
     return undefined;
   }
